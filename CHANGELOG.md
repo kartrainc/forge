@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Dependency compatibility
 
+- Require DOMPurify 3.4.17 in the canvas packages, their workspace lockfile and
+  the Vue template's chat dependencies, for GHSA-cg2g-xh64-v4q7 (critical),
+  GHSA-mrv2-3pqr-j5jr and GHSA-c6gr-qvv4-5v3f.
 - Coordinate weekly dependency updates in one cross-ecosystem PR, including
   standalone SDK manifests; refresh the generator and three emitted Python locks.
 - Exercise all authentication parity runners with installed runtime dependencies,
