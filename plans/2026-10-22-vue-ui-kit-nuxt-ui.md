@@ -5,9 +5,11 @@ Base: f1e7ba714fca490f8d72caa367f9e34697c72930.
 Date: 2026-10-22. Status: accepted. The decisions below were confirmed with the
 owner on 2026-10-22, who approved ADR-011 and F-01 the same day. F-01 is
 merged (#376, `78f67083`) into `cchifor/forge` and Kartra's fork
-`kartrainc/forge`, which F-02 and F-03 target from now on. F-02 is built on
-`feat/vue-nuxt-ui-kit`, and §"F-02 as built" records where it settled the text
-above differently. First consumer:
+`kartrainc/forge`, which F-02 and F-03 target from now on. F-02 is merged
+(kartrainc/forge#1, `58a17f1a`), and §"F-02 as built" records where it
+settled the text above differently. F-03 is built on
+`feat/vue-nuxt-ui-agent-tooling`: the skill is vendored at `v4.12.0`, the
+release tag of the pinned `@nuxt/ui`. First consumer:
 kartra-ai, which plans its own adoption in its repository.
 
 Requested scope: offer Nuxt UI 4 as a selectable kit of the Vue template,

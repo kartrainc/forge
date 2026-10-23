@@ -216,11 +216,32 @@ before changing anything.
   `primitives.test.ts` and `splitter.test.ts`. The three suites import the
   deleted kit and fail until removed.
 - The brand module lands in `src/custom/theme/`: `nuxt-ui.config.ts` (the
-  palettes, primary from `default_color_scheme`) and `tokens.css`. Forge writes
-  it once; later starter changes arrive as sidecars.
+  palettes, primary from `default_color_scheme`) and `tokens.css`. It is
+  scaffold: a later starter change updates an untouched file in place and
+  arrives as a sidecar for one you edited.
 - The stored colour mode moves from the `theme` key to VueUse's
   `vueuse-color-scheme`; `system` becomes `auto`. Users see their system mode
   once until they choose again.
+- The project gains the Nuxt UI agent tooling: `.agents/skills/nuxt-ui/`,
+  `.claude/skills/nuxt-ui/`, `.mcp.json` and `.codex/config.toml`
+  ([agentic usage](docs/guides/agentic-usage.md#nuxt-ui-projects)). If any of
+  them already exists without a forge record, the update stops on the
+  collision before changing anything: move it aside, update, then merge your
+  version back.
+
+#### Switching back to shadcn
+
+Set `ui_kit` back to `shadcn` the same way. The shadcn kit is regenerated and
+untouched screens are rewritten. The scaffold only Nuxt UI emits stays on disk
+without a forge record:
+
+- `src/app/providers/head.ts` and `head.test.ts`, and `src/custom/theme/`.
+  They import `@unhead/vue` and `@nuxt/ui`, which shadcn projects do not
+  depend on, so the type-check and the unit suite fail until you delete them.
+- The agent tooling: `.agents/skills/nuxt-ui/`, `.claude/skills/nuxt-ui/`,
+  `.mcp.json` and `.codex/config.toml`. Delete it, or keep what you added to
+  the MCP files elsewhere: while any of them remains unrecorded, a later
+  switch to Nuxt UI stops on the collision.
 
 ### Executable Postgres init script (unreleased)
 

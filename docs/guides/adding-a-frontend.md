@@ -18,6 +18,11 @@ If the framework is close enough to an existing template that a single
 Copier variable would cover the delta, prefer extending the existing
 template instead.
 
+Another component library for the Vue template is not a new framework: it is
+a UI kit (`frontend.ui_kit`), rendered from the Vue template's kit-specific
+files beside the shared ones. See [UI kits](frontend-layouts.md#ui-kits) and
+ADR-011.
+
 ## The three registration points
 
 A frontend is fully described by three pieces of metadata:
