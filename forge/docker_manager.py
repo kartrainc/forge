@@ -440,6 +440,12 @@ def render_init_db(
     init_path.parent.mkdir(parents=True, exist_ok=True)
     # Write with LF line endings (CRLF breaks shebang in Linux containers)
     init_path.write_bytes(output.replace("\r\n", "\n").encode("utf-8"))
+    # Executable, so the Postgres image runs it by its shebang. Its entrypoint
+    # executes a ``*.sh`` init script when ``[ -x ]`` holds and sources it
+    # otherwise; Docker Desktop's file sharing reports a bind-mounted 0644 file
+    # as executable yet refuses to execute it (exit 126), so no database but
+    # POSTGRES_DB was created there. On Windows, chmod only clears read-only.
+    init_path.chmod(0o755)
     return init_path
 
 

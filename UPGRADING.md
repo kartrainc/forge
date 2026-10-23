@@ -222,6 +222,20 @@ before changing anything.
   `vueuse-color-scheme`; `system` becomes `auto`. Users see their system mode
   once until they choose again.
 
+### Executable Postgres init script (unreleased)
+
+`deploy/compose/init-db.sh`, which creates each backend's database and
+Keycloak's, is now generated with mode 0755. On macOS with Docker Desktop the
+0644 file failed with `bad interpreter: Permission denied`, so `docker compose
+up` created only `POSTGRES_DB`.
+
+- An untouched `init-db.sh` gets the mode on the next update. If you edited it,
+  run `chmod +x deploy/compose/init-db.sh` yourself.
+- Postgres runs init scripts only on an empty data directory, and a failed run
+  still leaves it initialized. If your stack never created its databases,
+  delete the Postgres volume once after updating, for example with
+  `docker compose down -v`, which also deletes the other volumes.
+
 ### Frontend content-security policy (unreleased)
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,

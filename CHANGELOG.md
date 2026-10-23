@@ -94,6 +94,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   nothing included and which named an undefined nginx variable, is no longer
   emitted. Both Vue lanes run the browser suites against the production build
   under the policy and fail on any violation.
+- Generate `deploy/compose/init-db.sh` executable. Postgres runs an init script
+  it sees as executable and sources the rest; Docker Desktop's file sharing
+  reports a bind-mounted 0644 file as executable but refuses to run it, so on
+  macOS only `POSTGRES_DB` was created and Keycloak and every backend's
+  migration failed.
 
 ### Platform routing
 
