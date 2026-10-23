@@ -268,8 +268,11 @@ kit it uses, unless the project has the AI chat:
   `"security.csp" = "user"` under `[forge.option_origins]`, then update: the
   update takes options from `forge.toml`, not from the recipe.
 - `scripts/serve-csp.mjs` and `playwright.csp.config.ts` run the browser suites
-  against the production build under the policy:
-  `npm run build && npx playwright test -c playwright.csp.config.ts`.
+  against the production build under the policy, with auth disabled since
+  nothing serves `/auth/*` there:
+  `VITE_AUTH_DISABLED=true npm run build && npx playwright test -c playwright.csp.config.ts`.
+  The sign-in flow, a same-origin `fetch` of `/auth/userinfo` and navigations
+  to `/auth/login` and `/logout`, is not run under the policy.
 - Svelte, Flutter and plugin frontends, and Vue projects with the AI chat, are
   served as before, without a policy. The chat's MCP panels load remote
   origins in frames, which the policy would block.

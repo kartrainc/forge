@@ -490,7 +490,8 @@ Where the build settled the text above differently:
 - **More of the app takes the nonce.** vaul-vue, behind `UDrawer` and the
   dashboard's mobile menu, reads it from the `content` attribute of a
   `csp-nonce` meta tag, so the `nuxt-ui` `index.html` carries a second one
-  beside Vite's. zod probes for `eval` to compile its parsers; `src/app/providers/csp.ts`,
+  beside Vite's, which the browser does not hide as it hides `nonce`. zod
+  probes for `eval` to compile its parsers; `src/app/providers/csp.ts`,
   imported first by `main.ts` in both kits, sets `z.config({ jitless: true })`.
 - **The app's nonce wiring is unconditional.** `csp.ts`, the head hook
   (`src/app/providers/head.ts`) and the `UApp` and `ConfigProvider` props read
@@ -507,7 +508,9 @@ Where the build settled the text above differently:
 - **The check reruns the e2e suites.** `scripts/serve-csp.mjs` serves `dist/`
   with the policy read from `nginx.conf`, a fresh nonce per response and a
   `report-uri`; `playwright.csp.config.ts` points the suites at it. Both are
-  common files copied when the policy is on. The e2e specs collect coverage only
+  common files copied when the policy is on. The check builds with auth
+  disabled, as the runner's browser suites do, so the sign-in flow runs
+  under the policy unproven. The e2e specs collect coverage only
   when `FORGE_BROWSER_COVERAGE` is set, and `forge/quality/csp.py` judges the
   reports. It passes only when Playwright exits cleanly with no global error,
   and admits the two elements above only in a `nuxt-ui` project and only by
@@ -546,5 +549,7 @@ Where the build settled the text above differently:
 - A content-security policy for Svelte and Flutter, with a lane that proves it.
 - The AI chat under the policy: a `frame-src` for the MCP panels' origins,
   and a lane that runs the chat.
+- The sign-in flow under the policy: a check that serves `/auth/*`.
+- vaul-vue reading the `nonce` property, so the `content` copy can go.
 - The reverse-sync harvester maps project files to a fragment's `files/` tree
   and does not know `files-<kit>/` yet.

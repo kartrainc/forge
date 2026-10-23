@@ -5,7 +5,7 @@
 // the browser reports is appended to the file FORGE_CSP_REPORT names, one JSON
 // object per line, or printed when it is unset.
 //
-//   npm run build && npx playwright test -c playwright.csp.config.ts
+//   VITE_AUTH_DISABLED=true npm run build && npx playwright test -c playwright.csp.config.ts
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';

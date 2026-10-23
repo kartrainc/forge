@@ -77,8 +77,12 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
    Nuxt UI's palette, plus a `csp-nonce` meta tag with a `content` attribute
    for vaul-vue. zod parses without `eval`. Both Vue lanes run the browser
    suites against the production build under the policy and fail on any
-   violation, with two exceptions named below. The policy covers the Vue
-   template without the AI chat, which is what the lanes prove under it.
+   violation, with two exceptions named below. They run with auth disabled,
+   like every browser suite of the lanes, since nothing serves `/auth/*`
+   there, so the sign-in flow is not run under the policy. That flow is a
+   same-origin `fetch`, which `connect-src 'self'` admits, and navigations,
+   which a policy does not govern. The policy covers the Vue template without
+   the AI chat, which is what the lanes prove under it.
 
 ### What the policy leaves out
 
@@ -96,6 +100,13 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
   identifies them, and the check admits exactly these two, by their exact
   samples, in a `nuxt-ui` project. The copy's sample is also the real
   palette's, so the Nuxt UI e2e suite asserts that the palette applies.
+- **A nonce the page can read.** A browser hides the value of a `nonce`
+  attribute from the page, so injected markup cannot read it through CSS
+  attribute selectors or a dangling tag. vaul-vue reads it from the `content`
+  attribute of the `csp-nonce` meta tag instead, so a `nuxt-ui` page carries
+  it in the open. It is fresh for each response of a `no-store` page, which
+  limits a leak to that page load. The copy can go when vaul-vue reads the
+  `nonce` property.
 - **Strict-Transport-Security.** nginx serves the frontend over plain HTTP
   behind a TLS terminator, and a browser keeps the header for as long as it
   says, subdomains included. The terminator sends it.

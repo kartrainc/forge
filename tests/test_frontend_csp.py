@@ -34,6 +34,7 @@ from forge.frontend_csp import (
     security_headers,
 )
 from forge.generator import generate
+from forge.sync.forge_to_project.updater import update_project
 
 # What scripts/serve-csp.mjs reads from nginx.conf.
 _SERVED_POLICY = re.compile(r'add_header Content-Security-Policy "([^"]+)"')
@@ -224,6 +225,25 @@ def test_the_chart_values_carry_the_headers_and_the_policy(render) -> None:
     )
     assert '  contentSecurityPolicy: ""' in values_off
     assert "  securityHeaders: {}" in values_off
+
+
+def test_an_update_without_a_recipe_keeps_a_chat_project_without_the_policy(
+    render, tmp_path: Path
+) -> None:
+    config = _config(**{"deploy.target": "kubernetes"})
+    assert config.frontend is not None
+    config.frontend.include_chat = True
+    root = tmp_path / "project"
+    shutil.copytree(render(config), root)
+    values = root / "deploy" / "helm" / "values.yaml"
+    assert '  contentSecurityPolicy: ""' in values.read_text(encoding="utf-8")
+    # Without a recipe the update rebuilds the frontend from forge.toml, which
+    # does not record the chat; the app's Copier answers do.
+    (root / ".forge" / "quality.json").unlink()
+    update_project(root, quiet=True, update_mode="merge")
+    updated = values.read_text(encoding="utf-8")
+    assert '  contentSecurityPolicy: ""' in updated
+    assert "  securityHeaders: {}" in updated
 
 
 @pytest.mark.skipif(shutil.which("helm") is None, reason="helm not installed")

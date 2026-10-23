@@ -566,9 +566,15 @@ def _update_locked(
         config.frontend = FrontendConfig(
             framework=frontend_framework, project_name=config.project_name
         )
-        # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
-        if frontend_framework == FrontendFramework.VUE and data.frontend.ui_kit:
-            config.frontend.ui_kit = data.frontend.ui_kit
+        if frontend_framework == FrontendFramework.VUE:
+            # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
+            if data.frontend.ui_kit:
+                config.frontend.ui_kit = data.frontend.ui_kit
+            # A Vue project with the chat is served without the content-security
+            # policy (forge.frontend_csp), which the Helm chart's values carry.
+            config.frontend.include_chat = _recorded_include_chat(
+                frontend_app_dir(project_root, data.frontend, frontend_framework)
+            )
 
     from forge.config._topology import compute_topology  # noqa: PLC0415
     from forge.synthesis import compute_platform_synthesis  # noqa: PLC0415
@@ -1144,6 +1150,24 @@ def frontend_app_dir(
     if framework == FrontendFramework.NONE:
         return None
     return project_root / (frontend.app_dir or "apps/frontend")
+
+
+def _recorded_include_chat(app_dir: Path | None) -> bool:
+    """Whether the frontend app was generated with the AI chat.
+
+    ``forge.toml`` does not record ``include_chat``; the app's Copier answers
+    do. A missing or unreadable answers file reads as no chat, the
+    :class:`FrontendConfig` default.
+    """
+    if app_dir is None:
+        return False
+    import yaml  # noqa: PLC0415
+
+    try:
+        answers = yaml.safe_load((app_dir / ".copier-answers.yml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(answers, dict) and answers.get("include_chat") is True
 
 
 def _frontend_framework_from_manifest(
