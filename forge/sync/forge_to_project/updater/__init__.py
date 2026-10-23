@@ -566,6 +566,9 @@ def _update_locked(
         config.frontend = FrontendConfig(
             framework=frontend_framework, project_name=config.project_name
         )
+        # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
+        if frontend_framework == FrontendFramework.VUE and data.frontend.ui_kit:
+            config.frontend.ui_kit = data.frontend.ui_kit
 
     from forge.config._topology import compute_topology  # noqa: PLC0415
     from forge.synthesis import compute_platform_synthesis  # noqa: PLC0415

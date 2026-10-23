@@ -47,6 +47,7 @@ from forge.sync.forge_to_project.updater._merge_driver import (
 )
 from forge.sync.manifest import read_forge_toml
 from forge.sync.merge import file_three_way_decide, sha256_of_file
+from forge.ui_kits import DEFAULT_UI_KIT
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,12 @@ def plan_update(
     # cast: a plugin frontend's sentinel behaves like a member (see the updater).
     frontend_framework = cast("FrontendFramework", _frontend_framework_from_manifest(data.frontend))
     frontend_dir = frontend_app_dir(project_root, data.frontend, frontend_framework)
+    # The recorded Vue UI kit selects fragments' files-<kit>/ trees, as on update.
+    ui_kit = (
+        (data.frontend.ui_kit or DEFAULT_UI_KIT)
+        if frontend_framework == FrontendFramework.VUE
+        else None
+    )
 
     decisions: list[FilePlanEntry] = []
     for rf in plan.ordered:
@@ -193,6 +200,7 @@ def plan_update(
                     update_mode,
                     config,
                     backend,
+                    ui_kit=ui_kit,
                 )
             )
 
@@ -294,18 +302,19 @@ def _decide_for_fragment(
     update_mode: UpdateMode,
     config: ProjectConfig,
     backend_language: BackendLanguage,
+    *,
+    ui_kit: str | None = None,
 ) -> list[FilePlanEntry]:
-    """Produce file-level decisions for one fragment × one backend."""
+    """Produce file-level decisions for one fragment × one backend.
+
+    ``ui_kit`` is the project's Vue UI kit, which selects ``files-<kit>/``.
+    """
     try:
         fp = FragmentPlan.from_impl(
             impl,
             fragment_name,
             options=option_values,
-            ui_kit=(
-                config.frontend.ui_kit
-                if config.frontend and config.frontend.framework == FrontendFramework.VUE
-                else None
-            ),
+            ui_kit=ui_kit,
         )
     except Exception:  # noqa: BLE001 — the apply pass would surface this; preview gracefully.
         return []

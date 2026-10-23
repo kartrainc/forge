@@ -120,8 +120,16 @@ def test_an_external_api_is_admitted_by_its_origin() -> None:
             project_name="csp",
             backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
         ),
+        # The chat's MCP panels frame remote origins the policy would block.
+        ProjectConfig(
+            project_name="csp",
+            backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
+            frontend=FrontendConfig(
+                project_name="frontend", framework=FrontendFramework.VUE, include_chat=True
+            ),
+        ),
     ],
-    ids=["option-off", "svelte", "flutter", "no-frontend"],
+    ids=["option-off", "svelte", "flutter", "no-frontend", "vue-with-chat"],
 )
 def test_nothing_is_served_without_the_option_or_the_vue_template(config: ProjectConfig) -> None:
     assert not csp_enabled(config)

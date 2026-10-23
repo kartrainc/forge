@@ -93,8 +93,8 @@
       "sha256": "43bcfaa4f6332ffe"
     },
     "apps/frontend/nginx.conf": {
-      "size": 1755,
-      "sha256": "35a70c54af8f1e5a"
+      "size": 146,
+      "sha256": "62a7e656f3823799"
     },
     "apps/frontend/openapi-snapshot.json": {
       "size": 55628,
@@ -107,10 +107,6 @@
     "apps/frontend/package.json": {
       "size": 2433,
       "sha256": "df74089a9c8b9258"
-    },
-    "apps/frontend/playwright.csp.config.ts": {
-      "size": 476,
-      "sha256": "1c4f276f25cdd30f"
     },
     "apps/frontend/playwright.quality.config.ts": {
       "size": 385,
@@ -131,10 +127,6 @@
     "apps/frontend/scripts/remap-browser.mjs": {
       "size": 778,
       "sha256": "078da64f2ee555a7"
-    },
-    "apps/frontend/scripts/serve-csp.mjs": {
-      "size": 2939,
-      "sha256": "2eb35da141bde645"
     },
     "apps/frontend/src/app/App.vue": {
       "size": 957,
@@ -1309,8 +1301,8 @@
       "sha256": "aba9539ccbfa500e"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2790,
-      "sha256": "2773dcdbf3f85245"
+      "size": 2605,
+      "sha256": "b36b4f8a384f1d35"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,

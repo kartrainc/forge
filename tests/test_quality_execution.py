@@ -190,7 +190,9 @@ _ICON_FETCH = {
 }
 
 
-def _content_security(tmp_path, monkeypatch, reports, stats=None):
+def _content_security(
+    tmp_path, monkeypatch, reports, stats=None, *, ui_kit="nuxt-ui", exit_code=0, errors=()
+):
     service = tmp_path / "apps" / "web"
     service.mkdir(parents=True)
     (service / "playwright.csp.config.ts").write_text("export default {}\n", encoding="utf-8")
@@ -205,13 +207,13 @@ def _content_security(tmp_path, monkeypatch, reports, stats=None):
         if argv[:3] == ["npx", "--no-install", "playwright"]:
             with open(env["FORGE_CSP_REPORT"], "w", encoding="utf-8") as stream:
                 stream.writelines(json.dumps(report) + "\n" for report in reports)
-            kwargs["stdout"].write(
-                json.dumps({"stats": stats or {"expected": 3, "unexpected": 0, "flaky": 0}})
-            )
+            outcome = {"stats": stats or {"expected": 3, "unexpected": 0, "flaky": 0}}
+            kwargs["stdout"].write(json.dumps({**outcome, "errors": list(errors)}))
+            return subprocess.CompletedProcess(argv, exit_code)
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr("forge.quality.csp.subprocess.run", run)
-    result = check_content_security(service, tmp_path / "out")
+    result = check_content_security(service, tmp_path / "out", ui_kit=ui_kit)
     assert calls == [["npm", "run", "build"], ["npx", "--no-install", "playwright"]]
     return result
 
@@ -226,6 +228,12 @@ def test_content_security_admits_only_the_known_upstream_elements(tmp_path, monk
     }
 
 
+def test_content_security_admits_nothing_for_the_shadcn_kit(tmp_path, monkeypatch):
+    result = _content_security(tmp_path, monkeypatch, [_PALETTE], ui_kit="shadcn")
+    assert result["passed"] is False
+    assert result["admitted"] == {} and len(result["violations"]) == 1
+
+
 def test_content_security_fails_on_any_other_report(tmp_path, monkeypatch):
     # An icon fetched at runtime instead of bundled is a connect-src report.
     result = _content_security(tmp_path, monkeypatch, [_PALETTE, _ICON_FETCH])
@@ -235,8 +243,22 @@ def test_content_security_fails_on_any_other_report(tmp_path, monkeypatch):
 
 def test_content_security_fails_when_a_suite_fails(tmp_path, monkeypatch):
     stats = {"expected": 1, "unexpected": 1, "flaky": 0}
-    result = _content_security(tmp_path, monkeypatch, [], stats)
+    result = _content_security(tmp_path, monkeypatch, [], stats, exit_code=1)
     assert result["passed"] is False and result["failed_tests"] == 1
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "errors"),
+    [(1, ()), (1, ({"message": "Error: globalTeardown failed"},)), (0, ({"message": "x"},))],
+    ids=["exit-code", "global-error", "error-without-exit-code"],
+)
+def test_content_security_fails_when_playwright_fails_outside_the_tests(
+    tmp_path, monkeypatch, exit_code, errors
+):
+    # A web-server, setup or teardown failure leaves the test statistics green.
+    result = _content_security(tmp_path, monkeypatch, [], exit_code=exit_code, errors=errors)
+    assert result["passed"] is False
+    assert (result["exit_code"], result["errors"]) == (exit_code, len(errors))
 
 
 def test_content_security_skips_a_frontend_without_the_policy(tmp_path):
@@ -252,12 +274,20 @@ def test_content_security_skips_a_frontend_without_the_policy(tmp_path):
         {**_PALETTE, "effective-directive": "script-src-elem"},
         {**_PALETTE, "blocked-uri": "https://example.com/x.css"},
         {**_PALETTE, "script-sample": ".x { color: red }"},
+        # Any other stylesheet that merely starts like the palette.
+        {**_PALETTE, "script-sample": "@layer theme { .unrelated { color: red"},
         {},
     ],
-    ids=["other-directive", "external-sheet", "other-style", "empty"],
+    ids=["other-directive", "external-sheet", "other-style", "palette-prefix", "empty"],
 )
 def test_only_inline_styles_with_a_known_sample_are_admitted(report):
-    assert admitted(report) is None
+    assert admitted(report, "nuxt-ui") is None
+
+
+def test_known_samples_are_admitted_for_nuxt_ui_only():
+    assert admitted(_PALETTE, "nuxt-ui") == "Nuxt UI's temporary palette copy (Vue mode)"
+    assert admitted(_TRANSITION, "nuxt-ui") == "VueUse's colour-mode transition guard"
+    assert admitted(_PALETTE, "shadcn") is None
 
 
 def test_rust_path_dependency_coverage_uses_the_same_execution(service, monkeypatch):

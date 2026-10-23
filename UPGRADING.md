@@ -226,7 +226,7 @@ before changing anything.
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,
 which nothing included. It now protects the Vue frontend itself, whichever UI
-kit it uses:
+kit it uses, unless the project has the AI chat:
 
 - `apps/<frontend>/nginx.conf` and the Helm chart's default server block send
   X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
@@ -239,20 +239,26 @@ kit it uses:
   it. A project that serves its own policy keeps it and adopts the nonce by
   merging the sidecar.
 - The build writes a nonce placeholder on its tags (`html.cspNonce` in
-  `vite.config.ts`); `index.html` loses its inline `style` attribute, whose
-  font family moves to `main.css`. The app reads the nonce for the `<style>`
-  elements its kit inserts (`src/app/providers/csp.ts`), and zod parses without
-  `eval`.
+  `vite.config.ts`). Every Vue project, the chat ones included, also changes
+  where the policy would need it: `index.html` loses its inline `style`
+  attribute, whose font family moves to `main.css`; the app reads the nonce,
+  when there is one, for the `<style>` elements its kit inserts
+  (`src/app/providers/csp.ts`, imported first by `main.ts`); zod parses
+  without `eval`; the e2e specs collect coverage only when
+  `FORGE_BROWSER_COVERAGE` is set.
 - Code of your own that inserts `<style>` elements or writes `style`
   attributes as markup is blocked from now on; Vue's `:style` bindings are not.
   Add the origins your frontend calls, such as an error tracker, to
   `connect-src` in `nginx.conf`. To serve without the policy, set
-  `security.csp` to `false` in the recipe and update.
+  `"security.csp" = false` under `[forge.options]` in `forge.toml`, and
+  `"security.csp" = "user"` under `[forge.option_origins]`, then update: the
+  update takes options from `forge.toml`, not from the recipe.
 - `scripts/serve-csp.mjs` and `playwright.csp.config.ts` run the browser suites
   against the production build under the policy:
-  `npm run build && npx playwright test -c playwright.csp.config.ts`. The e2e
-  specs collect coverage only when `FORGE_BROWSER_COVERAGE` is set.
-- Svelte, Flutter and plugin frontends are served as before, without a policy.
+  `npm run build && npx playwright test -c playwright.csp.config.ts`.
+- Svelte, Flutter and plugin frontends, and Vue projects with the AI chat, are
+  served as before, without a policy. The chat's MCP panels load remote
+  origins in frames, which the policy would block.
 
 ## 1.0 → 1.1
 

@@ -78,7 +78,7 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
    for vaul-vue. zod parses without `eval`. Both Vue lanes run the browser
    suites against the production build under the policy and fail on any
    violation, with two exceptions named below. The policy covers the Vue
-   template only, which is the only frontend the lanes prove under it.
+   template without the AI chat, which is what the lanes prove under it.
 
 ### What the policy leaves out
 
@@ -93,10 +93,17 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
   suppresses transitions while the mode changes, are inserted without the
   nonce. The browser blocks both without visible effect: the palette applies
   from the head entry, which carries the nonce. The policy's `'report-sample'`
-  identifies them, and the check admits exactly these two by their samples.
+  identifies them, and the check admits exactly these two, by their exact
+  samples, in a `nuxt-ui` project. The copy's sample is also the real
+  palette's, so the Nuxt UI e2e suite asserts that the palette applies.
 - **Strict-Transport-Security.** nginx serves the frontend over plain HTTP
   behind a TLS terminator, and a browser keeps the header for as long as it
   says, subdomains included. The terminator sends it.
+- **The AI chat.** Its MCP panels load the app's `entryUrl` in an iframe,
+  usually from another origin, and the policy names no frame source, so
+  `default-src 'self'` would block them. Which origins to admit is the
+  project's to say, and no lane runs the chat, so a project with the chat is
+  served without the policy, as before.
 
 ## Alternatives considered
 
@@ -135,11 +142,11 @@ and leaves Nuxt UI's colour-mode components inert.
   only.
 - Plugin layouts render with `shadcn` unless `add_frontend_layout` lists
   more in `ui_kits` (SDK 1.6).
-- Every Vue project with `security.csp` on starts serving an enforced policy
-  on its next update. Code that inserts `<style>` elements or writes `style`
+- Every Vue project without the AI chat that has `security.csp` on starts
+  serving an enforced policy on its next update. Code that inserts `<style>` elements or writes `style`
   attributes as markup is blocked, and origins the frontend calls must be
-  listed in `connect-src`. Svelte, Flutter and plugin frontends are served
-  without a policy; the standalone snippet the option used to emit, which
+  listed in `connect-src`. Svelte, Flutter, plugin frontends and projects
+  with the chat are served without a policy; the standalone snippet the option used to emit, which
   nothing included, is gone.
 - Until Nuxt UI skips its temporary palette copy in Vue mode or gives it the
   nonce, and VueUse's transition guard takes one, the browser console of a

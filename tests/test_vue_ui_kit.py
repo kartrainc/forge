@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from forge.capability_resolver import resolve
 from forge.config import (
     BackendConfig,
     BackendLanguage,
@@ -27,6 +28,10 @@ from forge.config import (
 )
 from forge.generator import generate
 from forge.quality.model import ownership
+from forge.sync.forge_to_project import plan as plan_module
+from forge.sync.forge_to_project import updater as updater_module
+from forge.sync.forge_to_project.plan import plan_update
+from forge.sync.forge_to_project.updater import update_project
 from forge.ui_kits import NUXT_UI_VERSION
 
 # The shadcn kit: its generated components and the libraries it wraps.
@@ -204,3 +209,64 @@ def test_screens_and_crud_pages_render_on_nuxt_ui(app: Path) -> None:
     readme = _read(app, "README.md")
     assert "**UI**: Nuxt UI 4 (Reka UI + Tailwind CSS 4)" in readme
     assert "**Icons**: Iconify, lucide bundled" in readme
+
+
+def test_fragments_render_and_update_from_the_kits_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The session-timeout fragment's ``files-nuxt-ui/`` dialog, generated and kept.
+
+    The preview and ``forge --update`` rebuild the project from ``forge.toml``,
+    so they take the kit from the manifest's ``[forge.frontend]``; reading the
+    shared ``files/`` tree instead would propose the other dialog. Their config
+    has no Keycloak, which drops the gateway fragments from the plan, so both
+    are pinned to the plan generation resolved.
+    """
+    config = ProjectConfig(
+        project_name="nuxt-auth",
+        # 5000 is the Gatekeeper's port.
+        backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_auth=True,
+            include_chat=False,
+            include_openapi=False,
+            ui_kit="nuxt-ui",
+        ),
+        include_keycloak=True,
+        options={"auth.provider": "gatekeeper"},
+    )
+    config.validate()
+    generation_plan = resolve(config)
+    assert "platform_auth_session_timeout_vue" in {
+        rf.fragment.name for rf in generation_plan.ordered
+    }
+    for module in (plan_module, updater_module):
+        monkeypatch.setattr(module, "resolve", lambda _config: generation_plan)
+    rendered = Path(generate(config, quiet=True, dry_run=True))
+    root = tmp_path / "project"
+    shutil.copytree(rendered, root)
+    shutil.rmtree(rendered.parent, ignore_errors=True)
+    modal = root / "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue"
+    composable = root / "apps/frontend/src/shared/composables/useSessionTimeout.ts"
+    generated = modal.read_text(encoding="utf-8")
+    assert "<UModal" in generated and composable.is_file()
+
+    timeout = [
+        entry
+        for entry in plan_update(root).file_decisions
+        if entry.fragment == "platform_auth_session_timeout_vue"
+    ]
+    assert {entry.rel_path for entry in timeout} >= {
+        "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue",
+        "apps/frontend/src/shared/composables/useSessionTimeout.ts",
+    }
+    assert {entry.action for entry in timeout} == {"skipped-idempotent"}, timeout
+
+    # Without a recipe the update rebuilds the frontend from the manifest (a
+    # recipe-based update regenerates from the recipe, which records the kit).
+    (root / ".forge" / "quality.json").unlink()
+    update_project(root, quiet=True, update_mode="merge")
+    assert modal.read_text(encoding="utf-8") == generated
+    assert not modal.with_name(modal.name + ".forge-merge").exists()

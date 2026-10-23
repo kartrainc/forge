@@ -86,14 +86,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
-- `security.csp` now protects the Vue frontend. The frontend's `nginx.conf` and
-  the Helm chart's default server block send a nonce-based
-  Content-Security-Policy with `index.html` and defence-in-depth headers with
-  every response; the build stamps the nonce placeholder nginx replaces per
-  response. The standalone `deploy/infra/nginx-csp.conf`, which nothing
-  included and which named an undefined nginx variable, is no longer emitted.
-  Both Vue lanes run the browser suites against the production build under the
-  policy and fail on any violation.
+- `security.csp` now protects the Vue frontend without the AI chat. The
+  frontend's `nginx.conf` and the Helm chart's default server block send a
+  nonce-based Content-Security-Policy with `index.html` and defence-in-depth
+  headers with every response; the build stamps the nonce placeholder nginx
+  replaces per response. The standalone `deploy/infra/nginx-csp.conf`, which
+  nothing included and which named an undefined nginx variable, is no longer
+  emitted. Both Vue lanes run the browser suites against the production build
+  under the policy and fail on any violation.
 
 ### Platform routing
 

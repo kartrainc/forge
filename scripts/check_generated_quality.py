@@ -75,7 +75,7 @@ def check(
         # The production build under the policy nginx sends (security.csp).
         service = destination / "apps" / config.frontend_slug
         security = check_content_security(
-            service, destination / ".forge/coverage" / config.frontend_slug
+            service, destination / ".forge/coverage" / config.frontend_slug, ui_kit=ui_kit
         )
         result["content_security"] = security
         result["passed"] = result["passed"] and security["passed"]

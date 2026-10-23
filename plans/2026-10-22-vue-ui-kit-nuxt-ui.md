@@ -495,9 +495,11 @@ Where the build settled the text above differently:
 - **The app's nonce wiring is unconditional.** `csp.ts`, the head hook
   (`src/app/providers/head.ts`) and the `UApp` and `ConfigProvider` props read
   the meta tag and do nothing without it. Only `html.cspNonce`, the vaul meta
-  tag and the files of the check follow `security.csp`.
-- **The policy covers the Vue template only.** Svelte, Flutter and plugin
-  frontends are served without it, since no lane proves them under it. The
+  tag and the files of the check follow whether the policy is served.
+- **The policy covers the Vue template without the AI chat.** Svelte, Flutter
+  and plugin frontends are served without it, since no lane proves them under
+  it, and so are projects with the chat: its MCP panels frame remote origins
+  that the policy would block. The
   `security_csp` fragment is removed: the option enables no fragment, like
   `auth.api_keys`, and is read by the renderers through `forge/frontend_csp.py`,
   which also admits an external API's origin in `connect-src`.
@@ -507,8 +509,12 @@ Where the build settled the text above differently:
   `report-uri`; `playwright.csp.config.ts` points the suites at it. Both are
   common files copied when the policy is on. The e2e specs collect coverage only
   when `FORGE_BROWSER_COVERAGE` is set, and `forge/quality/csp.py` judges the
-  reports. The no-icon-fetch check is the same run: a request to the Iconify
-  API is a `connect-src` violation.
+  reports. It passes only when Playwright exits cleanly with no global error,
+  and admits the two elements above only in a `nuxt-ui` project and only by
+  their exact sample; the palette copy's sample is also the real palette's, so
+  the Nuxt UI e2e spec asserts that the palette applies. The no-icon-fetch
+  check is the same run: a request to the Iconify API is a `connect-src`
+  violation.
 - **`ConfirmHost` stays** instead of `useOverlay`: it and `useConfirm` are
   kit-free; only `ConfirmDialog` has a `UModal` variant. **`VerticalSplitter`
   is not emitted** under `nuxt-ui`, nor its suite: no screen uses it.
@@ -538,5 +544,7 @@ Where the build settled the text above differently:
   temporary palette copy in Vue mode or give it `UApp`'s nonce, and to let
   VueUse's transition guard take one.
 - A content-security policy for Svelte and Flutter, with a lane that proves it.
+- The AI chat under the policy: a `frame-src` for the MCP panels' origins,
+  and a lane that runs the chat.
 - The reverse-sync harvester maps project files to a fragment's `files/` tree
   and does not know `files-<kit>/` yet.

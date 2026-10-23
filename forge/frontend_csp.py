@@ -10,7 +10,9 @@ stamps on its own tags (``html.cspNonce``) and the app reads back from the
 ``csp-nonce`` meta tag for the ``<style>`` elements its UI kit inserts.
 
 Only the Vue template is built for the policy, so Svelte, Flutter and plugin
-frontends are served without it (ADR-011). Strict-Transport-Security is left to
+frontends are served without it, and so is a Vue frontend with the AI chat:
+its MCP panels load remote origins in frames, which the policy would block
+(ADR-011). Strict-Transport-Security is left to
 the TLS terminator in front of the frontend: nginx serves plain HTTP behind it,
 and a browser keeps the header for as long as it says.
 """
@@ -40,9 +42,11 @@ _FONT_FILES = "https://fonts.gstatic.com"
 
 
 def csp_enabled(config: ProjectConfig) -> bool:
-    """True when ``security.csp`` is on and the frontend is the Vue template."""
+    """True when ``security.csp`` is on and the frontend is the Vue template without chat."""
     frontend = config.frontend
     if frontend is None or frontend.framework != FrontendFramework.VUE:
+        return False
+    if frontend.include_chat:
         return False
     if OPTION in config.options:
         return bool(config.options[OPTION])

@@ -1471,7 +1471,8 @@ build's ``__CSP_NONCE__`` placeholder). Every response also carries
 X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
 Permissions-Policy. Strict-Transport-Security is left to the TLS terminator.
 
-FRONTENDS: vue (Svelte, Flutter and plugin frontends are served without it)
+FRONTENDS: vue without the AI chat, whose MCP panels frame remote origins
+(Svelte, Flutter, plugin frontends and chat projects are served without it)
 CUSTOMISE: add the origins your frontend calls to ``connect-src`` in nginx.conf.
 
 <!-- END GENERATED:OPTIONS-CATALOG -->

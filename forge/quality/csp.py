@@ -8,9 +8,13 @@ against it and fails on any violation the browser reports. A connect-src
 violation also catches an icon fetched from the Iconify API at runtime instead
 of bundled.
 
-Two reports are admitted, each a ``<style>`` element a Nuxt UI 4.12 dependency
-inserts without the nonce in Vue mode. The browser blocks both without visible
-effect, and Nuxt UI offers no option to stop or nonce them:
+Two reports are admitted for a ``nuxt-ui`` project, each a ``<style>`` element a
+Nuxt UI 4.12 dependency inserts without the nonce in Vue mode. The browser
+blocks both without visible effect, and Nuxt UI offers no option to stop or
+nonce them. A report is admitted only when its sample, the first 40 characters
+the policy's ``'report-sample'`` lets the browser send, is exactly the
+element's. The palette copy's text is also the real palette's, so the Nuxt UI
+e2e suite asserts separately that the palette applies.
 
 * Nuxt UI's colour plugin writes a temporary copy of the palette before its
   head entry renders; the head entry, which carries the nonce, applies it.
@@ -25,28 +29,29 @@ import subprocess
 import sys
 from pathlib import Path
 
-#: The start of each admitted report's sample: the blocked stylesheet's text.
+#: Each admitted report's sample (its first 40 characters) under ``nuxt-ui``.
 ADMITTED_STYLE_SAMPLES = {
-    "@layer theme {": "Nuxt UI's temporary palette copy (Vue mode)",
+    "@layer theme {\n  :root, :host {\n  --ui-c": "Nuxt UI's temporary palette copy (Vue mode)",
     "*,*::before,*::after{-webkit-transition:": "VueUse's colour-mode transition guard",
 }
 
 
-def admitted(report: dict) -> str | None:
+def admitted(report: dict, ui_kit: str) -> str | None:
     """Name the known upstream element a report is about, or ``None``."""
+    if ui_kit != "nuxt-ui":
+        return None
     if report.get("effective-directive") != "style-src-elem":
         return None
     if report.get("blocked-uri") != "inline":
         return None
-    sample = report.get("script-sample", "")
-    return next(
-        (why for start, why in ADMITTED_STYLE_SAMPLES.items() if sample.startswith(start)), None
-    )
+    return ADMITTED_STYLE_SAMPLES.get(report.get("script-sample", ""))
 
 
-def check_content_security(service: Path, output: Path) -> dict:
+def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn") -> dict:
     """Build ``service``, run its browser suites under the policy, judge the reports.
 
+    Passes only when Playwright exits cleanly with tests run, no failed or flaky
+    test and no global error, and every report is admitted for ``ui_kit``.
     Returns ``{"passed", "tests", "violations", "admitted"}``. A service without
     ``playwright.csp.config.ts`` (the option off) is reported as skipped.
     """
@@ -71,7 +76,8 @@ def check_content_security(service: Path, output: Path) -> dict:
     )
     execution = output / "csp.execution"
     with execution.open("w", encoding="utf-8") as stream:
-        subprocess.run(
+        # Not check=True: the reports are judged even when a test fails.
+        completed = subprocess.run(
             ["npx", "--no-install", "playwright", "test", "--config", "playwright.csp.config.ts"],
             cwd=service,
             env=env,
@@ -79,9 +85,15 @@ def check_content_security(service: Path, output: Path) -> dict:
             stdout=stream,
             stderr=sys.stderr,
         )
-    statistics = json.loads(execution.read_text(encoding="utf-8"))["stats"]
+    result = json.loads(execution.read_text(encoding="utf-8"))
+    statistics = result["stats"]
+    # A global error (the web server, setup or teardown) is reported apart
+    # from the test statistics.
+    errors = result.get("errors") or []
     passed_tests = (
-        not statistics.get("unexpected", 0)
+        completed.returncode == 0
+        and not errors
+        and not statistics.get("unexpected", 0)
         and not statistics.get("flaky", 0)
         and statistics.get("expected", 0) > 0
     )
@@ -90,7 +102,7 @@ def check_content_security(service: Path, output: Path) -> dict:
     known: dict[str, int] = {}
     for line in lines:
         report = json.loads(line)
-        why = admitted(report)
+        why = admitted(report, ui_kit)
         if why:
             known[why] = known.get(why, 0) + 1
         else:
@@ -111,6 +123,8 @@ def check_content_security(service: Path, output: Path) -> dict:
         "passed": passed_tests and not violations,
         "tests": statistics.get("expected", 0),
         "failed_tests": statistics.get("unexpected", 0),
+        "exit_code": completed.returncode,
+        "errors": len(errors),
         "violations": violations,
         "admitted": known,
     }

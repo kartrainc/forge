@@ -20,6 +20,11 @@ test('application boots and navigates preferences in a real browser', async ({ p
     await mockHealth(page);
     await page.goto('/');
     await expectHealthyDashboard(page);
+    // Nuxt UI's palette applies: under the content-security policy only its
+    // nonce lets the palette element in, and nothing else defines the shades.
+    const shade = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--ui-color-primary-500').trim());
+    expect(shade).not.toBe('');
     await expect(page.locator('body')).not.toBeEmpty();
     await expect(page.locator('body')).not.toHaveText(/Internal Error|500 Internal/);
     await page.locator('a[href="/settings"]').first().click();
