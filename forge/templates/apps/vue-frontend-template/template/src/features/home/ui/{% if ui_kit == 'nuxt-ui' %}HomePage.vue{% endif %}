@@ -1,0 +1,109 @@
+<script setup lang="ts">
+import HealthIndicator from '@/shared/components/HealthIndicator.vue'
+import { useServiceInfo, useReadiness } from '@/features/home'
+import { useAuth } from '@/shared/composables/useAuth'
+
+const { user } = useAuth()
+const { data: info, isLoading: infoLoading } = useServiceInfo()
+const { data: readiness, isLoading: readinessLoading } = useReadiness()
+
+const quickActions = [
+  // --- feature quick actions ---
+  // --- end feature quick actions ---
+  { label: 'View Profile', icon: 'i-lucide-user', route: '/profile' },
+  { label: 'Settings', icon: 'i-lucide-settings', route: '/settings' },
+]
+</script>
+
+<template>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight text-highlighted">
+        Welcome back, {{ user?.firstName }}!
+      </h1>
+      <p class="text-muted">
+        Here's what's happening with your service
+      </p>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <UPageCard
+        v-for="action in quickActions"
+        :key="action.label"
+        :title="action.label"
+        :icon="action.icon"
+        :to="action.route"
+        variant="subtle"
+      />
+    </div>
+
+    <!-- Service Information -->
+    <UCard>
+      <template #header>
+        <h2 class="flex items-center gap-2 font-semibold text-highlighted">
+          <UIcon name="i-lucide-info" class="size-5" />
+          Service Information
+        </h2>
+      </template>
+      <div v-if="infoLoading" class="space-y-4">
+        <div v-for="n in 3" :key="n">
+          <USkeleton class="mb-1 h-3 w-20" />
+          <USkeleton class="h-5 w-40" />
+        </div>
+      </div>
+      <dl v-else-if="info" class="space-y-4">
+        <div>
+          <dt class="text-xs text-muted">Title</dt>
+          <dd class="text-sm font-medium">{{ info.title }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs text-muted">Version</dt>
+          <dd class="text-sm font-medium">v{{ info.version }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs text-muted">Description</dt>
+          <dd class="text-sm font-medium">{{ info.description }}</dd>
+        </div>
+      </dl>
+    </UCard>
+
+    <!-- Health Status -->
+    <UCard>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <h2 class="flex items-center gap-2 font-semibold text-highlighted">
+            <UIcon name="i-lucide-activity" class="size-5" />
+            Health Status
+          </h2>
+          <USkeleton v-if="readinessLoading" class="h-6 w-16" />
+          <HealthIndicator v-else-if="readiness" :status="readiness.status" />
+        </div>
+      </template>
+      <div v-if="readinessLoading" class="space-y-3">
+        <div v-for="n in 3" :key="n" class="flex items-center justify-between rounded-md border border-default p-3">
+          <div>
+            <USkeleton class="mb-1 h-4 w-24" />
+            <USkeleton class="h-3 w-16" />
+          </div>
+          <USkeleton class="h-6 w-14" />
+        </div>
+      </div>
+      <div v-else-if="readiness?.components" class="space-y-3">
+        <div
+          v-for="(component, name) in readiness.components"
+          :key="name"
+          class="flex items-center justify-between rounded-md border border-default p-3"
+        >
+          <div>
+            <p class="font-medium capitalize">{{ name }}</p>
+            <p v-if="component.latency_ms != null" class="text-xs text-muted">
+              {{ component.latency_ms.toFixed(1) }}ms latency
+            </p>
+          </div>
+          <HealthIndicator :status="component.status" />
+        </div>
+      </div>
+    </UCard>
+  </div>
+</template>

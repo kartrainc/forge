@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@import '@nuxt/ui';
+@import '../../custom/theme/tokens.css';
+
+@layer base {
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+}

@@ -1,9 +1,8 @@
 """The Vue template's UI kit option (``frontend.ui_kit``) and its refusals.
 
-``shadcn`` is the default and the only selectable kit until the Nuxt UI
-rendering lands (plans/2026-10-22-vue-ui-kit-nuxt-ui.md, F-02). ``nuxt-ui`` is
-registered unselectable; the ``nuxt_ui_selectable`` fixture flips it so the
-plan-time refusals can be exercised before then. Every refusal is raised before
+``shadcn`` is the default; ``nuxt-ui`` renders the template on Nuxt UI 4
+(plans/2026-10-22-vue-ui-kit-nuxt-ui.md). A kit can be registered unselectable,
+which the ``nuxt_ui_hidden`` fixture exercises. Every refusal is raised before
 anything is written: a kit the frontend settings cannot render, a component or
 child component the kit cannot render, a fragment that declares other kits.
 """
@@ -43,9 +42,9 @@ from forge.variable_mapper import svelte_context, vue_context
 
 
 @pytest.fixture
-def nuxt_ui_selectable(monkeypatch):
-    """Make ``nuxt-ui`` selectable, as F-02 will."""
-    kit = dataclasses.replace(ui_kits.UI_KITS["nuxt-ui"], supported=True)
+def nuxt_ui_hidden(monkeypatch):
+    """Register ``nuxt-ui`` unselectable, as F-01 did before its rendering."""
+    kit = dataclasses.replace(ui_kits.UI_KITS["nuxt-ui"], supported=False)
     monkeypatch.setitem(ui_kits.UI_KITS, "nuxt-ui", kit)
 
 
@@ -68,16 +67,24 @@ def _project(frontend: FrontendConfig, components: list[str] | None = None) -> P
 
 
 class TestRegistry:
-    def test_shadcn_is_the_default_and_only_selectable_kit(self) -> None:
+    def test_shadcn_is_the_default(self) -> None:
         assert ui_kits.DEFAULT_UI_KIT == "shadcn"
         assert _frontend().ui_kit == "shadcn"
-        assert ui_kits.available_ui_kits(FrontendFramework.VUE) == ("shadcn",)
 
-    def test_nuxt_ui_is_registered_but_not_selectable(self) -> None:
+    def test_nuxt_ui_is_selectable_without_chat(self) -> None:
         kit = ui_kits.get_ui_kit("nuxt-ui")
         assert kit is not None
-        assert kit.supported is False
+        assert kit.supported is True
         assert kit.chat is False
+        assert ui_kits.NUXT_UI_VERSION.startswith("4.")
+
+    def test_an_unselectable_kit_is_not_listed(self, nuxt_ui_hidden) -> None:
+        assert ui_kits.available_ui_kits(FrontendFramework.VUE) == ("shadcn",)
+
+    def test_the_cli_choices_cover_every_kit(self) -> None:
+        for kit in ui_kits.UI_KITS.values():
+            assert set(kit.color_schemes) <= set(ui_kits.COLOR_SCHEME_CHOICES)
+        assert ui_kits.COLOR_SCHEME_CHOICES[: len(ui_kits.COLOR_SCHEMES)] == ui_kits.COLOR_SCHEMES
 
     def test_only_the_vue_template_has_kits(self) -> None:
         assert ui_kits.applies_to(FrontendFramework.VUE)
@@ -85,7 +92,7 @@ class TestRegistry:
         assert not ui_kits.applies_to(FrontendFramework.FLUTTER)
         assert ui_kits.available_ui_kits(FrontendFramework.SVELTE) == ()
 
-    def test_selectable_kits_list_the_default_first(self, nuxt_ui_selectable) -> None:
+    def test_selectable_kits_list_the_default_first(self) -> None:
         assert ui_kits.available_ui_kits(FrontendFramework.VUE) == ("shadcn", "nuxt-ui")
 
     def test_color_schemes_map_to_tailwind_palettes(self) -> None:
@@ -113,7 +120,7 @@ class TestFrontendRefusals:
         with pytest.raises(ValueError, match="ui_kit must be a UI kit name"):
             _frontend(ui_kit=value).validate()
 
-    def test_nuxt_ui_is_refused_until_selectable(self) -> None:
+    def test_an_unselectable_kit_is_refused(self, nuxt_ui_hidden) -> None:
         with pytest.raises(
             ValueError, match=r"'nuxt-ui' is not available for vue\. Choose from: shadcn"
         ):
@@ -127,6 +134,14 @@ class TestFrontendRefusals:
         _frontend(framework=FrontendFramework.SVELTE).validate()
         _frontend(framework=FrontendFramework.FLUTTER, include_openapi=True).validate()
 
+    @pytest.mark.parametrize("framework", [FrontendFramework.SVELTE, FrontendFramework.FLUTTER])
+    def test_svelte_and_flutter_refuse_tailwind_palettes(self, framework) -> None:
+        # The CLI offers every kit's schemes; the other templates take eight.
+        with pytest.raises(ValueError, match=f"'violet' is not available for {framework.value}"):
+            _frontend(
+                framework=framework, include_openapi=True, default_color_scheme="violet"
+            ).validate()
+
     def test_shadcn_accepts_only_the_template_schemes(self) -> None:
         for scheme in ui_kits.COLOR_SCHEMES:
             _frontend(default_color_scheme=scheme).validate()
@@ -135,10 +150,10 @@ class TestFrontendRefusals:
         ):
             _frontend(default_color_scheme="violet").validate()
 
-    def test_nuxt_ui_validates_on_the_sidebar_layout(self, nuxt_ui_selectable) -> None:
+    def test_nuxt_ui_validates_on_the_sidebar_layout(self) -> None:
         _frontend(ui_kit="nuxt-ui").validate()
 
-    def test_layout_without_the_kit_is_refused(self, nuxt_ui_selectable) -> None:
+    def test_layout_without_the_kit_is_refused(self) -> None:
         with pytest.raises(
             ValueError,
             match="Layout 'topnav' does not support UI kit 'nuxt-ui' yet. "
@@ -146,13 +161,11 @@ class TestFrontendRefusals:
         ):
             _frontend(ui_kit="nuxt-ui", layout="topnav").validate()
 
-    def test_chat_is_refused_on_nuxt_ui(self, nuxt_ui_selectable) -> None:
+    def test_chat_is_refused_on_nuxt_ui(self) -> None:
         with pytest.raises(ValueError, match="does not support include_chat yet"):
             _frontend(ui_kit="nuxt-ui", include_chat=True).validate()
 
-    def test_nuxt_ui_accepts_template_schemes_and_tailwind_palettes(
-        self, nuxt_ui_selectable
-    ) -> None:
+    def test_nuxt_ui_accepts_template_schemes_and_tailwind_palettes(self) -> None:
         for scheme in ("deepPurple", "violet", "emerald", "zinc"):
             _frontend(ui_kit="nuxt-ui", default_color_scheme=scheme).validate()
         with pytest.raises(
@@ -223,14 +236,23 @@ class TestEntryPoints:
         with pytest.raises(ValueError, match="ui_kit must be a UI kit name, got list"):
             fe.validate()
 
-    @pytest.mark.parametrize("kit", ["vuetify", "nuxt-ui"])
-    def test_generation_refuses_a_kit_without_validate(self, kit: str) -> None:
+    def test_generation_refuses_a_kit_without_validate(self, nuxt_ui_hidden) -> None:
         # Programmatic callers may skip ProjectConfig.validate(); the generator
         # still refuses before rendering, so it never records a kit it did not render.
-        with pytest.raises(ValueError, match=f"UI kit '{kit}' is not available for vue"):
-            generate(_project(_frontend(ui_kit=kit)), quiet=True, dry_run=True)
+        for kit in ("vuetify", "nuxt-ui"):
+            with pytest.raises(ValueError, match=f"UI kit '{kit}' is not available for vue"):
+                generate(_project(_frontend(ui_kit=kit)), quiet=True, dry_run=True)
 
-    def _interactive(self, monkeypatch, selects: list[str]) -> tuple[ProjectConfig, list[str]]:
+    def test_generation_refuses_settings_the_kit_cannot_render(self) -> None:
+        # Nuxt UI with chat would render both App.vue variants.
+        with pytest.raises(ValueError, match="does not support include_chat"):
+            generate(
+                _project(_frontend(ui_kit="nuxt-ui", include_chat=True)), quiet=True, dry_run=True
+            )
+
+    def _interactive(
+        self, monkeypatch, selects: list[str], confirms: list[bool] | None = None
+    ) -> tuple[ProjectConfig, list[str]]:
         class _Tty:
             def isatty(self) -> bool:
                 return True
@@ -244,32 +266,43 @@ class TestEntryPoints:
             asked.append(message)
             return next(picks)
 
-        confirms = iter([False, True, False, False, True])  # backend, auth, chat, openapi, go
+        # backend, auth, chat, openapi, go
+        answers = iter(confirms if confirms is not None else [False, True, False, False, True])
+
+        def confirm(message, *_, **__):
+            asked.append(message)
+            return next(answers)
+
         with (
             patch("forge.cli.interactive._ask_text", side_effect=lambda *a, **k: next(texts)),
             patch("forge.cli.interactive._ask_select", side_effect=select),
-            patch("forge.cli.interactive._ask_confirm", side_effect=lambda *a, **k: next(confirms)),
+            patch("forge.cli.interactive._ask_confirm", side_effect=confirm),
         ):
             config = _collect_inputs()
         assert config is not None
         return config, asked
 
-    def test_the_prompt_skips_the_kit_while_one_is_selectable(self, monkeypatch) -> None:
+    def test_the_prompt_skips_the_kit_while_one_is_selectable(
+        self, monkeypatch, nuxt_ui_hidden
+    ) -> None:
         config, asked = self._interactive(
             monkeypatch, ["Python (FastAPI)", "3.13", "Vue 3", "npm", "blue", "Sidebar App Shell"]
         )
         assert "UI kit:" not in asked
         assert config.frontend is not None and config.frontend.ui_kit == "shadcn"
 
-    def test_the_prompt_offers_the_kit_and_filters_by_it(
-        self, monkeypatch, nuxt_ui_selectable
-    ) -> None:
+    def test_the_prompt_offers_the_kit_and_filters_by_it(self, monkeypatch) -> None:
         label = ui_kits.UI_KITS["nuxt-ui"].display_label
-        # No layout question: sidebar is the only layout listing nuxt-ui.
+        # No layout question: sidebar is the only layout listing nuxt-ui. No chat
+        # question either: the kit has no chat UI. Confirms: backend, auth, openapi, go.
         config, asked = self._interactive(
-            monkeypatch, ["Python (FastAPI)", "3.13", "Vue 3", "npm", label, "violet"]
+            monkeypatch,
+            ["Python (FastAPI)", "3.13", "Vue 3", "npm", label, "violet"],
+            confirms=[False, True, False, True],
         )
-        assert asked[-2:] == ["UI kit:", "Default color scheme:"]
+        assert "Enable AI chat panel?" not in asked
+        order = ["UI kit:", "Enable OpenAPI code generation?", "Default color scheme:"]
+        assert [question for question in asked if question in order] == order
         assert config.frontend is not None
         assert (config.frontend.ui_kit, config.frontend.layout) == ("nuxt-ui", "sidebar")
         assert config.frontend.default_color_scheme == "violet"
@@ -370,7 +403,7 @@ class TestComponents:
     def test_shadcn_projects_select_every_component(self) -> None:
         _project(_frontend(), components=sorted(COMPONENT_REGISTRY)).validate()
 
-    def test_a_component_is_refused_with_its_replacement(self, nuxt_ui_selectable) -> None:
+    def test_a_component_is_refused_with_its_replacement(self) -> None:
         with pytest.raises(
             ValueError,
             match=r"Component 'Checkbox' renders only with UI kit shadcn; the project uses "
@@ -378,7 +411,7 @@ class TestComponents:
         ):
             _project(_frontend(ui_kit="nuxt-ui"), ["Checkbox"]).validate()
 
-    def test_a_child_is_refused_through_the_selected_component(self, nuxt_ui_selectable) -> None:
+    def test_a_child_is_refused_through_the_selected_component(self) -> None:
         with pytest.raises(ValueError) as caught:
             _project(_frontend(ui_kit="nuxt-ui"), ["NotificationCenter"]).validate()
         message = str(caught.value)
@@ -389,11 +422,11 @@ class TestComponents:
         assert "Use UPopover instead." in message
         assert "Component 'NotificationCenter' renders only with UI kit shadcn" in message
 
-    def test_a_kit_free_template_is_refused_through_its_child(self, nuxt_ui_selectable) -> None:
+    def test_a_kit_free_template_is_refused_through_its_child(self) -> None:
         with pytest.raises(ValueError, match="Component 'Console' needs 'StatCard'"):
             _project(_frontend(ui_kit="nuxt-ui"), ["Console"]).validate()
 
-    def test_a_kit_free_component_is_accepted(self, nuxt_ui_selectable) -> None:
+    def test_a_kit_free_component_is_accepted(self) -> None:
         _project(_frontend(ui_kit="nuxt-ui"), ["EntityList"]).validate()
 
     def test_projects_without_a_kit_skip_the_check(self) -> None:
@@ -437,9 +470,7 @@ class TestFragments:
         with pytest.raises(FragmentError, match="ui_kits"):
             Fragment(name="bad_kits", implementations=_IMPL, ui_kits=("",))
 
-    def test_a_fragment_declaring_other_kits_is_refused(
-        self, probe_fragment, nuxt_ui_selectable
-    ) -> None:
+    def test_a_fragment_declaring_other_kits_is_refused(self, probe_fragment) -> None:
         name = probe_fragment(("shadcn",))
         _check_fragment_ui_kits(_project(_frontend()), {name})
         with pytest.raises(

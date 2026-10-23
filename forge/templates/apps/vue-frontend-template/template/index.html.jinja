@@ -2,6 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+{%- if security_csp and ui_kit == 'nuxt-ui' %}
+    <!-- security.csp: nginx writes each response's nonce over the placeholder.
+         Vite adds its own csp-nonce meta tag; vaul-vue, behind Nuxt UI's
+         drawer, reads the nonce from this one's content attribute. -->
+    <meta property="csp-nonce" nonce="__CSP_NONCE__" content="__CSP_NONCE__" />
+{%- endif %}
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -9,8 +15,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>{{ app_title }}</title>
   </head>
-  <body class="min-h-screen bg-background antialiased" style="font-family: 'Inter', sans-serif">
+{%- if ui_kit == 'nuxt-ui' %}
+  <body class="bg-default text-default antialiased">
+    <div id="app" class="isolate"></div>
+{%- else %}
+  <body class="min-h-screen bg-background antialiased">
     <div id="app"></div>
+{%- endif %}
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

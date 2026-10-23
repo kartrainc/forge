@@ -1,0 +1,20 @@
+<script setup lang="ts">
+import { ConfigProvider } from 'radix-vue'
+import { Toaster } from 'vue-sonner'
+import { cspNonce } from './providers/csp'
+
+// The response's CSP nonce, for the <style> elements radix-vue inserts.
+const nonce = cspNonce()
+</script>
+
+<template>
+  <ConfigProvider :nonce="nonce">
+    <RouterView />
+    <Toaster
+      position="bottom-right"
+      :expand="true"
+      rich-colors
+      close-button
+    />
+  </ConfigProvider>
+</template>

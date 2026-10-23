@@ -35,7 +35,9 @@ export function testCrud(plural: string, singular: string, backend: string) {
       await mockHealth(page);
       await page.goto('/');
       await expectHealthyDashboard(page);
-      await expect.poll(() => page.evaluate(() => Boolean((window as any).__coverage__))).toBe(true);
+      if (process.env.FORGE_BROWSER_COVERAGE) {
+        await expect.poll(() => page.evaluate(() => Boolean((window as any).__coverage__))).toBe(true);
+      }
       await page.locator(`a[href="/${plural}"]`).first().click();
       await page.getByText(`New ${singular[0].toUpperCase() + singular.slice(1)}`, { exact: true }).click();
       await field('name-input').fill('Quality example');
@@ -60,11 +62,14 @@ export function testCrud(plural: string, singular: string, backend: string) {
       await expect(page.getByText('Updated example', { exact: true })).toHaveCount(0);
       expect(writes.map(write => write.method)).toEqual(['POST', 'PATCH', 'DELETE']);
     } finally {
-      const coverage = await page.evaluate(() => (window as any).__coverage__);
-      expect(coverage, 'Browser instrumentation must produce real coverage').toBeTruthy();
-      const directory = process.env.FORGE_BROWSER_COVERAGE!;
-      await mkdir(directory, { recursive: true });
-      await writeFile(path.join(directory, `${testInfo.parallelIndex}-${Date.now()}.json`), JSON.stringify(coverage));
+      // Only the instrumented run collects coverage (FORGE_BROWSER_COVERAGE).
+      const directory = process.env.FORGE_BROWSER_COVERAGE;
+      if (directory) {
+        const coverage = await page.evaluate(() => (window as any).__coverage__);
+        expect(coverage, 'Browser instrumentation must produce real coverage').toBeTruthy();
+        await mkdir(directory, { recursive: true });
+        await writeFile(path.join(directory, `${testInfo.parallelIndex}-${Date.now()}.json`), JSON.stringify(coverage));
+      }
     }
   });
 }

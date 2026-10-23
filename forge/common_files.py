@@ -100,6 +100,18 @@ def apply_common_files(
             project_root / "apps" / config.frontend_slug / "scripts/remap-browser.mjs",
             collector,
         )
+    from forge.frontend_csp import csp_enabled  # noqa: PLC0415
+
+    if csp_enabled(config):
+        # The browser suites against the production build under the policy
+        # nginx.conf sends (security.csp); the rendered lane runs them.
+        frontend = project_root / "apps" / config.frontend_slug
+        _copy_if_absent(COMMON_DIR / "serve-csp.mjs", frontend / "scripts/serve-csp.mjs", collector)
+        _copy_if_absent(
+            COMMON_DIR / "playwright.csp.config.ts",
+            frontend / "playwright.csp.config.ts",
+            collector,
+        )
 
 
 def _ci_source_for(bc: BackendConfig) -> Path | None:

@@ -488,6 +488,7 @@ class TestCollectInputs:
                 "3.13",
                 "Vue 3",  # frontend framework
                 "npm",  # package manager
+                "shadcn-vue (Radix Vue + Tailwind CSS 4)",  # UI kit (Vue offers two)
                 "blue",  # color scheme
                 "Sidebar App Shell",  # app-shell layout (Vue now offers >1)
             ]
@@ -496,7 +497,7 @@ class TestCollectInputs:
             [
                 False,  # add another backend? no
                 True,  # enable keycloak auth? yes
-                False,  # enable chat? no
+                False,  # enable chat? no (asked after the kit, which has chat)
                 False,  # enable openapi? no
                 True,  # proceed with generation? yes
             ]

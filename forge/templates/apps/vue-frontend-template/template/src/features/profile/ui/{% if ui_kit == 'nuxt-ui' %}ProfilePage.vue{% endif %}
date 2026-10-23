@@ -1,0 +1,76 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useAuth } from '@/shared/composables/useAuth'
+
+const { user, logout } = useAuth()
+
+const initials = computed(() => {
+  if (!user.value) return '?'
+  return (
+    (user.value.firstName?.[0] ?? '') + (user.value.lastName?.[0] ?? '')
+  ).toUpperCase() || '?'
+})
+
+const infoFields = computed(() => {
+  if (!user.value) return []
+  return [
+    { icon: 'i-lucide-mail', label: 'Email', value: user.value.email },
+    { icon: 'i-lucide-hash', label: 'User ID', value: user.value.id },
+    { icon: 'i-lucide-building-2', label: 'Customer ID', value: user.value.customerId },
+    { icon: 'i-lucide-building-2', label: 'Organization', value: user.value.orgId ?? 'N/A' },
+  ]
+})
+</script>
+
+<template>
+  <div class="mx-auto max-w-lg space-y-6 py-6">
+    <!-- Avatar & Identity -->
+    <div class="flex flex-col items-center gap-3">
+      <UAvatar :text="initials" size="3xl" data-test="profile-initials" />
+      <div class="text-center">
+        <h2 class="text-xl font-semibold text-highlighted">
+          {{ user?.firstName }} {{ user?.lastName }}
+        </h2>
+        <p class="text-sm text-muted">@{{ user?.username }}</p>
+      </div>
+      <div class="flex flex-wrap justify-center gap-2">
+        <UBadge
+          v-for="role in user?.roles"
+          :key="role"
+          :label="role"
+          icon="i-lucide-shield"
+          color="neutral"
+          variant="subtle"
+          data-test="profile-role"
+        />
+      </div>
+    </div>
+
+    <USeparator />
+
+    <UCard>
+      <div class="space-y-4">
+        <div v-for="field in infoFields" :key="field.label" class="flex items-center gap-3">
+          <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-elevated">
+            <UIcon :name="field.icon" class="size-4 text-muted" />
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs text-muted">{{ field.label }}</p>
+            <p class="text-sm font-medium break-all">{{ field.value }}</p>
+          </div>
+        </div>
+      </div>
+    </UCard>
+
+    <USeparator />
+
+    <UButton
+      label="Sign Out"
+      icon="i-lucide-log-out"
+      color="error"
+      variant="outline"
+      block
+      @click="logout()"
+    />
+  </div>
+</template>

@@ -1,0 +1,60 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useAuth } from '@/shared/composables/useAuth'
+
+const router = useRouter()
+const route = useRoute()
+const { isAuthenticated, login } = useAuth()
+
+const authDisabled = import.meta.env.VITE_AUTH_DISABLED === 'true'
+const isLoading = ref(false)
+
+onMounted(() => {
+  if (isAuthenticated.value) {
+    const redirect = (route.query.redirect as string) || '/'
+    router.replace(redirect)
+  }
+})
+
+function handleLogin() {
+  isLoading.value = true
+  if (authDisabled) {
+    login()
+    const redirect = (route.query.redirect as string) || '/'
+    router.replace(redirect)
+  } else {
+    const redirect = (route.query.redirect as string) || '/'
+    login(redirect)
+  }
+}
+</script>
+
+<template>
+  <div class="flex min-h-svh items-center justify-center bg-muted p-4">
+    <UCard class="w-full max-w-sm" :ui="{ body: 'p-8 sm:p-8 space-y-6 text-center' }">
+      <div class="mx-auto flex size-20 items-center justify-center rounded-2xl bg-primary text-inverted">
+        <UIcon name="i-lucide-sparkles" class="size-10" />
+      </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-highlighted">Welcome</h1>
+        <p class="mt-1.5 text-sm text-muted">Sign in to continue</p>
+      </div>
+      <UButton
+        data-test="login-submit-btn"
+        :label="isLoading ? 'Signing in...' : 'Sign in'"
+        :icon="isLoading ? undefined : 'i-lucide-log-in'"
+        :loading="isLoading"
+        size="xl"
+        block
+        @click="handleLogin"
+      />
+      <UBadge
+        v-if="authDisabled"
+        label="Dev Mode - Auth Disabled"
+        color="warning"
+        variant="subtle"
+      />
+    </UCard>
+  </div>
+</template>

@@ -15,15 +15,25 @@ export interface PageHeaderAction {
   /** Stable key for `v-for` rendering. */
   key: string
   label: string
+{%- if ui_kit == 'nuxt-ui' %}
+  /** A component, or an icon name such as `i-lucide-plus`. */
+  icon?: Component | string
+{%- else %}
   icon?: Component
+{%- endif %}
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
   disabled?: boolean
   onClick: () => void
 }
 
 export interface PageHeaderConfig {
+{%- if ui_kit == 'nuxt-ui' %}
+  /** Leading icon rendered before the title: a component, or an icon name. */
+  icon?: Component | string
+{%- else %}
   /** Leading icon rendered before the title. */
   icon?: Component
+{%- endif %}
   /** Primary heading. When set, AppHeader renders this instead of breadcrumbs. */
   title?: string
   /** Secondary line beneath the title. */

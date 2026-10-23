@@ -1,0 +1,41 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { BadgeProps } from '@nuxt/ui'
+
+const props = defineProps<{
+  status: 'UP' | 'DOWN' | 'DEGRADED' | string
+}>()
+
+const color = computed<BadgeProps['color']>(() => {
+  switch (props.status) {
+    case 'UP':
+      return 'success'
+    case 'DEGRADED':
+      return 'warning'
+    case 'DOWN':
+      return 'error'
+    default:
+      return 'neutral'
+  }
+})
+
+const dotColor = computed(() => {
+  switch (props.status) {
+    case 'UP':
+      return 'bg-success'
+    case 'DEGRADED':
+      return 'bg-warning'
+    case 'DOWN':
+      return 'bg-error'
+    default:
+      return 'bg-muted'
+  }
+})
+</script>
+
+<template>
+  <UBadge :color="color" variant="subtle" class="gap-1.5">
+    <span data-test="health-dot" :class="['size-2 rounded-full', dotColor]" />
+    {{ status }}
+  </UBadge>
+</template>

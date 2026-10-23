@@ -60,6 +60,14 @@ jobs:
       fail-fast: false
       matrix:
         language: [python, node, rust, vue, svelte]
+        kit: [default]
+        include:
+          # The Vue template on Nuxt UI (ADR-011): the first consumer's shape,
+          # auth on, chat off, two CRUD features. A kit value other than
+          # `default` makes this a job of its own.
+          - language: vue
+            kit: nuxt-ui
+            args: --ui-kit nuxt-ui --auth --features items,orders
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -95,11 +103,11 @@ jobs:
         run: echo "npm_config_before=$FORGE_NPM_SNAPSHOT" >> "$GITHUB_ENV"
       - run: uv sync --locked --dev
       - name: Rendered application and shared-runtime gates
-        run: uv run --locked python scripts/check_generated_quality.py --language ${{ matrix.language }} --output .artifacts/generated-${{ matrix.language }}
+        run: uv run --locked python scripts/check_generated_quality.py --language ${{ matrix.language }} ${{ matrix.args }} --output .artifacts/generated-${{ matrix.language }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: generated-${{ matrix.language }}-coverage
+          name: generated-${{ matrix.language }}-${{ matrix.kit }}-coverage
           path: .artifacts/generated-*/.forge/coverage/
           include-hidden-files: true
           if-no-files-found: error

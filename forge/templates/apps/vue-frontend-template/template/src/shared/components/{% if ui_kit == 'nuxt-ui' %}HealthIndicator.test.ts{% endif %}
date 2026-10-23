@@ -1,0 +1,21 @@
+import { describe, it, expect } from 'vitest'
+import { mount } from '@vue/test-utils'
+import HealthIndicator from './HealthIndicator.vue'
+
+describe('HealthIndicator', () => {
+  it('renders the status text', () => {
+    const wrapper = mount(HealthIndicator, { props: { status: 'UP' } })
+    expect(wrapper.text()).toContain('UP')
+  })
+
+  it.each([
+    ['UP', 'bg-success'],
+    ['DEGRADED', 'bg-warning'],
+    ['DOWN', 'bg-error'],
+    ['UNKNOWN', 'bg-muted'],
+  ])('colours the dot for %s', (status, colour) => {
+    const dot = mount(HealthIndicator, { props: { status } }).get('[data-test="health-dot"]')
+    expect(dot.classes()).toContain('rounded-full')
+    expect(dot.classes()).toContain(colour)
+  })
+})

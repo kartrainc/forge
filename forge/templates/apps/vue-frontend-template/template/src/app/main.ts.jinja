@@ -1,13 +1,27 @@
+// First import: it configures zod before any schema is built.
+{%- if ui_kit == 'nuxt-ui' %}
+import { cspNonce } from './providers/csp'
+{%- else %}
+import './providers/csp'
+{%- endif %}
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { VueQueryPlugin } from '@tanstack/vue-query'
+{%- if ui_kit == 'nuxt-ui' %}
+import ui from '@nuxt/ui/vue-plugin'
+{%- endif %}
 
 import App from './App.vue'
 import router from './router'
 import { queryClient } from './providers/query-client'
+{%- if ui_kit == 'nuxt-ui' %}
+import { createAppHead } from './providers/head'
+{%- endif %}
 import { useAuth } from '@/shared/composables/useAuth'
 import { configureApiClient } from '@/shared/api/client'
+{%- if ui_kit == 'shadcn' %}
 import { useSettingsStore } from '@/shared/stores/settings.store'
+{%- endif %}
 
 import './styles/main.css'
 
@@ -24,6 +38,11 @@ async function bootstrap() {
   app.use(pinia)
   app.use(router)
   app.use(VueQueryPlugin, { queryClient })
+{%- if ui_kit == 'nuxt-ui' %}
+  // Nuxt UI renders its palette through the head installed before it.
+  app.use(createAppHead(cspNonce()))
+  app.use(ui)
+{%- endif %}
 
   // Initialize auth (handles VITE_AUTH_DISABLED internally)
   const auth = useAuth()
@@ -44,6 +63,7 @@ async function bootstrap() {
     onUnauthorized: () => {},
   })
 {%- endif %}
+{%- if ui_kit == 'shadcn' %}
 
   // Apply stored theme
   const settingsStore = useSettingsStore()
@@ -57,6 +77,7 @@ async function bootstrap() {
         settingsStore.applyTheme()
       }
     })
+{%- endif %}
 
   app.mount('#app')
 }

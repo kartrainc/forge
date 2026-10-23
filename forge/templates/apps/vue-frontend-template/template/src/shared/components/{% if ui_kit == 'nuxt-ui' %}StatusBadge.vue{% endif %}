@@ -1,0 +1,53 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { BadgeProps } from '@nuxt/ui'
+
+export type StatusVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
+
+const props = defineProps<{
+  /** Status key. Maps to a built-in variant for DRAFT / ACTIVE / ARCHIVED. */
+  status: string
+  /** Override the variant inferred from `status` to render an arbitrary status. */
+  variant?: StatusVariant
+  /** Override the displayed text (defaults to a humanized form of `status`). */
+  label?: string
+  /** Override the leading icon (an icon name, e.g. `i-lucide-circle-alert`). */
+  icon?: string
+}>()
+
+const COLORS: Record<StatusVariant, BadgeProps['color']> = {
+  neutral: 'neutral',
+  success: 'success',
+  warning: 'warning',
+  danger: 'error',
+  info: 'info',
+}
+
+const BUILTIN: Record<string, { icon: string; label: string; variant: StatusVariant }> = {
+  DRAFT: { icon: 'i-lucide-pencil', label: 'Draft', variant: 'warning' },
+  ACTIVE: { icon: 'i-lucide-circle-check', label: 'Active', variant: 'success' },
+  ARCHIVED: { icon: 'i-lucide-archive', label: 'Archived', variant: 'neutral' },
+}
+
+const config = computed(() => {
+  const builtin = BUILTIN[props.status]
+  const variant = props.variant ?? builtin?.variant ?? 'neutral'
+  return {
+    icon: props.icon ?? builtin?.icon ?? 'i-lucide-pencil',
+    label: props.label ?? builtin?.label ?? props.status,
+    variant,
+    color: COLORS[variant],
+  }
+})
+</script>
+
+<template>
+  <UBadge
+    :color="config.color"
+    :icon="config.icon"
+    :label="config.label"
+    :data-variant="config.variant"
+    variant="subtle"
+    class="rounded-full"
+  />
+</template>

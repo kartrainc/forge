@@ -9,7 +9,11 @@
     "codegen": "openapi-ts",
 {%- endif %}
     "dev": "vite",
+{%- if ui_kit == 'nuxt-ui' %}
+    "build": "vite build && npm run type-check",
+{%- else %}
     "build": "npm run type-check && vite build",
+{%- endif %}
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -38,6 +42,20 @@
     "@vue-flow/minimap": "^1.5.4",
     "dagre": "^0.8.5",
 {%- endif %}
+{%- if ui_kit == 'nuxt-ui' %}
+    "@iconify-json/lucide": "^1.2.145",
+    "@microsoft/fetch-event-source": "^2.0.1",
+    "@nuxt/ui": "^{{ nuxt_ui_version }}",
+    "@tanstack/vue-query": "^5.104.1",
+    "@tanstack/vue-virtual": "^3.13.39",
+    "@unhead/vue": "^3.4.3",
+    "@vueuse/core": "^15.0.0",
+    "ky": "^2.1.0",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
+    "vue-router": "^5.4.0",
+    "zod": "^4.6.5"
+{%- else %}
     "@microsoft/fetch-event-source": "^2.0.1",
     "@tanstack/vue-query": "^5.104.1",
     "@tanstack/vue-table": "^9.2.7",
@@ -55,6 +73,7 @@
     "vue-router": "^5.4.0",
     "vue-sonner": "^2.0.9",
     "zod": "^4.6.5"
+{%- endif %}
   },
   "overrides": { "vitest": "5.0.3", "cookie@<0.7.0": "0.7.2", "js-yaml@>=4.0.0 <4.3.2": "4.3.2" },
   "devDependencies": {
@@ -67,7 +86,9 @@
     "@types/dagre": "^0.7.54",
 {%- endif %}
     "@playwright/test": "^1.64.0",
+{%- if ui_kit == 'shadcn' %}
     "@tailwindcss/vite": "^4.3.3",
+{%- endif %}
     "@testing-library/vue": "^8.1.0",
     "@tsconfig/node22": "^22.0.6",
     "@types/node": "^22.15.3",
@@ -76,7 +97,9 @@
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.9.1",
+{%- if ui_kit == 'shadcn' %}
     "autoprefixer": "^10.6.1",
+{%- endif %}
     "eslint": "^10.12.0",
     "eslint-plugin-vue": "^10.11.1",
     "globals": "^17.13.0",
@@ -84,7 +107,9 @@
     "msw": "^3.0.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
+{%- if ui_kit == 'shadcn' %}
     "unplugin-auto-import": "^21.1.0",
+{%- endif %}
     "vite": "^8.3.4",
     "vitest": "5.0.3",
     "@vitest/coverage-v8": "5.0.3",

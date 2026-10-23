@@ -60,10 +60,6 @@
       "size": 343,
       "sha256": "72fe8243235d907b"
     },
-    "deploy/infra/nginx-csp.conf": {
-      "size": 1661,
-      "sha256": "22237aeddb41cfae"
-    },
     "docker-compose.yml": {
       "size": 8820,
       "sha256": "9a94950eef4a8084"

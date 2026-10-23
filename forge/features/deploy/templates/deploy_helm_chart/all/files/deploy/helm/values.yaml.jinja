@@ -129,6 +129,19 @@ frontend:
   # Ingress handles /api routing, so the pod doesn't proxy backends. Override
   # with your own server block if needed.
   nginxConf: ""
+  # security.csp: the headers the default nginx config sends with every
+  # response, and the Content-Security-Policy it sends with index.html
+  # ($request_id stands for each response's nonce). Empty when the option is
+  # off; unused when nginxConf is set.
+{%- if topology.frontend_security_headers %}
+  securityHeaders:
+{%- for name, value in topology.frontend_security_headers %}
+    {{ name }}: "{{ value }}"
+{%- endfor %}
+{%- else %}
+  securityHeaders: {}
+{%- endif %}
+  contentSecurityPolicy: "{{ topology.frontend_csp }}"
   resources:
     requests:
       cpu: 50m

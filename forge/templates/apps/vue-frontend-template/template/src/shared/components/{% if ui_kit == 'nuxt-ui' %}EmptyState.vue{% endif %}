@@ -1,0 +1,15 @@
+<script setup lang="ts">
+defineProps<{
+  message: string
+  /** An icon name, e.g. `i-lucide-package`. */
+  icon?: string
+}>()
+</script>
+
+<template>
+  <UEmpty :icon="icon || 'i-lucide-inbox'" :description="message" variant="naked">
+    <template #actions>
+      <slot name="action" />
+    </template>
+  </UEmpty>
+</template>

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
+import { ConfigProvider } from 'radix-vue'
 import { Toaster } from 'vue-sonner'
 import ConfirmHost from '@/shared/components/ConfirmHost.vue'
 import { useAiChat } from '@/features/ai_chat'
+import { cspNonce } from './providers/csp'
 
 const { toggleChat } = useAiChat()
 
@@ -15,15 +17,20 @@ function handleKeydown(e: KeyboardEvent) {
 
 onMounted(() => document.addEventListener('keydown', handleKeydown))
 onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
+
+// The response's CSP nonce, for the <style> elements radix-vue inserts.
+const nonce = cspNonce()
 </script>
 
 <template>
-  <RouterView />
-  <ConfirmHost />
-  <Toaster
-    position="bottom-right"
-    :expand="true"
-    rich-colors
-    close-button
-  />
+  <ConfigProvider :nonce="nonce">
+    <RouterView />
+    <ConfirmHost />
+    <Toaster
+      position="bottom-right"
+      :expand="true"
+      rich-colors
+      close-button
+    />
+  </ConfigProvider>
 </template>

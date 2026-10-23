@@ -30,7 +30,7 @@ from forge.appliers.files import (
     _is_ephemeral_path,
     _render_or_read,
 )
-from forge.appliers.plan import FragmentPlan
+from forge.appliers.plan import FragmentPlan, kit_replaced_paths
 from forge.capability_resolver import resolve
 from forge.config import BackendConfig, BackendLanguage, FrontendFramework, ProjectConfig
 from forge.errors import PROVENANCE_MANIFEST_MISSING, ProvenanceError
@@ -301,10 +301,15 @@ def _decide_for_fragment(
             impl,
             fragment_name,
             options=option_values,
+            ui_kit=(
+                config.frontend.ui_kit
+                if config.frontend and config.frontend.framework == FrontendFramework.VUE
+                else None
+            ),
         )
     except Exception:  # noqa: BLE001 — the apply pass would surface this; preview gracefully.
         return []
-    if fp.files_dir is None:
+    if fp.files_dir is None and fp.kit_files_dir is None:
         return []
 
     # Mirror the real applier (appliers/files.py::copy_files): ``*.jinja``
@@ -316,11 +321,19 @@ def _decide_for_fragment(
         config, backend_label, backend_language, backend_dir, project_root, option_values, impl
     )
 
+    # As the applier does, ``files-<kit>/`` replaces the same paths of ``files/``.
+    replaced = kit_replaced_paths(fp.kit_files_dir)
+    sources = [
+        (tree, src_path)
+        for tree in (fp.files_dir, fp.kit_files_dir)
+        if tree is not None
+        for src_path in tree.rglob("*")
+    ]
     out: list[FilePlanEntry] = []
-    for src_path in fp.files_dir.rglob("*"):
+    for tree, src_path in sources:
         if not src_path.is_file():
             continue
-        rel = src_path.relative_to(fp.files_dir)
+        rel = src_path.relative_to(tree)
         # Skip ephemeral build artefacts (``__pycache__``, caches) the applier
         # never copies — otherwise they surface as phantom ``new`` entries.
         if _is_ephemeral_path(rel):
@@ -330,6 +343,8 @@ def _decide_for_fragment(
         is_jinja = src_path.name.endswith(_JINJA_SUFFIX)
         if is_jinja:
             rel = rel.with_name(rel.name[: -len(_JINJA_SUFFIX)])
+        if tree == fp.files_dir and rel in replaced:
+            continue
         dst = backend_dir / rel
         try:
             rel_key = dst.relative_to(project_root).as_posix()

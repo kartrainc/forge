@@ -220,17 +220,9 @@ def _collect_inputs() -> ProjectConfig | None:
             fe_port = _ask_port("Frontend server port:", default="5173")
 
         include_auth = _ask_confirm("Enable Keycloak authentication?", default=True)
-        include_chat = _ask_confirm("Enable AI chat panel?", default=False)
-        include_openapi = False
-        if framework == FrontendFramework.VUE:
-            include_openapi = _ask_confirm("Enable OpenAPI code generation?", default=False)
-        elif framework == FrontendFramework.FLUTTER:
-            # Flutter's retrofit-generated client is wired into the home feature,
-            # so OpenAPI generation is mandatory (see FrontendConfig.validate).
-            include_openapi = True
 
-        # UI kit — only prompt when the framework offers a choice. The colour
-        # schemes and layouts offered next depend on it.
+        # UI kit — only prompt when the framework offers a choice. Chat, the
+        # colour schemes and the layouts offered next depend on it.
         from forge.ui_kits import (  # noqa: PLC0415
             DEFAULT_UI_KIT,
             applies_to,
@@ -248,6 +240,17 @@ def _collect_inputs() -> ProjectConfig | None:
             }
             ui_kit = _kit_labels[_ask_select("UI kit:", choices=list(_kit_labels))]
         _kit = get_ui_kit(ui_kit)
+
+        include_chat = False
+        if _kit is None or _kit.chat:
+            include_chat = _ask_confirm("Enable AI chat panel?", default=False)
+        include_openapi = False
+        if framework == FrontendFramework.VUE:
+            include_openapi = _ask_confirm("Enable OpenAPI code generation?", default=False)
+        elif framework == FrontendFramework.FLUTTER:
+            # Flutter's retrofit-generated client is wired into the home feature,
+            # so OpenAPI generation is mandatory (see FrontendConfig.validate).
+            include_openapi = True
 
         color_scheme = "blue"
         if framework == FrontendFramework.VUE:

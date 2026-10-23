@@ -1459,21 +1459,20 @@ ENDPOINTS: /api/v1/webhooks (CRUD + /{id}/test fire)
 
 ### `security.csp`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** —
 
-_Strict Content-Security-Policy + HSTS + X-Content-Type-Options via nginx._
+_Nonce-based Content-Security-Policy for the Vue frontend, served by nginx._
 
-Drops ``deploy/infra/nginx-csp.conf`` with production-ready strict CSP (no
-unsafe-inline, strict-dynamic, nonce-based script tags), HSTS, and
-related defence-in-depth headers. ``include deploy/infra/nginx-csp.conf;`` from
-any nginx server{} block.
+The frontend's nginx configuration (``apps/<frontend>/nginx.conf`` and the Helm
+chart's default server block) sends a strict Content-Security-Policy with
+``index.html``: no ``'unsafe-inline'`` or ``'unsafe-eval'``, scripts and
+stylesheets admitted by a per-response nonce (``$request_id``, written over the
+build's ``__CSP_NONCE__`` placeholder). Every response also carries
+X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
+Permissions-Policy. Strict-Transport-Security is left to the TLS terminator.
 
-BACKENDS: all (project-scoped)
-DEV NOTE: relax the ``connect-src`` directive during local development
-if your dev server streams from a non-default origin.
-
-**Enables fragments:**
-- on `true` → `security_csp`
+FRONTENDS: vue (Svelte, Flutter and plugin frontends are served without it)
+CUSTOMISE: add the origins your frontend calls to ``connect-src`` in nginx.conf.
 
 <!-- END GENERATED:OPTIONS-CATALOG -->
 

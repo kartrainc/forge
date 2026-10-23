@@ -19,4 +19,4 @@ proposals.
 | [006](ADR-006-forge-toml-provenance-manifest.md) | `forge.toml` provenance manifest as round-trip source of truth | Accepted |
 | [007](ADR-007-separate-frontend-templates.md) | Three separate frontend templates instead of one with adapters | Accepted |
 | [008](ADR-008-codex-review-worktree.md) | Codex review runs in a separate git worktree | Accepted |
-| [011](ADR-011-ui-kit-option-for-the-vue-template.md) | A UI kit option for the Vue template | Proposed |
+| [011](ADR-011-ui-kit-option-for-the-vue-template.md) | A UI kit option for the Vue template | Accepted |

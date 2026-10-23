@@ -6,7 +6,10 @@ The declarations are only as good as the files behind them, so this lint reads
 the files. Every Vue-shipping fragment (each component feature compiles to one)
 that renders with ``nuxt-ui`` — by declaring it, or by declaring nothing, which
 means any kit — must not import the shadcn kit or use its colour token classes,
-which Nuxt UI does not define. Every declared kit must be a registered one.
+which Nuxt UI does not define. The files read are the ones the fragment renders
+under that kit: its ``files/`` tree, with the paths its ``files-nuxt-ui/`` tree
+replaces swapped for that tree's files. Every declared kit must be a registered
+one, and so must every ``files-<kit>/`` tree's kit.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import pytest
 
 from forge import layout_variants as lv
 from forge import ui_kits
+from forge.appliers.plan import kit_replaced_paths
 from forge.components import COMPONENT_REGISTRY
 from forge.config import FrontendFramework
 from forge.fragments import FRAGMENT_REGISTRY
@@ -38,17 +42,31 @@ _SHADCN_CLASS = re.compile(
 
 
 def _vue_fragments() -> dict[str, list[Path]]:
-    """Fragment name → its ``files/`` trees, for every fragment shipping ``.vue`` files."""
+    """Fragment name → its directories, for every fragment shipping ``.vue`` files."""
     found: dict[str, list[Path]] = {}
     for name, fragment in FRAGMENT_REGISTRY.items():
-        trees = [
-            _resolve_fragment_dir(impl.fragment_dir) / "files"
-            for impl in fragment.implementations.values()
-        ]
-        trees = [tree for tree in trees if tree.is_dir() and any(tree.rglob("*.vue"))]
-        if trees:
-            found[name] = trees
+        dirs = sorted(
+            {_resolve_fragment_dir(i.fragment_dir) for i in fragment.implementations.values()}
+        )
+        dirs = [d for d in dirs if any(d.glob("files*/**/*.vue"))]
+        if dirs:
+            found[name] = dirs
     return found
+
+
+def _rendered_files(fragment_dir: Path, kit: str) -> list[tuple[str, Path]]:
+    """The files a fragment directory renders under ``kit``, as the applier picks them."""
+    shared, own = fragment_dir / "files", fragment_dir / f"files-{kit}"
+    replaced = kit_replaced_paths(own if own.is_dir() else None)
+    files = []
+    for tree in (shared, own):
+        if not tree.is_dir():
+            continue
+        for path in sorted(tree.rglob("*")):
+            rel = path.relative_to(tree)
+            if path.is_file() and not (tree == shared and rel in replaced):
+                files.append((f"{tree.name}/{rel.as_posix()}", path))
+    return files
 
 
 def _kits(fragment_name: str) -> tuple[str, ...]:
@@ -56,14 +74,13 @@ def _kits(fragment_name: str) -> tuple[str, ...]:
     return declared or tuple(ui_kits.UI_KITS)
 
 
-def _shadcn_dependencies(trees: list[Path]) -> list[str]:
+def _shadcn_dependencies(fragment_dirs: list[Path], kit: str = "nuxt-ui") -> list[str]:
     hits = []
-    for tree in trees:
-        for path in sorted(tree.rglob("*")):
+    for fragment_dir in fragment_dirs:
+        for rel, path in _rendered_files(fragment_dir, kit):
             if path.suffix not in {".vue", ".ts"}:
                 continue
             text = path.read_text(encoding="utf-8")
-            rel = path.relative_to(tree).as_posix()
             hits += [f"{rel}: imports {m}" for m in sorted(set(_SHADCN_IMPORT.findall(text)))]
             hits += [f"{rel}: class {m}" for m in sorted(set(_SHADCN_CLASS.findall(text)))]
     return hits
@@ -89,6 +106,30 @@ def test_fragments_rendering_with_nuxt_ui_do_not_depend_on_shadcn(fragment_name:
 def test_the_shadcn_markers_catch_a_shadcn_tree() -> None:
     # The Checkbox component is built on radix-vue and the kit's tokens.
     assert _shadcn_dependencies(_vue_fragments()["component_Checkbox"])
+
+
+def test_a_kit_tree_replaces_the_shared_files_it_names() -> None:
+    # The session-timeout fragment ships its dialog for both kits.
+    (fragment_dir,) = _vue_fragments()["platform_auth_session_timeout_vue"]
+    nuxt = dict(_rendered_files(fragment_dir, "nuxt-ui"))
+    shadcn = dict(_rendered_files(fragment_dir, "shadcn"))
+    modal = "src/features/auth/components/SessionTimeoutModal.vue"
+    assert f"files-nuxt-ui/{modal}" in nuxt and f"files/{modal}" not in nuxt
+    assert f"files/{modal}" in shadcn and f"files-nuxt-ui/{modal}" not in shadcn
+    composable = "files/src/shared/composables/useSessionTimeout.ts"
+    assert composable in nuxt and composable in shadcn
+    assert "<UModal" in nuxt[f"files-nuxt-ui/{modal}"].read_text(encoding="utf-8")
+
+
+def test_kit_trees_name_registered_kits() -> None:
+    kits = {
+        tree.name.removeprefix("files-")
+        for dirs in _vue_fragments().values()
+        for fragment_dir in dirs
+        for tree in fragment_dir.glob("files-*")
+        if tree.is_dir()
+    }
+    assert kits and kits <= set(ui_kits.UI_KITS)
 
 
 def test_declared_kits_are_registered() -> None:

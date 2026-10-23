@@ -1,4 +1,4 @@
-"""CSP nginx config + SBOM workflow."""
+"""Frontend content-security policy + SBOM workflow."""
 
 from __future__ import annotations
 

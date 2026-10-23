@@ -7,6 +7,9 @@ dist-ssr/
 
 # Generated files
 src/auto-imports.d.ts
+{%- if ui_kit == 'nuxt-ui' %}
+src/components.d.ts
+{%- endif %}
 
 # Editor
 .vscode/*

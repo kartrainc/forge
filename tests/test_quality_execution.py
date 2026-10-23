@@ -16,6 +16,7 @@ from forge.config import (
     FrontendFramework,
     ProjectConfig,
 )
+from forge.quality.csp import admitted, check_content_security
 from forge.quality.dependencies import dependencies
 from forge.quality.model import write_recipe
 from forge.quality.runner import _test_count, run_native, run_suites
@@ -156,6 +157,8 @@ def test_browser_remaps_original_sources(service, monkeypatch):
     root, directory, source = service
 
     def playwright(argv, **kwargs):
+        # The browser suites mock the API in the page; no gateway serves /auth.
+        assert kwargs["env"]["VITE_AUTH_DISABLED"] == "true"
         kwargs["stdout"].write(json.dumps({"stats": {"expected": 2, "unexpected": 0, "flaky": 0}}))
         return subprocess.CompletedProcess(argv, 0)
 
@@ -167,6 +170,94 @@ def test_browser_remaps_original_sources(service, monkeypatch):
     monkeypatch.setattr("forge.quality.runner._execute", remap)
     output = run_native(root, {"name": "api", "path": "services/api", "language": "vue"}, "e2e")
     assert json.loads((root / output).read_text(encoding="utf-8"))["tests"] == 2
+
+
+_PALETTE = {
+    "effective-directive": "style-src-elem",
+    "blocked-uri": "inline",
+    "script-sample": "@layer theme {\n  :root, :host {\n  --ui-c",
+}
+_TRANSITION = {
+    "effective-directive": "style-src-elem",
+    "blocked-uri": "inline",
+    "script-sample": "*,*::before,*::after{-webkit-transition:",
+}
+_ICON_FETCH = {
+    "document-uri": "http://127.0.0.1:4174/",
+    "effective-directive": "connect-src",
+    "blocked-uri": "https://api.iconify.design/lucide.json",
+    "script-sample": "",
+}
+
+
+def _content_security(tmp_path, monkeypatch, reports, stats=None):
+    service = tmp_path / "apps" / "web"
+    service.mkdir(parents=True)
+    (service / "playwright.csp.config.ts").write_text("export default {}\n", encoding="utf-8")
+    monkeypatch.setenv("FORGE_BROWSER_COVERAGE", "/coverage")
+    calls = []
+
+    def run(argv, **kwargs):
+        env = kwargs["env"]
+        calls.append(argv[:3])
+        # The production build, without instrumentation, auth off, reporting.
+        assert "FORGE_BROWSER_COVERAGE" not in env and env["VITE_AUTH_DISABLED"] == "true"
+        if argv[:3] == ["npx", "--no-install", "playwright"]:
+            with open(env["FORGE_CSP_REPORT"], "w", encoding="utf-8") as stream:
+                stream.writelines(json.dumps(report) + "\n" for report in reports)
+            kwargs["stdout"].write(
+                json.dumps({"stats": stats or {"expected": 3, "unexpected": 0, "flaky": 0}})
+            )
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("forge.quality.csp.subprocess.run", run)
+    result = check_content_security(service, tmp_path / "out")
+    assert calls == [["npm", "run", "build"], ["npx", "--no-install", "playwright"]]
+    return result
+
+
+def test_content_security_admits_only_the_known_upstream_elements(tmp_path, monkeypatch):
+    result = _content_security(tmp_path, monkeypatch, [_PALETTE, _TRANSITION, _TRANSITION])
+    assert result["passed"] is True
+    assert result["violations"] == []
+    assert result["admitted"] == {
+        "Nuxt UI's temporary palette copy (Vue mode)": 1,
+        "VueUse's colour-mode transition guard": 2,
+    }
+
+
+def test_content_security_fails_on_any_other_report(tmp_path, monkeypatch):
+    # An icon fetched at runtime instead of bundled is a connect-src report.
+    result = _content_security(tmp_path, monkeypatch, [_PALETTE, _ICON_FETCH])
+    assert result["passed"] is False
+    assert [v["blocked-uri"] for v in result["violations"]] == [_ICON_FETCH["blocked-uri"]]
+
+
+def test_content_security_fails_when_a_suite_fails(tmp_path, monkeypatch):
+    stats = {"expected": 1, "unexpected": 1, "flaky": 0}
+    result = _content_security(tmp_path, monkeypatch, [], stats)
+    assert result["passed"] is False and result["failed_tests"] == 1
+
+
+def test_content_security_skips_a_frontend_without_the_policy(tmp_path):
+    assert check_content_security(tmp_path, tmp_path / "out") == {
+        "passed": True,
+        "skipped": "security.csp is off",
+    }
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {**_PALETTE, "effective-directive": "script-src-elem"},
+        {**_PALETTE, "blocked-uri": "https://example.com/x.css"},
+        {**_PALETTE, "script-sample": ".x { color: red }"},
+        {},
+    ],
+    ids=["other-directive", "external-sheet", "other-style", "empty"],
+)
+def test_only_inline_styles_with_a_known_sample_are_admitted(report):
+    assert admitted(report) is None
 
 
 def test_rust_path_dependency_coverage_uses_the_same_execution(service, monkeypatch):

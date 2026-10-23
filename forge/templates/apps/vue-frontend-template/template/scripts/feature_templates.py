@@ -637,6 +637,426 @@ function formatDate(dateStr: string | null): string {{
 """
 
 # ──────────────────────────────────────────────
+# ui/{Plural}ListPage.vue -- Nuxt UI (ui_kit = nuxt-ui)
+# ──────────────────────────────────────────────
+NUXT_UI_LIST_PAGE_TEMPLATE = """\
+<script setup lang="ts">
+import {{ ref, computed, watch }} from 'vue'
+import {{ useRouter }} from 'vue-router'
+import type {{ DropdownMenuItem }} from '@nuxt/ui'
+import {{ useToast }} from '@nuxt/ui/composables'
+import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
+import EmptyState from '@/shared/components/EmptyState.vue'
+import {{ use{Plural}, useDelete{Singular} }} from '@/features/{plural}'
+
+const router = useRouter()
+const toast = useToast()
+
+const page = ref(0)
+const pageSize = ref(20)
+const searchInput = ref('')
+const searchQuery = ref('')
+
+let searchTimeout: ReturnType<typeof setTimeout>
+watch(searchInput, (val) => {{
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {{
+    searchQuery.value = val
+    page.value = 0
+  }}, 300)
+}})
+
+const skip = computed(() => page.value * pageSize.value)
+
+const {{ data, isLoading, isError }} = use{Plural}({{
+  skip,
+  limit: pageSize,
+  search: searchQuery,
+}})
+
+const delete{Singular} = useDelete{Singular}()
+const deleteDialogOpen = ref(false)
+const {singular}ToDelete = ref<{{ id: string; name: string }} | null>(null)
+
+function confirmDelete({singular}: {{ id: string; name: string }}) {{
+  {singular}ToDelete.value = {singular}
+  deleteDialogOpen.value = true
+}}
+
+function rowActions({singular}: {{ id: string; name: string }}): DropdownMenuItem[][] {{
+  return [
+    [{{ label: 'View', icon: 'i-lucide-eye', onSelect: () => router.push(`/{plural}/${{{singular}.id}}`) }}],
+    [{{
+      label: 'Delete',
+      icon: 'i-lucide-trash-2',
+      color: 'error',
+      'data-test': '{singular}-delete-btn',
+      onSelect: () => confirmDelete({{ id: {singular}.id, name: {singular}.name }}),
+    }}],
+  ]
+}}
+
+async function handleDelete() {{
+  if (!{singular}ToDelete.value) return
+  try {{
+    await delete{Singular}.mutateAsync({singular}ToDelete.value.id)
+    toast.add({{ title: `{Singular} "${{{singular}ToDelete.value.name}}" deleted`, color: 'success' }})
+  }} catch {{
+    // handled by global mutation onError
+  }}
+  {singular}ToDelete.value = null
+}}
+</script>
+
+<template>
+  <div class="space-y-4" data-test="{plural}-list">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight text-highlighted">{Plural}</h1>
+        <p class="text-muted">Manage your {plural}</p>
+      </div>
+      <UButton data-test="{plural}-create-btn" icon="i-lucide-plus" label="New {Singular}" @click="router.push('/{plural}/new')" />
+    </div>
+
+    <UInput
+      v-model="searchInput"
+      data-test="{plural}-search-input"
+      placeholder="Search {plural}..."
+      icon="i-lucide-search"
+      class="max-w-sm"
+    >
+      <template v-if="searchInput" #trailing>
+        <UButton
+          color="neutral"
+          variant="link"
+          size="sm"
+          icon="i-lucide-x"
+          aria-label="Clear search"
+          @click="searchInput = ''"
+        />
+      </template>
+    </UInput>
+
+    <!-- Loading -->
+    <div v-if="isLoading" class="space-y-3">
+      <USkeleton v-for="i in 3" :key="i" class="h-24 w-full" />
+    </div>
+
+    <!-- Error -->
+    <p v-else-if="isError" class="py-8 text-center text-muted">
+      Failed to load {plural}. Please try again.
+    </p>
+
+    <!-- Empty -->
+    <EmptyState v-else-if="data && data.items.length === 0" message="No {plural} found." icon="i-lucide-package">
+      <template #action>
+        <UButton label="Create your first {singular}" @click="router.push('/{plural}/new')" />
+      </template>
+    </EmptyState>
+
+    <!-- Card list -->
+    <div v-else-if="data" class="space-y-3">
+      <UCard
+        v-for="{singular} in data.items"
+        :key="{singular}.id"
+        data-test="{singular}-card"
+        class="cursor-pointer transition-colors hover:bg-elevated/50"
+        @click="router.push(`/{plural}/${{{singular}.id}}`)"
+      >
+        <div class="flex items-center justify-between">
+          <span class="font-medium text-highlighted" data-test="{singular}-name">{{{{ {singular}.name }}}}</span>
+          <div @click.stop>
+            <UDropdownMenu :items="rowActions({singular})" :content="{{ align: 'end' }}">
+              <UButton icon="i-lucide-ellipsis" color="neutral" variant="ghost" size="sm" aria-label="Actions" />
+            </UDropdownMenu>
+          </div>
+        </div>
+        <p v-if="{singular}.description" class="mt-1 line-clamp-2 text-sm text-muted">
+          {{{{ {singular}.description }}}}
+        </p>
+      </UCard>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="data && data.total > 0" class="flex items-center justify-between text-sm text-muted">
+      <p>Showing {{{{ data.skip + 1 }}}}-{{{{ Math.min(data.skip + data.limit, data.total) }}}} of {{{{ data.total }}}}</p>
+      <UButton
+        v-if="data.has_more"
+        data-test="{plural}-load-more"
+        label="Load More"
+        color="neutral"
+        variant="outline"
+        size="sm"
+        @click="page++"
+      />
+    </div>
+
+    <ConfirmDialog
+      v-model:open="deleteDialogOpen"
+      title="Delete {Singular}"
+      :description="`Are you sure you want to delete '${{ {singular}ToDelete?.name }}'?`"
+      confirm-label="Delete"
+      @confirm="handleDelete"
+    />
+  </div>
+</template>
+"""
+
+
+# ──────────────────────────────────────────────
+# ui/{Singular}CreatePage.vue -- Nuxt UI (ui_kit = nuxt-ui)
+# ──────────────────────────────────────────────
+NUXT_UI_CREATE_PAGE_TEMPLATE = """\
+<script setup lang="ts">
+import {{ reactive }} from 'vue'
+import {{ useRouter }} from 'vue-router'
+import {{ z }} from 'zod'
+import type {{ FormSubmitEvent }} from '@nuxt/ui'
+import {{ useToast }} from '@nuxt/ui/composables'
+import {{ useCreate{Singular} }} from '@/features/{plural}'
+
+const router = useRouter()
+const toast = useToast()
+const create{Singular} = useCreate{Singular}()
+
+const schema = z.object({{
+  name: z.string().trim().min(1, 'Name is required'),
+  description: z.string().trim().optional(),
+}})
+
+const state = reactive({{ name: '', description: '' }})
+
+function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {{
+  create{Singular}.mutate(
+    {{
+      name: event.data.name,
+      description: event.data.description || undefined,
+    }},
+    {{
+      onSuccess: ({singular}) => {{
+        toast.add({{ title: `{Singular} "${{ {singular}.name }}" created`, color: 'success' }})
+        router.push(`/{plural}/${{ {singular}.id }}`)
+      }},
+    }},
+  )
+}}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" aria-label="Back" @click="router.push('/{plural}')" />
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight text-highlighted">New {Singular}</h1>
+        <p class="text-muted">Create a new {singular}</p>
+      </div>
+    </div>
+
+    <UForm :schema="schema" :state="state" class="max-w-2xl" @submit="onSubmit">
+      <UCard>
+        <template #header>
+          <h2 class="font-semibold text-highlighted">{Singular} Details</h2>
+          <p class="text-sm text-muted">Fill in the details</p>
+        </template>
+        <div class="space-y-4">
+          <UFormField label="Name" name="name" required>
+            <UInput v-model="state.name" data-test="{singular}-name-input" placeholder="Enter name" class="w-full" />
+          </UFormField>
+          <UFormField label="Description" name="description">
+            <UTextarea
+              v-model="state.description"
+              data-test="{singular}-description-input"
+              placeholder="Enter description"
+              :rows="3"
+              class="w-full"
+            />
+          </UFormField>
+        </div>
+        <template #footer>
+          <div class="flex gap-2">
+            <UButton
+              data-test="{singular}-cancel-btn"
+              label="Cancel"
+              color="neutral"
+              variant="outline"
+              @click="router.push('/{plural}')"
+            />
+            <UButton
+              data-test="{singular}-submit-btn"
+              type="submit"
+              :loading="create{Singular}.isPending.value"
+              :label="create{Singular}.isPending.value ? 'Creating...' : 'Create {Singular}'"
+            />
+          </div>
+        </template>
+      </UCard>
+    </UForm>
+  </div>
+</template>
+"""
+
+
+# ──────────────────────────────────────────────
+# ui/{Singular}DetailPage.vue -- Nuxt UI (ui_kit = nuxt-ui)
+# ──────────────────────────────────────────────
+NUXT_UI_DETAIL_PAGE_TEMPLATE = """\
+<script setup lang="ts">
+import {{ reactive, ref, watch }} from 'vue'
+import {{ useRouter }} from 'vue-router'
+import {{ z }} from 'zod'
+import type {{ FormSubmitEvent }} from '@nuxt/ui'
+import {{ useToast }} from '@nuxt/ui/composables'
+import ConfirmDialog from '@/shared/components/ConfirmDialog.vue'
+import {{ use{Singular}, useUpdate{Singular}, useDelete{Singular} }} from '@/features/{plural}'
+
+const props = defineProps<{{ {singular}Id: string }}>()
+const router = useRouter()
+const toast = useToast()
+
+const {{ data: {singular}, isLoading, isError }} = use{Singular}(props.{singular}Id)
+const update{Singular} = useUpdate{Singular}()
+const delete{Singular} = useDelete{Singular}()
+
+const schema = z.object({{
+  name: z.string().trim().min(1, 'Name is required'),
+  description: z.string().trim(),
+}})
+
+const editing = ref(false)
+const state = reactive({{ name: '', description: '' }})
+const deleteDialogOpen = ref(false)
+
+function resetForm() {{
+  state.name = {singular}.value?.name ?? ''
+  state.description = {singular}.value?.description ?? ''
+}}
+
+watch({singular}, resetForm, {{ immediate: true }})
+
+function startEdit() {{ editing.value = true }}
+
+function cancelEdit() {{
+  resetForm()
+  editing.value = false
+}}
+
+function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {{
+  update{Singular}.mutate(
+    {{ id: props.{singular}Id, data: {{ name: event.data.name, description: event.data.description || null }} }},
+    {{ onSuccess: () => {{ toast.add({{ title: '{Singular} updated', color: 'success' }}); editing.value = false }} }},
+  )
+}}
+
+async function handleDelete() {{
+  try {{
+    await delete{Singular}.mutateAsync(props.{singular}Id)
+    toast.add({{ title: '{Singular} deleted', color: 'success' }})
+    router.push('/{plural}')
+  }} catch {{}}
+}}
+
+function formatDate(dateStr: string | null): string {{
+  if (!dateStr) return 'N/A'
+  return new Date(dateStr).toLocaleString()
+}}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <UButton icon="i-lucide-arrow-left" color="neutral" variant="ghost" aria-label="Back" @click="router.push('/{plural}')" />
+      <h1 class="flex-1 text-3xl font-bold tracking-tight text-highlighted">{Singular} Detail</h1>
+      <template v-if="{singular} && !editing">
+        <UButton
+          data-test="{singular}-edit-btn"
+          label="Edit"
+          icon="i-lucide-pencil"
+          color="neutral"
+          variant="outline"
+          @click="startEdit"
+        />
+        <UButton
+          data-test="{singular}-delete-btn"
+          label="Delete"
+          icon="i-lucide-trash-2"
+          color="error"
+          @click="deleteDialogOpen = true"
+        />
+      </template>
+    </div>
+
+    <UCard v-if="isLoading" class="max-w-2xl">
+      <div class="space-y-4">
+        <USkeleton class="h-8 w-48" />
+        <USkeleton class="h-4 w-full" />
+      </div>
+    </UCard>
+    <UCard v-else-if="isError" class="max-w-2xl">
+      <p class="text-center text-muted">Failed to load.</p>
+    </UCard>
+
+    <UCard v-else-if="{singular} && !editing" data-test="{singular}-detail" class="max-w-2xl">
+      <template #header>
+        <h2 class="font-semibold text-highlighted">Summary</h2>
+      </template>
+      <dl class="space-y-3">
+        <div><dt class="text-xs text-muted">Name</dt><dd class="text-sm font-medium">{{{{ {singular}.name }}}}</dd></div>
+        <div><dt class="text-xs text-muted">Description</dt><dd class="text-sm">{{{{ {singular}.description || 'No description' }}}}</dd></div>
+        <div class="grid grid-cols-2 gap-4">
+          <div><dt class="text-xs text-muted">Created</dt><dd class="text-sm">{{{{ formatDate({singular}.created_at) }}}}</dd></div>
+          <div><dt class="text-xs text-muted">Updated</dt><dd class="text-sm">{{{{ formatDate({singular}.updated_at) }}}}</dd></div>
+        </div>
+      </dl>
+    </UCard>
+
+    <UForm v-else-if="{singular} && editing" :schema="schema" :state="state" class="max-w-2xl" @submit="onSubmit">
+      <UCard>
+        <template #header>
+          <h2 class="font-semibold text-highlighted">Edit {Singular}</h2>
+        </template>
+        <div class="space-y-4">
+          <UFormField label="Name" name="name" required>
+            <UInput v-model="state.name" data-test="{singular}-edit-name-input" class="w-full" />
+          </UFormField>
+          <UFormField label="Description" name="description">
+            <UTextarea v-model="state.description" :rows="3" class="w-full" />
+          </UFormField>
+        </div>
+        <template #footer>
+          <div class="flex gap-2">
+            <UButton
+              data-test="{singular}-cancel-edit-btn"
+              label="Cancel"
+              icon="i-lucide-x"
+              color="neutral"
+              variant="outline"
+              @click="cancelEdit"
+            />
+            <UButton
+              data-test="{singular}-save-btn"
+              type="submit"
+              icon="i-lucide-save"
+              :loading="update{Singular}.isPending.value"
+              :label="update{Singular}.isPending.value ? 'Saving...' : 'Save'"
+            />
+          </div>
+        </template>
+      </UCard>
+    </UForm>
+
+    <ConfirmDialog
+      v-model:open="deleteDialogOpen"
+      title="Delete {Singular}"
+      :description="`Are you sure you want to delete '${{ {singular}?.name }}'?`"
+      confirm-label="Delete"
+      @confirm="handleDelete"
+    />
+  </div>
+</template>
+"""
+
+
+# ──────────────────────────────────────────────
 # MSW handlers for a feature
 # ──────────────────────────────────────────────
 MSW_HANDLERS_TEMPLATE = """\
@@ -740,4 +1160,11 @@ HUB_MSW_SPREAD = "  ...{plural}Handlers,\n"
 HUB_HOME_ACTIONS = (
     "  {{ label: 'Browse {Plural}', icon: Package, route: '/{plural}' }},\n"
     "  {{ label: 'Create {Singular}', icon: Plus, route: '/{plural}/new' }},\n"
+)
+
+# Nuxt UI (ui_kit = nuxt-ui) names icons instead of importing them.
+NUXT_UI_HUB_SIDEBAR_NAV = "  {{ label: '{Plural}', to: '/{plural}', icon: 'i-lucide-package' }},\n"
+NUXT_UI_HUB_HOME_ACTIONS = (
+    "  {{ label: 'Browse {Plural}', icon: 'i-lucide-package', route: '/{plural}' }},\n"
+    "  {{ label: 'Create {Singular}', icon: 'i-lucide-plus', route: '/{plural}/new' }},\n"
 )

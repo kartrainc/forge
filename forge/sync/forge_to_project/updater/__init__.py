@@ -595,6 +595,11 @@ def _update_locked(
         # pass None here, pinning the chart to the proxy default port).
         primary_server_port=(config.backend.server_port if config.backend else None),
         topology=compute_topology(config, plan, synthesis=_synthesis),
+        ui_kit=(
+            config.frontend.ui_kit
+            if config.frontend and config.frontend.framework == FrontendFramework.VUE
+            else None
+        ),
     )
 
     # Re-run schema-driven codegen so template/codegen changes reach existing

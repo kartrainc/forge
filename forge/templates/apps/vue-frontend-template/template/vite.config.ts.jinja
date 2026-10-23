@@ -2,13 +2,53 @@ import browserCoverage from './scripts/browser-coverage.ts';
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+{%- if ui_kit == 'nuxt-ui' %}
+import ui from '@nuxt/ui/vite'
+import { theme, ui as uiConfig } from './src/custom/theme/nuxt-ui.config.ts'
+{%- else %}
 import tailwindcss from '@tailwindcss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
+{%- endif %}
 
 export default defineConfig({
   plugins: [
     ...(process.env.FORGE_COVERAGE === 'true' ? [browserCoverage()] : []),
     vue(),
+{%- if ui_kit == 'nuxt-ui' %}
+    // Nuxt UI brings Tailwind CSS and the auto-import plugins with it; their
+    // options are set here, the design system in src/custom/theme/.
+    ui({
+      ui: uiConfig,
+      theme,
+      autoImport: {
+        imports: [
+          'vue',
+          'vue-router',
+          'pinia',
+          {
+            '@tanstack/vue-query': [
+              'useQuery',
+              'useMutation',
+              'useQueryClient',
+              'useInfiniteQuery',
+            ],
+          },
+        ],
+        dts: 'src/auto-imports.d.ts',
+        dirs: [
+          'src/shared/composables',
+          'src/shared/stores',
+          'src/features/*/composables',
+          'src/features/*/api',
+        ],
+        vueTemplate: true,
+      },
+      components: { dts: 'src/components.d.ts' },
+      // Bundle every icon the sources name, so nothing is fetched at runtime.
+      icon: { clientBundle: { scan: { globInclude: ['src/**/*.{vue,ts}'] } } },
+      experimental: { componentDetection: true },
+    }),
+{%- else %}
     tailwindcss(),
     AutoImport({
       imports: [
@@ -33,7 +73,13 @@ export default defineConfig({
       ],
       vueTemplate: true,
     }),
+{%- endif %}
   ],
+{%- if security_csp %}
+  // security.csp: Vite stamps this placeholder on its own tags and into a
+  // csp-nonce meta tag; nginx replaces it with each response's nonce.
+  html: { cspNonce: '__CSP_NONCE__' },
+{%- endif %}
   define: {
     __DEV_VALIDATION__: JSON.stringify(process.env.NODE_ENV !== 'production'),
   },
@@ -58,7 +104,11 @@ export default defineConfig({
           groups: [
             { name: 'vendor-vue', test: /node_modules\/(?:@vue|vue|vue-router|pinia)\// },
             { name: 'vendor-tanstack', test: /node_modules\/@tanstack\// },
+{%- if ui_kit == 'nuxt-ui' %}
+            { name: 'vendor-nuxt-ui', test: /node_modules\/(?:@nuxt\/ui|reka-ui)\// },
+{%- else %}
             { name: 'vendor-radix', test: /node_modules\/radix-vue\// },
+{%- endif %}
           ],
         },
       },

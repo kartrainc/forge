@@ -59,18 +59,25 @@ class FragmentFileApplier:
     """Copies a fragment's ``files/`` tree into the target dir."""
 
     def apply(self, ctx: FragmentContext, plan: FragmentPlan) -> None:
-        if plan.files_dir is None:
-            return
-        copy_files(
-            plan.files_dir,
-            ctx.backend_dir,
-            update_mode=ctx.update_mode,
-            file_baselines=ctx.file_baselines,
-            collector=ctx.provenance,
-            project_root=ctx.project_root,
-            fragment_name=plan.feature_key,
-            render_context=_build_render_context(ctx),
-        )
+        from forge.appliers.plan import kit_replaced_paths  # noqa: PLC0415
+
+        render_context = _build_render_context(ctx)
+        # ``files-<kit>/`` replaces the same paths of ``files/`` (FragmentPlan).
+        replaced = kit_replaced_paths(plan.kit_files_dir)
+        for tree, skip in ((plan.files_dir, replaced), (plan.kit_files_dir, frozenset())):
+            if tree is None:
+                continue
+            copy_files(
+                tree,
+                ctx.backend_dir,
+                update_mode=ctx.update_mode,
+                file_baselines=ctx.file_baselines,
+                collector=ctx.provenance,
+                project_root=ctx.project_root,
+                fragment_name=plan.feature_key,
+                render_context=render_context,
+                skip=skip,
+            )
 
 
 def _build_render_context(ctx: FragmentContext) -> dict[str, Any]:
@@ -133,6 +140,7 @@ def copy_files(
     project_root: Path | None = None,
     fragment_name: str | None = None,
     render_context: Mapping[str, Any] | None = None,
+    skip: frozenset[Path] = frozenset(),
 ) -> tuple[FileMergeOutcome, ...]:
     """Copy every file under ``src/`` into ``dst_root/``, preserving structure.
 
@@ -150,6 +158,9 @@ def copy_files(
     files are byte-identical pure copies regardless of this argument; when
     ``render_context is None``, ``.jinja`` files are copied verbatim
     (the pre-render-support behaviour for callers that don't render).
+
+    ``skip`` lists destination paths, relative to ``dst_root``, that another
+    tree writes instead (a fragment's ``files-<kit>/``); they are not copied.
     """
     baselines: Mapping[str, str] = file_baselines or {}
     outcomes: list[FileMergeOutcome] = []
@@ -173,6 +184,8 @@ def copy_files(
         render = render_context is not None and src_path.name.endswith(_JINJA_SUFFIX)
         if render:
             rel = rel.with_name(rel.name[: -len(_JINJA_SUFFIX)])
+        if rel in skip:
+            continue
         dst_path = dst_root / rel
 
         outcome = _apply_one_file(

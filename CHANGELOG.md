@@ -69,13 +69,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Vue UI kits
 
 - Add `frontend.ui_kit` (`--ui-kit`) to choose the Vue template's component
-  library. `shadcn` stays the default; `nuxt-ui` is registered and becomes
-  selectable with its rendering ([ADR-011](docs/architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md)).
+  library. `shadcn` stays the default ([ADR-011](docs/architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md)).
   Layouts, component features and fragments declare their kits; forge refuses
   an incompatible combination before writing, naming the replacement component.
 - Render the Vue template's no-chat `App.vue` and `MainLayout.vue` and its
   no-Keycloak `useAuth.ts` from Copier conditional file names instead of
   post-generate strings; generated output is unchanged.
+- Make `nuxt-ui` selectable: the template renders its shell, screens and CRUD
+  pages on Nuxt UI 4 with its colour mode, bundled lucide icons and a brand
+  module in `src/custom/theme/` that the project owns. It takes the sidebar
+  layout without the AI chat; `--color-scheme` also takes Tailwind palette
+  names for it. A `vue-nuxt-ui` lane of the generated-quality check renders it
+  with authentication and two CRUD features.
+- Let a fragment ship a `files-<kit>/` tree whose files replace the same paths
+  of `files/` for that kit; the session-timeout dialog uses it for Nuxt UI.
+
+### Fixed
+
+- `security.csp` now protects the Vue frontend. The frontend's `nginx.conf` and
+  the Helm chart's default server block send a nonce-based
+  Content-Security-Policy with `index.html` and defence-in-depth headers with
+  every response; the build stamps the nonce placeholder nginx replaces per
+  response. The standalone `deploy/infra/nginx-csp.conf`, which nothing
+  included and which named an undefined nginx variable, is no longer emitted.
+  Both Vue lanes run the browser suites against the production build under the
+  policy and fail on any violation.
 
 ### Platform routing
 
@@ -270,6 +288,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Plugin SDK
 
+- **SDK 1.6:** `ForgeAPI.add_frontend_layout` takes `ui_kits`, the Vue UI kits
+  a plugin layout renders with, as a `layout.toml` declares them.
 - **`add_backend` now genuinely generates** (#224): registering a backend
   language through `ForgeAPI.add_backend` produces a working project end to
   end, not just a registry entry. The paths that coerced the language string

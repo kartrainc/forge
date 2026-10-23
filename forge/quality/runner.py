@@ -240,6 +240,11 @@ def run_browser(root: Path, item: dict, output: Path, env: dict[str, str]) -> st
     directory = output / "browser-native"
     shutil.rmtree(directory, ignore_errors=True)
     env["FORGE_BROWSER_COVERAGE"] = str(directory)
+    # No gateway serves /auth/* in the browser suites, which mock the API in
+    # the page; with auth on, the app would leave for the gateway's login.
+    # Vite lets this variable win over .env. Unit and integration suites keep
+    # the project's setting, so they exercise the real auth flow.
+    env["VITE_AUTH_DISABLED"] = "true"
     execution = output / "e2e.execution"
     with execution.open("w", encoding="utf-8") as stream:
         subprocess.run(
