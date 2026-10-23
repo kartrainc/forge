@@ -11,6 +11,7 @@ the agent tooling: the official Nuxt UI skill and its MCP server.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -31,10 +32,12 @@ from forge.config import (
 )
 from forge.generator import generate
 from forge.quality.model import ownership
+from forge.quality.update import update_owned_project
 from forge.sync.forge_to_project import plan as plan_module
 from forge.sync.forge_to_project import updater as updater_module
 from forge.sync.forge_to_project.plan import plan_update
 from forge.sync.forge_to_project.updater import update_project
+from forge.sync.manifest import read_forge_toml
 from forge.ui_kits import (
     NUXT_UI_MCP_URL,
     NUXT_UI_SKILL_COMMIT,
@@ -284,10 +287,27 @@ def test_fragments_render_and_update_from_the_kits_tree(
     assert not modal.with_name(modal.name + ".forge-merge").exists()
 
 
-def test_the_vendored_skill_follows_the_pinned_release() -> None:
-    # Re-vendor the skill when NUXT_UI_VERSION moves (docs/guides/agentic-usage.md).
+def _git_blob_sha(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def test_the_vendored_skill_is_the_pinned_release() -> None:
+    """The vendored bytes are the upstream files at the release of NUXT_UI_VERSION.
+
+    ``scripts/vendor_nuxt_ui_skill.py`` records the Git blob hash GitHub lists
+    for each file at the tag; this test recomputes them offline. Moving
+    NUXT_UI_VERSION fails it until the script vendors the matching tag.
+    """
+    record = json.loads(_SKILL.with_name("nuxt-ui.upstream.json").read_text(encoding="utf-8"))
+    assert (record["tag"], record["commit"]) == (NUXT_UI_SKILL_TAG, NUXT_UI_SKILL_COMMIT)
     assert f"v{NUXT_UI_VERSION}" == NUXT_UI_SKILL_TAG
     assert re.fullmatch(r"[0-9a-f]{40}", NUXT_UI_SKILL_COMMIT)
+    vendored = {
+        p.relative_to(_SKILL).as_posix(): _git_blob_sha(p.read_bytes())
+        for p in _SKILL.rglob("*")
+        if p.is_file()
+    }
+    assert vendored == record["files"]
     skill = (_SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert skill.startswith("---\nname: nuxt-ui\n")
     licence = (_SKILL / "LICENSE.md").read_text(encoding="utf-8")
@@ -347,3 +367,112 @@ def test_a_shadcn_project_gets_no_nuxt_ui_tooling() -> None:
             assert not (root / rel).exists(), rel
     finally:
         shutil.rmtree(root.parent, ignore_errors=True)
+
+
+def test_upgrading_names_what_only_nuxt_ui_emits() -> None:
+    """Switching back to shadcn leaves Nuxt UI's own scaffold on disk, unrecorded.
+
+    UPGRADING's "Switching back to shadcn" names it, because two of those files
+    break a shadcn project and any of them blocks a later switch to Nuxt UI.
+    """
+
+    def provenance(kit: str) -> dict:
+        config = ProjectConfig(
+            project_name="switch",
+            backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
+            frontend=FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                include_openapi=False,
+                ui_kit=kit,
+            ),
+        )
+        root = Path(generate(config, quiet=True, dry_run=True))
+        try:
+            return read_forge_toml(root / "forge.toml").provenance
+        finally:
+            shutil.rmtree(root.parent, ignore_errors=True)
+
+    nuxt, shadcn = provenance("nuxt-ui"), provenance("shadcn")
+    only = set(nuxt) - set(shadcn)
+    assert only
+    assert {
+        ownership(rel, nuxt[rel]["origin"], nuxt[rel].get("template_name")) for rel in only
+    } == {"scaffold"}
+    named = (
+        "src/app/providers/head.ts",
+        "head.test.ts",
+        "src/custom/theme/",
+        ".agents/skills/nuxt-ui/",
+        ".claude/skills/nuxt-ui/",
+        ".mcp.json",
+        ".codex/config.toml",
+    )
+
+    def is_named(rel: str) -> bool:
+        rel = rel.removeprefix("apps/frontend/")
+        return any(rel == n or rel.startswith(n) or rel.endswith("/" + n) for n in named)
+
+    assert sorted(rel for rel in only if not is_named(rel)) == []
+    upgrading = (Path(__file__).resolve().parents[1] / "UPGRADING.md").read_text(encoding="utf-8")
+    section = upgrading.split("#### Switching back to shadcn", 1)[1].split("\n### ", 1)[0]
+    for name in named:
+        assert f"`{name}`" in section, name
+
+
+def test_switching_back_to_shadcn_and_again_follows_upgrading(tmp_path: Path) -> None:
+    config = ProjectConfig(
+        project_name="switch",
+        backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_auth=True,
+            include_chat=False,
+            include_openapi=False,
+            ui_kit="nuxt-ui",
+        ),
+    )
+    rendered = Path(generate(config, quiet=True, dry_run=True))
+    root = tmp_path / "project"
+    shutil.copytree(rendered, root)
+    shutil.rmtree(rendered.parent, ignore_errors=True)
+    recipe = root / ".forge" / "quality.json"
+
+    def switch(kit: str) -> dict:
+        data = json.loads(recipe.read_text(encoding="utf-8"))
+        data["config"]["frontend"]["ui_kit"] = kit
+        recipe.write_text(json.dumps(data), encoding="utf-8")
+        return update_owned_project(root)
+
+    left = [
+        "apps/frontend/src/app/providers/head.ts",
+        "apps/frontend/src/custom/theme/nuxt-ui.config.ts",
+        ".mcp.json",
+        ".codex/config.toml",
+        ".claude/skills/nuxt-ui/SKILL.md",
+    ]
+    assert switch("shadcn")["passed"]
+    assert (root / "apps/frontend/src/shared/ui").is_dir()
+    provenance = read_forge_toml(root / "forge.toml").provenance
+    for rel in left:
+        assert (root / rel).is_file() and rel not in provenance, rel
+    # While any of them remains unrecorded, switching again stops before writing.
+    with pytest.raises(ValueError, match="collides with user file"):
+        switch("nuxt-ui")
+    for rel in (
+        "apps/frontend/src/app/providers/head.ts",
+        "apps/frontend/src/app/providers/head.test.ts",
+        "apps/frontend/src/custom/theme",
+        ".agents/skills/nuxt-ui",
+        ".claude/skills/nuxt-ui",
+        ".mcp.json",
+        ".codex/config.toml",
+    ):
+        path = root / rel
+        shutil.rmtree(path) if path.is_dir() else path.unlink()
+    assert switch("nuxt-ui")["passed"]
+    assert "<UApp" in (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
+    assert (root / ".mcp.json").is_file()

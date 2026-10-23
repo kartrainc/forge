@@ -57,13 +57,18 @@ COLOR_SCHEMES: tuple[str, ...] = (
     "cyan",
 )
 
-#: Tailwind CSS's default palettes; Nuxt UI's ``ui.colors`` take these names.
+#: Tailwind CSS 4.3's palettes (the template requires ``tailwindcss`` 4.3 or
+#: later); Nuxt UI's ``ui.colors`` take these names.
 TAILWIND_PALETTES: tuple[str, ...] = (
     "slate",
     "gray",
     "zinc",
     "neutral",
     "stone",
+    "mauve",
+    "olive",
+    "mist",
+    "taupe",
     "red",
     "orange",
     "amber",

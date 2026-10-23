@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/nuxt/ui",
+  "tag": "v4.12.0",
+  "commit": "b1053b8508078274326aa44bb322076ca135aedf",
+  "source": "skills/nuxt-ui and LICENSE.md (the repository's licence)",
+  "files": {
+    "LICENSE.md": "acf1a2cfc2df1551e5d5c0ea22abfa98c1aa4469",
+    "SKILL.md": "2ce6e71f4382aa4e09109d06e6ee636f20acbdff",
+    "references/components.md": "30ebb016eced688a814706a25c1a55f789efaebe",
+    "references/guidelines/component-selection.md": "b34c1ab9faa4062780051cb9f0e96ea093006196",
+    "references/guidelines/conventions.md": "b79f9cc249c7439d66e012ca2bad2a17b51b2c15",
+    "references/guidelines/design-system.md": "747eda950ef03bfe6902c3741705321b6afef44f",
+    "references/guidelines/forms.md": "5fd91f192b47eba5bc7458427e0b3054f96a2032",
+    "references/layouts/chat.md": "04acbb721d5b40a2472b7f98b94fc4be94576c00",
+    "references/layouts/dashboard.md": "a2fa9bd3fbb8d5068493a534f91a34d2de939aee",
+    "references/layouts/docs.md": "e539897e838422cec7d44795187d35b36b465136",
+    "references/layouts/editor.md": "eb224a6646adc903f935f6247ef1e2c57800527b",
+    "references/layouts/landing.md": "a0d231ad8e071c1cd577bfc98ab578192a239683",
+    "references/recipes/auth.md": "57d2bdc07c7b37bcbf92ceb96dc5dcccfb5248fb",
+    "references/recipes/data-tables.md": "20dddbfdffb2d21ad8c7d744484cc35f90e1269b",
+    "references/recipes/navigation.md": "ef71a988547dc447f8b46c1b6b89a963c80c01de",
+    "references/recipes/overlays.md": "45fd78f26b87aa22ea3eeecad830db89e05d4462"
+  }
+}

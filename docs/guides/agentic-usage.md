@@ -31,27 +31,31 @@ it; the MCP server answers what a component accepts. Claude Code asks you to
 approve the project's `.mcp.json` servers on first use. Codex reads
 `.codex/config.toml` only once you trust the project; your
 `~/.codex/config.toml` still applies underneath. These files are scaffold:
-edit them as you like. An update brings a later forge change into an untouched
-file and proposes it as a `.forge-merge` sidecar for one you edited; a file
-you delete is written again.
+edit them as you like. In a project with a quality recipe
+(`.forge/quality.json`), an update brings a later forge change into an
+untouched file, proposes it as a `.forge-merge` sidecar for one you edited, and
+writes a deleted one again. The legacy update of a project without a recipe
+leaves them as they are. UPGRADING lists what to delete when a project
+switches back to `shadcn`.
 
 The skill is vendored in
 [`forge/templates/_common/skills/nuxt-ui`](../../forge/templates/_common/skills/nuxt-ui/SKILL.md)
 from `skills/nuxt-ui` of github.com/nuxt/ui at the release tag of the
-`@nuxt/ui` version forge pins (`NUXT_UI_SKILL_TAG` and `NUXT_UI_SKILL_COMMIT`
-in `forge/ui_kits.py`). When `NUXT_UI_VERSION` moves, a test fails until the
-skill is vendored again from the matching tag:
+`@nuxt/ui` version forge pins, with the repository's `LICENSE.md`.
+`nuxt-ui.upstream.json` beside it records the tag, the commit and each file's
+Git blob hash as GitHub lists it, and `forge/ui_kits.py` repeats the tag and
+commit. A test recomputes the hashes offline, so it fails when a vendored file
+differs from its upstream blob, or when `NUXT_UI_VERSION` moves before the
+skill is vendored again. When the version moves, vendor the matching tag and
+read the diff:
 
 ```bash
-tag=v<version>; sha=$(gh api repos/nuxt/ui/commits/$tag --jq .sha)
-gh api "repos/nuxt/ui/git/trees/$sha?recursive=1" \
-  --jq '.tree[] | select(.type=="blob") | select(.path|startswith("skills/nuxt-ui/")) | .path'
-# fetch each path (and LICENSE.md) with:
-#   gh api -H "Accept: application/vnd.github.raw" "repos/nuxt/ui/contents/<path>?ref=$sha"
+uv run python scripts/vendor_nuxt_ui_skill.py v<version>
 ```
 
-Replace the directory's contents with the fetched files, keep `LICENSE.md`,
-read the diff, then record the tag and commit in `forge/ui_kits.py`.
+The script needs the GitHub CLI. It checks every fetched file against its
+upstream hash before replacing the directory, then updates the record and the
+two constants.
 
 ## Headless workflow
 

@@ -89,7 +89,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Give a `nuxt-ui` project the official Nuxt UI agent skill, vendored from the
   `@nuxt/ui` release forge pins, in `.agents/skills` and `.claude/skills`, and
   the Nuxt UI MCP server in `.mcp.json` (Claude Code) and `.codex/config.toml`
-  (Codex).
+  (Codex). `scripts/vendor_nuxt_ui_skill.py` vendors a later release, and the
+  recorded upstream blob hashes let a test check the copy offline.
+- Accept Tailwind CSS 4.3's `mauve`, `olive`, `mist` and `taupe` as the
+  `nuxt-ui` colour scheme.
 
 ### Fixed
 

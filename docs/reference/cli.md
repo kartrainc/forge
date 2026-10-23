@@ -34,7 +34,7 @@ built-in platform preset. Example YAML configurations are supplied through
 `--frontend vue --ui-kit nuxt-ui` renders the Vue template on Nuxt UI 4 instead
 of the default `shadcn` kit; it takes the `sidebar` layout and no AI chat (see
 [UI kits](../guides/frontend-layouts.md#ui-kits)). `--color-scheme` takes the
-template's eight schemes and, for `nuxt-ui`, any Tailwind CSS palette name.
+template's eight schemes and, for `nuxt-ui`, any Tailwind CSS 4.3 palette name.
 
 ## Project lifecycle
 

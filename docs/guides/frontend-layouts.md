@@ -83,7 +83,7 @@ anything:
 Under `nuxt-ui` the AI chat (`include_chat`) and the component features built
 on shadcn-vue are refused as well; the refusal names the Nuxt UI component to
 use instead where there is one. `--color-scheme` takes the template's eight
-schemes for both kits and, for `nuxt-ui`, any Tailwind CSS palette name.
+schemes for both kits and, for `nuxt-ui`, any Tailwind CSS 4.3 palette name.
 
 ## Architecture
 
