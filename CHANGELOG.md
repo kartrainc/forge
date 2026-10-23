@@ -86,6 +86,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   with authentication and two CRUD features.
 - Let a fragment ship a `files-<kit>/` tree whose files replace the same paths
   of `files/` for that kit; the session-timeout dialog uses it for Nuxt UI.
+- Give a `nuxt-ui` project the official Nuxt UI agent skill, vendored from the
+  `@nuxt/ui` release forge pins, in `.agents/skills` and `.claude/skills`, and
+  the Nuxt UI MCP server in `.mcp.json` (Claude Code) and `.codex/config.toml`
+  (Codex).
 
 ### Fixed
 

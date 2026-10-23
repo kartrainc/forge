@@ -1,0 +1,7 @@
+# Project-scoped Codex configuration. Codex loads it only once you trust this
+# project; your own ~/.codex/config.toml still applies underneath.
+
+# The Nuxt UI MCP server: component APIs, examples and icon search for the
+# nuxt-ui skill in .agents/skills/nuxt-ui.
+[mcp_servers.nuxt-ui]
+url = "https://ui.nuxt.com/mcp"

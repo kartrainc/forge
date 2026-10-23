@@ -221,6 +221,12 @@ before changing anything.
 - The stored colour mode moves from the `theme` key to VueUse's
   `vueuse-color-scheme`; `system` becomes `auto`. Users see their system mode
   once until they choose again.
+- The project gains the Nuxt UI agent tooling: `.agents/skills/nuxt-ui/`,
+  `.claude/skills/nuxt-ui/`, `.mcp.json` and `.codex/config.toml`
+  ([agentic usage](docs/guides/agentic-usage.md#nuxt-ui-projects)). If any of
+  them already exists without a forge record, the update stops on the
+  collision before changing anything: move it aside, update, then merge your
+  version back.
 
 ### Executable Postgres init script (unreleased)
 

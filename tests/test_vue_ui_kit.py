@@ -5,7 +5,8 @@ The ``vue-nuxt-ui`` rendered lane (``scripts/check_generated_quality.py
 suites over the coverage gate and runs under the content-security policy.
 These tests pin what the template renders for the kit, from a dry run without
 npm: the dependencies and the wiring by the book, no trace of the shadcn kit,
-the brand module the project owns, the generated screens and CRUD pages.
+the brand module the project owns, the generated screens and CRUD pages, and
+the agent tooling: the official Nuxt UI skill and its MCP server.
 """
 
 from __future__ import annotations
@@ -13,12 +14,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from forge.capability_resolver import resolve
+from forge.common_files import COMMON_DIR
 from forge.config import (
     BackendConfig,
     BackendLanguage,
@@ -32,7 +35,16 @@ from forge.sync.forge_to_project import plan as plan_module
 from forge.sync.forge_to_project import updater as updater_module
 from forge.sync.forge_to_project.plan import plan_update
 from forge.sync.forge_to_project.updater import update_project
-from forge.ui_kits import NUXT_UI_VERSION
+from forge.ui_kits import (
+    NUXT_UI_MCP_URL,
+    NUXT_UI_SKILL_COMMIT,
+    NUXT_UI_SKILL_TAG,
+    NUXT_UI_VERSION,
+)
+from tests._artefact_filters import is_generated_artefact
+from tests.test_project_layout import layout_violations
+
+_SKILL = COMMON_DIR / "skills" / "nuxt-ui"
 
 # The shadcn kit: its generated components and the libraries it wraps.
 _SHADCN_IMPORT = re.compile(
@@ -270,3 +282,68 @@ def test_fragments_render_and_update_from_the_kits_tree(
     update_project(root, quiet=True, update_mode="merge")
     assert modal.read_text(encoding="utf-8") == generated
     assert not modal.with_name(modal.name + ".forge-merge").exists()
+
+
+def test_the_vendored_skill_follows_the_pinned_release() -> None:
+    # Re-vendor the skill when NUXT_UI_VERSION moves (docs/guides/agentic-usage.md).
+    assert f"v{NUXT_UI_VERSION}" == NUXT_UI_SKILL_TAG
+    assert re.fullmatch(r"[0-9a-f]{40}", NUXT_UI_SKILL_COMMIT)
+    skill = (_SKILL / "SKILL.md").read_text(encoding="utf-8")
+    assert skill.startswith("---\nname: nuxt-ui\n")
+    licence = (_SKILL / "LICENSE.md").read_text(encoding="utf-8")
+    assert licence.startswith("MIT License\n") and "Copyright (c) 2023 Nuxt" in licence
+    # Every reference SKILL.md links to is vendored with it.
+    for link in re.findall(r"\]\((references/[^)]+\.md)\)", skill):
+        assert (_SKILL / link).is_file(), link
+
+
+def test_agents_get_the_nuxt_ui_skill_and_its_mcp_server(app: Path) -> None:
+    root = app.parent.parent
+    vendored = {p.relative_to(_SKILL): p.read_bytes() for p in _SKILL.rglob("*") if p.is_file()}
+    assert len(vendored) == 16
+    for agent in (".agents", ".claude"):
+        installed = root / agent / "skills" / "nuxt-ui"
+        copied = {
+            p.relative_to(installed): p.read_bytes() for p in installed.rglob("*") if p.is_file()
+        }
+        assert copied == vendored, agent
+        assert ownership(f"{agent}/skills/nuxt-ui/SKILL.md") == "scaffold"
+    # The shapes `claude mcp add --transport http --scope project` and
+    # `codex mcp add --url` write.
+    assert json.loads((root / ".mcp.json").read_text(encoding="utf-8")) == {
+        "mcpServers": {"nuxt-ui": {"type": "http", "url": NUXT_UI_MCP_URL}}
+    }
+    codex = tomllib.loads((root / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    assert codex == {"mcp_servers": {"nuxt-ui": {"url": NUXT_UI_MCP_URL}}}
+    for rel in (".mcp.json", ".codex/config.toml"):
+        assert ownership(rel) == "scaffold"
+    # The forge-platform skill keeps its place beside it.
+    assert (root / ".claude" / "skills" / "forge-platform" / "SKILL.md").is_file()
+    # Every root entry is a declared one (tests/test_project_layout.py).
+    files = [
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and not is_generated_artefact(p.relative_to(root).as_posix())
+    ]
+    assert layout_violations(files) == []
+
+
+def test_a_shadcn_project_gets_no_nuxt_ui_tooling() -> None:
+    config = ProjectConfig(
+        project_name="shadcn",
+        backends=[
+            BackendConfig(name="api", project_name="shadcn", language=BackendLanguage.PYTHON)
+        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_chat=False,
+            include_openapi=False,
+        ),
+    )
+    root = Path(generate(config, quiet=True, dry_run=True))
+    try:
+        for rel in (".agents/skills/nuxt-ui", ".claude/skills/nuxt-ui", ".mcp.json", ".codex"):
+            assert not (root / rel).exists(), rel
+    finally:
+        shutil.rmtree(root.parent, ignore_errors=True)

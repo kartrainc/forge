@@ -58,6 +58,33 @@ forge --config forge.yaml --yes
 The choice is persisted in the project's `forge.toml` (`[forge.frontend].layout`)
 so `forge --update` and harvest round-trips preserve it.
 
+## UI kits
+
+The Vue template renders its screens on one of two component libraries,
+chosen with `--ui-kit` (CLI), `frontend.ui_kit` (YAML) or the interactive
+prompt ([ADR-011](../architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md)):
+
+- `shadcn` *(default)*: shadcn-vue on Radix Vue and Tailwind CSS 4, the kit the
+  template has always shipped.
+- `nuxt-ui`: [Nuxt UI 4](https://ui.nuxt.com) on Reka UI and Tailwind CSS 4,
+  adopted by its own model: its colour mode, a palette fixed per project in
+  the brand module `src/custom/theme/`, lucide icons bundled at build time.
+  Agent tooling comes with it ([agentic usage](agentic-usage.md#nuxt-ui-projects)).
+
+Svelte and Flutter keep their own kits. Each layout lists the kits its files
+render with, and forge refuses a combination it cannot render before writing
+anything:
+
+| Layout | `shadcn` | `nuxt-ui` |
+|--------|----------|-----------|
+| `sidebar` | yes | yes |
+| `topnav`, `tabbar`, `threepane`, `bento`, `docs` | yes | not yet |
+
+Under `nuxt-ui` the AI chat (`include_chat`) and the component features built
+on shadcn-vue are refused as well; the refusal names the Nuxt UI component to
+use instead where there is one. `--color-scheme` takes the template's eight
+schemes for both kits and, for `nuxt-ui`, any Tailwind CSS palette name.
+
 ## Architecture
 
 Two orthogonal concerns:
@@ -82,9 +109,9 @@ was validated byte-identical to a single render. `sidebar` is self-contained
 (single render) and needs no overlay.
 
 `frontend_layout` is threaded through `variable_mapper → answers.json →
-post_generate`, so the chat-off MainLayout replacement applies only to
-`sidebar`; other layouts gate their chat with `{% if include_chat %}` and
-degrade cleanly when chat is disabled.
+post_generate`. The base renders the `sidebar` shell's chat-off and per-kit
+variants from Copier conditional file names; other layouts gate their chat
+with `{% if include_chat %}` and degrade cleanly when chat is disabled.
 
 ## Adding a layout
 
@@ -99,6 +126,7 @@ Adding a layout is a **drop-in** — no changes to `generator.py`:
    template_dir = "layouts/vue/<slug>"   # relative to forge/templates
    base = "apps/vue-frontend-template"    # "" for a self-contained variant
    supported = true
+   ui_kits = ["shadcn"]                   # the Vue UI kits its files render with
    ```
 2. Add the thin overlay under `template_dir/template/` — at minimum
    `src/shared/layouts/MainLayout.vue.jinja` composing base components, plus any
@@ -115,10 +143,11 @@ The layout is auto-discovered on the next run; `forge --frontend <fw> --layout
 
 ```python
 def register(api):
-    api.require_sdk(">=1.3")
+    api.require_sdk(">=1.6")
     api.add_frontend_layout(
         "vue", "mylayout", "/abs/path/to/template", "My Layout",
         base_template_dir="apps/vue-frontend-template",
+        ui_kits=("shadcn",),  # SDK 1.6; the default
     )
 ```
 

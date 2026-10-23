@@ -13,6 +13,46 @@ Generated `AGENTS.md` and `CLAUDE.md` point to the skill. Update the canonical
 source when contributing skill changes; keep emitted copies aligned through
 generation rather than editing two independent instruction sets.
 
+## Nuxt UI projects
+
+A Vue project on the `nuxt-ui` kit (`frontend.ui_kit`, see
+[frontend layouts](frontend-layouts.md#ui-kits)) also receives the official
+Nuxt UI skill and its MCP server:
+
+```text
+.agents/skills/nuxt-ui/      the skill, with its references and MIT licence
+.claude/skills/nuxt-ui/      the same copy, for Claude Code
+.mcp.json                    the nuxt-ui server (https://ui.nuxt.com/mcp) for Claude Code
+.codex/config.toml           the same server for Codex
+```
+
+The skill teaches when to use which Nuxt UI component and how to theme with
+it; the MCP server answers what a component accepts. Claude Code asks you to
+approve the project's `.mcp.json` servers on first use. Codex reads
+`.codex/config.toml` only once you trust the project; your
+`~/.codex/config.toml` still applies underneath. These files are scaffold:
+edit them as you like. An update brings a later forge change into an untouched
+file and proposes it as a `.forge-merge` sidecar for one you edited; a file
+you delete is written again.
+
+The skill is vendored in
+[`forge/templates/_common/skills/nuxt-ui`](../../forge/templates/_common/skills/nuxt-ui/SKILL.md)
+from `skills/nuxt-ui` of github.com/nuxt/ui at the release tag of the
+`@nuxt/ui` version forge pins (`NUXT_UI_SKILL_TAG` and `NUXT_UI_SKILL_COMMIT`
+in `forge/ui_kits.py`). When `NUXT_UI_VERSION` moves, a test fails until the
+skill is vendored again from the matching tag:
+
+```bash
+tag=v<version>; sha=$(gh api repos/nuxt/ui/commits/$tag --jq .sha)
+gh api "repos/nuxt/ui/git/trees/$sha?recursive=1" \
+  --jq '.tree[] | select(.type=="blob") | select(.path|startswith("skills/nuxt-ui/")) | .path'
+# fetch each path (and LICENSE.md) with:
+#   gh api -H "Accept: application/vnd.github.raw" "repos/nuxt/ui/contents/<path>?ref=$sha"
+```
+
+Replace the directory's contents with the fetched files, keep `LICENSE.md`,
+read the diff, then record the tag and commit in `forge/ui_kits.py`.
+
 ## Headless workflow
 
 ```mermaid

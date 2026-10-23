@@ -33,6 +33,18 @@ DEFAULT_UI_KIT = "shadcn"
 #: template depends on it with a caret, so a project takes later 4.x minors.
 NUXT_UI_VERSION = "4.12.0"
 
+#: The official Nuxt UI agent skill, vendored in ``forge/templates/_common/skills/
+#: nuxt-ui`` from ``skills/nuxt-ui`` of github.com/nuxt/ui at the release tag of
+#: :data:`NUXT_UI_VERSION`, with the repository's MIT licence. A ``nuxt-ui``
+#: project gets it in ``.agents/skills`` and ``.claude/skills``. Re-vendor it
+#: when the version moves (docs/guides/agentic-usage.md).
+NUXT_UI_SKILL_TAG = "v4.12.0"
+NUXT_UI_SKILL_COMMIT = "b1053b8508078274326aa44bb322076ca135aedf"
+
+#: Nuxt UI's MCP server, named in a ``nuxt-ui`` project's ``.mcp.json`` (Claude
+#: Code) and ``.codex/config.toml`` (Codex).
+NUXT_UI_MCP_URL = "https://ui.nuxt.com/mcp"
+
 #: The colour schemes the Vue template offers (``default_color_scheme``).
 COLOR_SCHEMES: tuple[str, ...] = (
     "blue",

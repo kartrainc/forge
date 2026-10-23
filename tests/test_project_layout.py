@@ -57,11 +57,14 @@ ROOT_ENTRIES = frozenset(
         # Provenance and the regeneration recipe.
         "forge.toml",
         ".forge",
-        # Agent instructions and the mirrored forge skill.
+        # Agent instructions, the mirrored skills, and a nuxt-ui project's MCP
+        # configuration for Claude Code and Codex.
         "AGENTS.md",
         "CLAUDE.md",
         ".agents",
         ".claude",
+        ".mcp.json",
+        ".codex",
         # Repository hygiene and CI.
         ".git",
         ".github",
