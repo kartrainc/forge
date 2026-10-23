@@ -46,6 +46,8 @@ def gh(path: str) -> Any:
 def vendor(tag: str) -> dict:
     commit = gh(f"repos/{REPOSITORY}/commits/{tag}")["sha"]
     tree = gh(f"repos/{REPOSITORY}/git/trees/{commit}?recursive=1")
+    if tree["truncated"]:
+        raise SystemExit(f"GitHub truncated the tree of {tag}; the skill may be incomplete")
     wanted = {
         entry["path"]: entry["sha"]
         for entry in tree["tree"]
@@ -54,6 +56,11 @@ def vendor(tag: str) -> dict:
     }
     if LICENCE not in wanted or f"{SOURCE_DIR}SKILL.md" not in wanted:
         raise SystemExit(f"{tag} has no {SOURCE_DIR}SKILL.md or {LICENCE}")
+    text = UI_KITS.read_text(encoding="utf-8")
+    for name, value in (("NUXT_UI_SKILL_TAG", tag), ("NUXT_UI_SKILL_COMMIT", commit)):
+        text, count = re.subn(rf'^{name} = "[^"]*"$', f'{name} = "{value}"', text, flags=re.M)
+        if count != 1:
+            raise SystemExit(f'{UI_KITS}: expected one `{name} = "..."` line, found {count}')
     files: dict[str, str] = {}
     with tempfile.TemporaryDirectory() as staging:
         for path, sha in sorted(wanted.items()):
@@ -75,9 +82,6 @@ def vendor(tag: str) -> dict:
         "files": dict(sorted(files.items())),
     }
     MANIFEST.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    text = UI_KITS.read_text(encoding="utf-8")
-    text = re.sub(r'NUXT_UI_SKILL_TAG = "[^"]*"', f'NUXT_UI_SKILL_TAG = "{tag}"', text)
-    text = re.sub(r'NUXT_UI_SKILL_COMMIT = "[^"]*"', f'NUXT_UI_SKILL_COMMIT = "{commit}"', text)
     UI_KITS.write_text(text, encoding="utf-8")
     return record
 
