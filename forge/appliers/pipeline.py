@@ -94,6 +94,7 @@ class FragmentPipeline:
             middlewares=middlewares,
             backend=ctx.backend_config.language,
             shared_env_vars=shared_env_vars,
+            ui_kit=ctx.ui_kit,
         )
         self.files.apply(ctx, plan)
         self.injection.apply(ctx, plan)

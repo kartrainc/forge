@@ -1,0 +1,42 @@
+import { mockHealth, expectHealthyDashboard } from './health';
+import { expect, test } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+// FORGE_BROWSER_COVERAGE is set for the instrumented run; the run against the
+// production build under the content-security policy collects none.
+test.afterEach(async ({ page }, testInfo) => {
+  const directory = process.env.FORGE_BROWSER_COVERAGE;
+  if (!directory) return;
+  const coverage = await page.evaluate(() => (window as any).__coverage__);
+  expect(coverage, 'Browser instrumentation must produce real coverage').toBeTruthy();
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, String(testInfo.parallelIndex) + '-' + Date.now() + '.json'), JSON.stringify(coverage));
+});
+
+test('application boots and navigates preferences in a real browser', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+    await mockHealth(page);
+    await page.goto('/');
+    await expectHealthyDashboard(page);
+    // Nuxt UI's palette applies: under the content-security policy only its
+    // nonce lets the palette element in, and nothing else defines the shades.
+    const shade = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--ui-color-primary-500').trim());
+    expect(shade).not.toBe('');
+    await expect(page.locator('body')).not.toBeEmpty();
+    await expect(page.locator('body')).not.toHaveText(/Internal Error|500 Internal/);
+    await page.locator('a[href="/settings"]').first().click();
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+    const theme = page.locator('[data-test="theme-select"]');
+    await theme.click();
+    await page.getByRole('option', { name: 'Dark', exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await theme.click();
+    await page.getByRole('option', { name: 'Light', exact: true }).click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await page.locator('a[href="/profile"]').first().click();
+    await expect(page.getByRole('button', { name: 'Sign Out' })).toBeVisible();
+    expect(errors).toEqual([]);
+});

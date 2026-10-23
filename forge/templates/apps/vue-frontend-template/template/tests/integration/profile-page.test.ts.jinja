@@ -4,8 +4,15 @@ import { mount } from '@vue/test-utils'
 import { http, HttpResponse } from 'msw'
 {%- endif %}
 import ProfilePage from '../../src/features/profile/ui/ProfilePage.vue'
+{%- if ui_kit == 'nuxt-ui' %}
+{%- set initials = "wrapper.get('[data-test=\"profile-initials\"]')" %}
+{%- set roles = "wrapper.findAll('[data-test=\"profile-role\"]')" %}
+{%- else %}
 import { AvatarFallback } from '../../src/shared/ui/avatar'
 import { Badge } from '../../src/shared/ui/badge'
+{%- set initials = 'wrapper.getComponent(AvatarFallback)' %}
+{%- set roles = 'wrapper.findAllComponents(Badge)' %}
+{%- endif %}
 import { useAuth } from '../../src/shared/composables/useAuth'
 {%- if include_auth %}
 import { server } from '../../src/shared/mocks/node'
@@ -29,8 +36,8 @@ it('shows the identity the gateway session reports and clears it on sign out', a
   const wrapper = mount(ProfilePage)
   expect(wrapper.get('h2').text()).toBe('Ada Lovelace')
   expect(wrapper.text()).toContain('@ada')
-  expect(wrapper.getComponent(AvatarFallback).text()).toBe('AL')
-  expect(wrapper.findAllComponents(Badge).map(badge => badge.text())).toEqual(['analyst'])
+  expect({{ initials }}.text()).toBe('AL')
+  expect({{ roles }}.map(badge => badge.text())).toEqual(['analyst'])
   for (const [label, value] of [
     ['Email', 'ada@example.com'],
     ['User ID', '7a1c2b3d-0000-4000-8000-000000000001'],
@@ -43,8 +50,8 @@ it('shows the identity the gateway session reports and clears it on sign out', a
   // Sign-out clears the session locally, then hands over to the gateway's /logout.
   await wrapper.findAll('button').find(button => button.text() === 'Sign Out')!.trigger('click')
   expect(auth.user.value).toBeNull()
-  expect(wrapper.getComponent(AvatarFallback).text()).toBe('?')
-  expect(wrapper.findAllComponents(Badge)).toHaveLength(0)
+  expect({{ initials }}.text()).toBe('?')
+  expect({{ roles }}).toHaveLength(0)
   wrapper.unmount()
 })
 {% else %}
@@ -55,8 +62,8 @@ it('shows the signed-in identity and clears it on sign out', async () => {
   const wrapper = mount(ProfilePage)
   expect(wrapper.get('h2').text()).toBe('Dev User')
   expect(wrapper.text()).toContain('@dev-user')
-  expect(wrapper.getComponent(AvatarFallback).text()).toBe('DU')
-  expect(wrapper.findAllComponents(Badge).map(badge => badge.text())).toEqual(['admin', 'user'])
+  expect({{ initials }}.text()).toBe('DU')
+  expect({{ roles }}.map(badge => badge.text())).toEqual(['admin', 'user'])
   for (const [label, value] of [
     ['Email', 'dev@localhost'],
     ['User ID', '00000000-0000-0000-0000-000000000001'],
@@ -68,8 +75,8 @@ it('shows the signed-in identity and clears it on sign out', async () => {
 
   await wrapper.findAll('button').find(button => button.text() === 'Sign Out')!.trigger('click')
   expect(auth.user.value).toBeNull()
-  expect(wrapper.getComponent(AvatarFallback).text()).toBe('?')
-  expect(wrapper.findAllComponents(Badge)).toHaveLength(0)
+  expect({{ initials }}.text()).toBe('?')
+  expect({{ roles }}).toHaveLength(0)
   expect(wrapper.text()).not.toContain('dev@localhost')
   wrapper.unmount()
 })

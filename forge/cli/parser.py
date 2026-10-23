@@ -11,6 +11,7 @@ import argparse
 import functools
 
 from forge.config import FrontendFramework
+from forge.ui_kits import COLOR_SCHEME_CHOICES
 from forge.ui_kits import COLOR_SCHEMES as _COLOR_SCHEMES
 
 FRAMEWORK_MAP = {
@@ -137,7 +138,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--author-name", metavar="NAME")
     p.add_argument("--package-manager", choices=["npm", "pnpm", "yarn", "bun"])
     p.add_argument("--frontend-port", type=int, metavar="PORT")
-    p.add_argument("--color-scheme", choices=COLOR_SCHEMES)
+    p.add_argument(
+        "--color-scheme",
+        choices=COLOR_SCHEME_CHOICES,
+        help="Primary colour. Svelte, Flutter and shadcn take the first eight; "
+        "nuxt-ui also takes any Tailwind CSS palette name.",
+    )
     p.add_argument(
         "--org-name", metavar="ORG", help="Flutter org in reverse domain (e.g. com.example)"
     )

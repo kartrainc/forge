@@ -81,6 +81,24 @@ ui_kit:
   default: "shadcn"
   help: "Component library (set by forge from FrontendConfig.ui_kit; see forge.ui_kits)"
 
+nuxt_ui_version:
+  type: str
+  when: false
+  default: "4.12.0"
+  help: "The @nuxt/ui release of the nuxt-ui kit (set by forge from forge.ui_kits.NUXT_UI_VERSION)"
+
+nuxt_ui_primary:
+  type: str
+  when: false
+  default: "blue"
+  help: "Tailwind palette behind Nuxt UI's primary colour (set by forge from default_color_scheme)"
+
+security_csp:
+  type: bool
+  when: false
+  default: false
+  help: "Build for the security.csp policy: the nonce placeholder (set by forge; see forge.frontend_csp)"
+
 consumed_services:
   type: str
   default: ""
@@ -136,6 +154,7 @@ keycloak_client_id:
 default_color_scheme:
   type: str
   default: "blue"
+  help: "The first eight for shadcn; nuxt-ui also takes any Tailwind CSS palette name"
   choices:
     - blue
     - indigo
@@ -145,6 +164,21 @@ default_color_scheme:
     - red
     - amber
     - cyan
+    - slate
+    - gray
+    - zinc
+    - neutral
+    - stone
+    - orange
+    - yellow
+    - lime
+    - emerald
+    - sky
+    - violet
+    - purple
+    - fuchsia
+    - pink
+    - rose
 
 # ─── Tasks (post-generation) ───
 

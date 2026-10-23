@@ -50,7 +50,12 @@ def test_get_unknown_layout_returns_none():
 
 def test_register_and_lookup_roundtrip():
     lv.register_layout_variant(
-        lv.LayoutVariant(FrontendFramework.VUE, "demolayout1", "apps/vue-frontend-template-demolayout1", "Top-Nav")
+        lv.LayoutVariant(
+            FrontendFramework.VUE,
+            "demolayout1",
+            "apps/vue-frontend-template-demolayout1",
+            "Top-Nav",
+        )
     )
     got = lv.get_layout_variant(FrontendFramework.VUE, "demolayout1")
     assert got is not None and got.display_label == "Top-Nav"
@@ -67,7 +72,11 @@ def test_duplicate_registration_raises():
 def test_unsupported_variant_hidden_from_available_but_resolvable():
     lv.register_layout_variant(
         lv.LayoutVariant(
-            FrontendFramework.SVELTE, "demolayout2", "apps/svelte-frontend-template-demolayout2", "Bento", supported=False
+            FrontendFramework.SVELTE,
+            "demolayout2",
+            "apps/svelte-frontend-template-demolayout2",
+            "Bento",
+            supported=False,
         )
     )
     assert "demolayout2" not in lv.available_layouts(FrontendFramework.SVELTE)
@@ -131,11 +140,17 @@ def test_validate_rejects_unsupported_layout_when_no_supported_variants():
 def test_validate_layout_is_framework_scoped():
     # A layout registered only for Vue must not validate for Svelte.
     lv.register_layout_variant(
-        lv.LayoutVariant(FrontendFramework.VUE, "demolayout2", "apps/vue-frontend-template-demolayout2", "Bento")
+        lv.LayoutVariant(
+            FrontendFramework.VUE, "demolayout2", "apps/vue-frontend-template-demolayout2", "Bento"
+        )
     )
-    FrontendConfig(framework=FrontendFramework.VUE, project_name="t", layout="demolayout2").validate()
+    FrontendConfig(
+        framework=FrontendFramework.VUE, project_name="t", layout="demolayout2"
+    ).validate()
     with pytest.raises(ValueError, match="not available for svelte"):
-        FrontendConfig(framework=FrontendFramework.SVELTE, project_name="t", layout="demolayout2").validate()
+        FrontendConfig(
+            framework=FrontendFramework.SVELTE, project_name="t", layout="demolayout2"
+        ).validate()
 
 
 # --- plugin API surface -----------------------------------------------------
@@ -156,7 +171,26 @@ def test_api_add_frontend_layout_registers_variant():
     assert variant is not None
     assert variant.display_label == "Top-Nav"
     assert variant.base_template_dir == "apps/vue-frontend-template"
+    # A plugin layout renders the default UI kit unless it lists others.
+    assert variant.ui_kits == ("shadcn",)
     assert "demolayout1" in lv.available_layouts(FrontendFramework.VUE)
+
+
+def test_api_add_frontend_layout_declares_ui_kits():
+    # SDK 1.6: the keyword a layout.toml's ``ui_kits`` key mirrors.
+    from forge.api import ForgeAPI, PluginRegistration
+
+    api = ForgeAPI(PluginRegistration(name="layout_plugin", module="m"))
+    api.add_frontend_layout(
+        "vue",
+        "demolayout3",
+        "apps/vue-frontend-template",
+        "Both kits",
+        ui_kits=("shadcn", "nuxt-ui"),
+    )
+    variant = lv.get_layout_variant(FrontendFramework.VUE, "demolayout3")
+    assert variant is not None
+    assert variant.ui_kits == ("shadcn", "nuxt-ui")
 
 
 def test_api_add_frontend_layout_accepts_string_framework():

@@ -256,6 +256,15 @@ def _external_api_mode(typed: TypedConfig) -> bool:
     return False
 
 
+def external_api_url(config: ProjectConfig) -> str:
+    """The external API the frontend calls directly, or ``""`` in local mode.
+
+    The content-security policy (:mod:`forge.frontend_csp`) admits its origin.
+    """
+    typed = _typed(config)
+    return _frontend_api_target_url(typed) if _external_api_mode(typed) else ""
+
+
 def _frontend_api_urls(
     config: ProjectConfig, backend_name: str, backend_port: int
 ) -> tuple[str, str, str]:
@@ -300,6 +309,8 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         config, backend_name, backend_port
     )
     from forge.codegen.event_union import AG_UI_CLIENT_VERSION, AG_UI_CORE_VERSION
+    from forge.frontend_csp import csp_enabled
+    from forge.ui_kits import NUXT_UI_VERSION, nuxt_ui_primary
 
     return {
         "project_name": fc.project_name,
@@ -340,6 +351,11 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         # The component library the template renders on (forge.ui_kits);
         # kit-specific files are selected by Copier conditional names.
         "ui_kit": fc.ui_kit,
+        "nuxt_ui_version": NUXT_UI_VERSION,
+        # The Tailwind palette behind Nuxt UI's primary colour (brand module).
+        "nuxt_ui_primary": nuxt_ui_primary(fc.default_color_scheme),
+        # security.csp: the build stamps the nonce placeholder (forge.frontend_csp).
+        "security_csp": csp_enabled(config),
         "backend_features": _build_backend_features_json(config),
         "proxy_targets": _build_proxy_targets_json(config),
         "vite_proxy_config": _build_vite_proxy_config(config),

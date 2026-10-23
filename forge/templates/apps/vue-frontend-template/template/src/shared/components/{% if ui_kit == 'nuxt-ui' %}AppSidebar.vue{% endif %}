@@ -1,0 +1,77 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
+import { useAuth } from '@/shared/composables/useAuth'
+
+const { user, logout } = useAuth()
+
+const primaryNav: NavigationMenuItem[] = [
+  { label: 'Home', to: '/', icon: 'i-lucide-house', exact: true },
+  // --- feature nav items ---
+  // --- end feature nav items ---
+]
+
+const secondaryNav: NavigationMenuItem[] = [
+  { label: 'Profile', to: '/profile', icon: 'i-lucide-user' },
+  { label: 'Settings', to: '/settings', icon: 'i-lucide-settings' },
+]
+
+const displayName = computed(
+  () => [user.value?.firstName, user.value?.lastName].filter(Boolean).join(' ') || user.value?.username || 'Account',
+)
+
+const initials = computed(() => {
+  if (!user.value) return '?'
+  return (
+    ((user.value.firstName?.[0] ?? '') + (user.value.lastName?.[0] ?? '')).toUpperCase()
+    || user.value.username[0]?.toUpperCase()
+    || '?'
+  )
+})
+
+const accountMenu = computed<DropdownMenuItem[][]>(() => [
+  [{ type: 'label', label: displayName.value, description: user.value?.email }],
+  [
+    { label: 'Account Settings', icon: 'i-lucide-user', to: '/profile' },
+    { label: 'Preferences', icon: 'i-lucide-sliders-horizontal', to: '/settings' },
+  ],
+  [{ label: 'Log Out', icon: 'i-lucide-log-out', onSelect: () => logout() }],
+])
+</script>
+
+<template>
+  <UDashboardSidebar id="app" collapsible resizable :ui="{ footer: 'border-t border-default' }">
+    <template #header="{ collapsed }">
+      <RouterLink to="/" class="flex min-w-0 items-center gap-2 px-1">
+        <span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-inverted">
+          <UIcon name="i-lucide-sparkles" class="size-4" />
+        </span>
+        <span v-if="!collapsed" class="truncate font-semibold text-highlighted">{{ app_title }}</span>
+      </RouterLink>
+    </template>
+
+    <template #default="{ collapsed }">
+      <UNavigationMenu :collapsed="collapsed" :items="primaryNav" orientation="vertical" tooltip />
+      <UNavigationMenu :collapsed="collapsed" :items="secondaryNav" orientation="vertical" tooltip class="mt-auto" />
+    </template>
+
+    <template #footer="{ collapsed }">
+      <UDropdownMenu
+        :items="accountMenu"
+        :content="{ align: 'center', collisionPadding: 12 }"
+        :ui="{ content: collapsed ? 'w-48' : 'w-(--reka-dropdown-menu-trigger-width)' }"
+      >
+        <UButton
+          :avatar="{ text: initials }"
+          :label="collapsed ? undefined : displayName"
+          :trailing-icon="collapsed ? undefined : 'i-lucide-chevrons-up-down'"
+          color="neutral"
+          variant="ghost"
+          block
+          :square="collapsed"
+          class="data-[state=open]:bg-elevated"
+        />
+      </UDropdownMenu>
+    </template>
+  </UDashboardSidebar>
+</template>

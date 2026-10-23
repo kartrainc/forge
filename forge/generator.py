@@ -222,11 +222,13 @@ def generate(
     # it is joined onto any path (staging, dry-run temp dir, or final root).
     validate_slug(config.project_slug)
     # Same defence for the UI kit: an unknown or unselectable kit would render
-    # the default kit's files while the recipe and manifest record the other.
+    # the default kit's files while the recipe and manifest record the other,
+    # and a kit with settings it cannot render (chat, a layout) would render
+    # two variants of the same file.
     if config.frontend is not None:
-        from forge.ui_kits import check_kit  # noqa: PLC0415
+        from forge.ui_kits import check_frontend  # noqa: PLC0415
 
-        check_kit(config.frontend)
+        check_frontend(config.frontend)
 
     if dry_run:
         # dry_run: generate into a throwaway temp dir as before.
@@ -788,6 +790,14 @@ def _generate_frontend_extras(
             render_nginx_conf(config, frontend_dir)
 
 
+def _vue_ui_kit(config: ProjectConfig) -> str | None:
+    """The project's Vue UI kit, which selects a fragment's ``files-<kit>/`` tree."""
+    frontend = config.frontend
+    if frontend is None or frontend.framework != FrontendFramework.VUE:
+        return None
+    return frontend.ui_kit
+
+
 def _apply_project_scope(
     config: ProjectConfig,
     plan: ResolvedPlan,
@@ -847,6 +857,7 @@ def _apply_project_scope(
             # INTERNAL_SERVICE_URL_*, APP__EVENTS__BUS_URL) lands in the Helm
             # values too — not just docker-compose. (audit #5)
             topology=compute_topology(config, plan, synthesis=synthesis),
+            ui_kit=_vue_ui_kit(config),
         )
 
     # Bundle the Keycloak realm into the Helm chart's files/ so the in-cluster

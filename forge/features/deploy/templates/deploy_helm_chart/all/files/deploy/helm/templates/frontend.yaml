@@ -4,7 +4,11 @@
        nginx.conf is supplied as a ConfigMap-mounted file rather than baked into
        the image (matching the compose bind-mount). In k8s the Ingress handles
        /api/<backend> routing, so the frontend pod only needs a static SPA
-       fallback — overridable via .Values.frontend.nginxConf. */ -}}
+       fallback — overridable via .Values.frontend.nginxConf. Under
+       security.csp it sends .Values.frontend.securityHeaders with every
+       response and the contentSecurityPolicy with index.html, whose nonce is
+       nginx's $request_id written over the build's __CSP_NONCE__ placeholder;
+       index.html is never cached, so its nonce always matches its header. */ -}}
 {{- if .Values.frontend.enabled }}
 ---
 apiVersion: v1
@@ -24,9 +28,23 @@ data:
         server_name _;
         root /usr/share/nginx/html;
         index index.html;
+{{- range $name, $value := .Values.frontend.securityHeaders }}
+        add_header {{ $name }} {{ $value | quote }} always;
+{{- end }}
         location / {
             try_files $uri $uri/ /index.html;
         }
+{{- with .Values.frontend.contentSecurityPolicy }}
+        location = /index.html {
+{{- range $name, $value := $.Values.frontend.securityHeaders }}
+            add_header {{ $name }} {{ $value | quote }} always;
+{{- end }}
+            add_header Content-Security-Policy {{ . | quote }} always;
+            add_header Cache-Control "no-store" always;
+            sub_filter_once off;
+            sub_filter "__CSP_NONCE__" "$request_id";
+        }
+{{- end }}
     }
 {{- end }}
 ---

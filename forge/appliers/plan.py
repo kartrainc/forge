@@ -204,6 +204,9 @@ class FragmentPlan:
             plugin's own package for plugin fragments.
         files_dir: ``fragment_dir / "files"`` when it exists; ``None`` for
             inject-only fragments.
+        kit_files_dir: ``fragment_dir / "files-<ui_kit>"`` when the
+            project's Vue UI kit has a tree of its own; its files replace
+            the same paths of ``files_dir`` (:func:`kit_replaced_paths`).
         injections: Parsed + rendered ``inject.yaml`` entries. Empty
             tuple when the fragment has no ``inject.yaml``.
         dependencies: Pass-through of ``impl.dependencies``.
@@ -218,6 +221,7 @@ class FragmentPlan:
     dependencies: tuple[str, ...]
     env_vars: tuple[tuple[str, str], ...]
     feature_key: str
+    kit_files_dir: Path | None = None
 
     @classmethod
     def from_impl(
@@ -230,6 +234,7 @@ class FragmentPlan:
         middlewares: tuple[MiddlewareSpec, ...] = (),
         backend: BackendLanguage | None = None,
         shared_env_vars: tuple[tuple[str, str], ...] = (),
+        ui_kit: str | None = None,
     ) -> FragmentPlan:
         """Resolve an impl to a concrete plan.
 
@@ -275,6 +280,8 @@ class FragmentPlan:
 
         files_path = fragment_dir / "files"
         files_dir: Path | None = files_path if files_path.is_dir() else None
+        kit_path = fragment_dir / f"files-{ui_kit}" if ui_kit else None
+        kit_files_dir = kit_path if kit_path is not None and kit_path.is_dir() else None
 
         inject_path = fragment_dir / "inject.yaml"
         if inject_path.is_file():
@@ -304,7 +311,26 @@ class FragmentPlan:
             dependencies=impl.dependencies,
             env_vars=_merge_env_vars(shared_env_vars, impl.env_vars),
             feature_key=feature_key,
+            kit_files_dir=kit_files_dir,
         )
+
+
+def kit_replaced_paths(kit_files_dir: Path | None) -> frozenset[Path]:
+    """The destination paths a ``files-<kit>/`` tree writes (``.jinja`` stripped).
+
+    The applier skips these paths in ``files/``, so a kit's file replaces the
+    shared one and a kit can add files of its own.
+    """
+    if kit_files_dir is None:
+        return frozenset()
+    paths = set()
+    for source in kit_files_dir.rglob("*"):
+        if source.is_file():
+            rel = source.relative_to(kit_files_dir)
+            if rel.name.endswith(".jinja"):
+                rel = rel.with_name(rel.name[: -len(".jinja")])
+            paths.add(rel)
+    return frozenset(paths)
 
 
 def _render_all(

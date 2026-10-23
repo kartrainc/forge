@@ -17,6 +17,21 @@ pre-release labels. SDK MAJOR aligns with the plugin compat boundary
 (plugins may need code changes); MINOR signals additive surface
 (plugins keep working, can opt into new APIs).
 
+## 1.6 (2026-10, with forge 1.x)
+
+Status: **provisional** — additive; existing plugins keep working unchanged.
+
+Added:
+
+- ``ForgeAPI.add_frontend_layout(..., ui_kits=("shadcn",))`` — the Vue UI
+  kits (``forge/ui_kits.py``) a layout's files render with, as the
+  ``ui_kits`` key of a ``layout.toml`` declares them. The default keeps an
+  existing plugin layout on the default kit; a project on another kit
+  (``frontend.ui_kit``) is refused the layout before anything is written
+  (ADR-011). Component features declare their kits in
+  ``[feature.component]`` and fragments on ``Fragment.ui_kits``; both landed
+  with the option and need no SDK change.
+
 ## 1.5 (2026-06, with forge 1.x)
 
 Status: **provisional** — additive; existing plugins keep working unchanged.

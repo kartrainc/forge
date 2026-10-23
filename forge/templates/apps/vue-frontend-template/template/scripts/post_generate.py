@@ -84,6 +84,7 @@ PACKAGE_MANAGER = _answers["package_manager"]
 APP_TITLE = _answers["app_title"]
 PROJECT_NAME = _answers["project_name"]
 VERSION = _answers["version"]
+UI_KIT = _answers.get("ui_kit", "shadcn")
 
 
 # ─── Load feature_templates.py ───
@@ -113,6 +114,14 @@ HUB_SIDEBAR_NAV = _mod.HUB_SIDEBAR_NAV
 HUB_MSW_IMPORT = _mod.HUB_MSW_IMPORT
 HUB_MSW_SPREAD = _mod.HUB_MSW_SPREAD
 HUB_HOME_ACTIONS = _mod.HUB_HOME_ACTIONS
+
+# The CRUD pages and the hub entries are written for the project's UI kit.
+if UI_KIT == "nuxt-ui":
+    LIST_PAGE_TEMPLATE = _mod.NUXT_UI_LIST_PAGE_TEMPLATE
+    CREATE_PAGE_TEMPLATE = _mod.NUXT_UI_CREATE_PAGE_TEMPLATE
+    DETAIL_PAGE_TEMPLATE = _mod.NUXT_UI_DETAIL_PAGE_TEMPLATE
+    HUB_SIDEBAR_NAV = _mod.NUXT_UI_HUB_SIDEBAR_NAV
+    HUB_HOME_ACTIONS = _mod.NUXT_UI_HUB_HOME_ACTIONS
 
 
 # ─── File Helpers ───
@@ -274,7 +283,10 @@ def patch_readme(feature_names: list[str]) -> None:
         ctx = make_feature_context(name)
         features_table += f"| {ctx['Plural']} | `/{ctx['plural']}` | CRUD management for {ctx['plural']} |\n"
     features_table += "| Profile | `/profile` | User profile from JWT token |\n"
-    features_table += "| Settings | `/settings` | Theme, color scheme, dark mode preferences |\n"
+    if UI_KIT == "nuxt-ui":
+        features_table += "| Settings | `/settings` | Color mode preference |\n"
+    else:
+        features_table += "| Settings | `/settings` | Theme, color scheme, dark mode preferences |\n"
     if INCLUDE_AUTH:
         features_table += "| Auth | `/login` | Keycloak OAuth2 login |\n"
     if INCLUDE_CHAT:
@@ -290,13 +302,19 @@ def patch_readme(feature_names: list[str]) -> None:
         scripts_table += f"| `{pm} run codegen` | Generate service-specific client in `src/custom/api` |\n"
 
     tech = "- **Framework**: Vue 3 + TypeScript + Vite\n"
-    tech += "- **UI**: Shadcn-Vue (Radix Vue + Tailwind CSS 4)\n"
+    if UI_KIT == "nuxt-ui":
+        tech += "- **UI**: Nuxt UI 4 (Reka UI + Tailwind CSS 4)\n"
+    else:
+        tech += "- **UI**: Shadcn-Vue (Radix Vue + Tailwind CSS 4)\n"
     tech += "- **State**: Pinia (client) + TanStack Vue Query (server)\n"
     tech += "- **HTTP**: Ky + Zod runtime validation\n"
     if INCLUDE_AUTH:
         tech += "- **Auth**: Keycloak (OAuth2 + PKCE)\n"
     tech += "- **Testing**: Vitest + MSW\n"
-    tech += "- **Icons**: Lucide Vue Next\n"
+    if UI_KIT == "nuxt-ui":
+        tech += "- **Icons**: Iconify, lucide bundled\n"
+    else:
+        tech += "- **Icons**: Lucide Vue Next\n"
 
     content = f"# {APP_TITLE}\n\n{PROJECT_NAME} - a Vue 3 SPA.\n\n"
     content += f"## Tech Stack\n\n{tech}\n"

@@ -1,0 +1,27 @@
+/**
+ * Nuxt UI configuration: the project's half of the design system.
+ *
+ * forge writes this file once and never overwrites it; a later forge change to
+ * the starter arrives as a `.forge-merge` sidecar. `vite.config.ts` passes these
+ * values to the Nuxt UI plugin, so this is the place to change them:
+ *
+ * - `ui.colors` picks the Tailwind palettes behind the semantic colours
+ *   (https://ui.nuxt.com/docs/getting-started/theme/design-system).
+ * - `ui.icons` overrides the icons Nuxt UI's own components use.
+ * - `ui.<component>` restyles one component everywhere (its `slots`,
+ *   `variants`, `compoundVariants`, `defaultVariants`).
+ * - `theme.colors` lists the semantic colours generated as CSS; keep `error`,
+ *   which form validation uses.
+ */
+import type { NuxtUIOptions } from '@nuxt/ui/unplugin'
+
+export const ui: NuxtUIOptions['ui'] = {
+  colors: {
+    primary: '{{ nuxt_ui_primary }}',
+    neutral: 'slate',
+  },
+}
+
+export const theme: NuxtUIOptions['theme'] = {
+  colors: ['primary', 'secondary', 'success', 'info', 'warning', 'error'],
+}

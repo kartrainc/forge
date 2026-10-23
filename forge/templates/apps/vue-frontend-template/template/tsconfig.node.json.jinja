@@ -12,11 +12,22 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+{%- if ui_kit == 'nuxt-ui' %}
+    "skipLibCheck": true,
+    "paths": {
+      "#build/ui": ["./node_modules/.nuxt-ui/ui"]
+    }
+{%- else %}
     "skipLibCheck": true
+{%- endif %}
   },
   "include": [
     "vite.config.ts",
+{%- if ui_kit == 'nuxt-ui' %}
+    "src/custom/theme/nuxt-ui.config.ts",
+{%- else %}
     "tailwind.config.ts",
+{%- endif %}
     "openapi-ts.config.ts",
     "eslint.config.js"
   ]

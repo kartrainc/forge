@@ -2,8 +2,32 @@ server {
     listen 80;
     root /usr/share/nginx/html;
     index index.html;
+{% if security_headers %}
+
+    # security.csp: defence-in-depth headers on every response.
+{% for name, value in security_headers %}
+    add_header {{ name }} "{{ value }}" always;
+{% endfor %}
+{% endif %}
 
     location / {
         try_files $uri $uri/ /index.html;
     }
+{% if content_security_policy %}
+
+    # security.csp: index.html carries the Content-Security-Policy. Its nonce is
+    # $request_id, 16 random bytes per request as hex; sub_filter writes it over
+    # the __CSP_NONCE__ placeholder the build stamps on its tags, and the page is
+    # never cached, so its nonce always matches its header. A location with its
+    # own add_header inherits none from the server, so the headers repeat here.
+    location = /index.html {
+{% for name, value in security_headers %}
+        add_header {{ name }} "{{ value }}" always;
+{% endfor %}
+        add_header Content-Security-Policy "{{ content_security_policy }}" always;
+        add_header Cache-Control "no-store" always;
+        sub_filter_once off;
+        sub_filter "{{ nonce_placeholder }}" "{{ nonce_variable }}";
+    }
+{% endif %}
 }

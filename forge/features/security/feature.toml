@@ -1,11 +1,11 @@
 [feature]
 name = "security"
 version = "1.0.0"
-summary = "CSP nginx config + SBOM workflow."
+summary = "Frontend content-security policy + SBOM workflow."
 category = "platform"
 
 [feature.depends]
 
 [feature.provides]
 options = ["security.csp", "security.sbom"]
-fragments = ["security_csp", "security_sbom"]
+fragments = ["security_sbom"]

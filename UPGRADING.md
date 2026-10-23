@@ -177,9 +177,8 @@ app-relative (`files/src/...`).
 
 ### Vue UI kit option (unreleased)
 
-`frontend.ui_kit` (`--ui-kit`) selects the Vue template's component library.
-`shadcn` is the default and, for now, the only selectable kit; `nuxt-ui` is
-registered for the Nuxt UI 4 rendering that follows ([ADR-011](docs/architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md)).
+`frontend.ui_kit` (`--ui-kit`) selects the Vue template's component library:
+`shadcn` (the default) or `nuxt-ui` ([ADR-011](docs/architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md)).
 Existing projects keep their output. On the next `forge --update` the quality
 recipe gains `ui_kit` and `forge.toml` records it under `[forge.frontend]`;
 older recipes and manifests read as `shadcn`. The option applies to Vue only:
@@ -195,7 +194,88 @@ Plugin authors: a component feature declares the kits it renders with in
 replacement per kit in `[feature.component.replaced_by]`; a fragment may set
 `Fragment.ui_kits` (default: any kit). Forge refuses, at plan time, a component
 or fragment whose kits exclude the project's. Plugin layouts render with
-`shadcn`.
+`shadcn` unless they pass `ui_kits` to `add_frontend_layout` (SDK 1.6). A
+fragment may ship a `files-<kit>/` tree beside `files/`; for a project on that
+kit its files replace the same paths of `files/`.
+
+#### Switching a project to Nuxt UI
+
+Set `ui_kit` to `nuxt-ui` under `config.frontend` in `.forge/quality.json`
+(and in your stack file, if you keep one) and run `forge --update`. Nuxt UI
+takes the `sidebar` layout and no AI chat; the update refuses other settings
+before changing anything.
+
+- Generated files are rewritten. `src/shared/ui/`, the settings store and
+  `useTheme.ts` leave the provenance and are deleted.
+- Untouched scaffold is updated in place, the screens and CRUD pages included.
+  Edited scaffold receives `.forge-merge` sidecars, typically `package.json`,
+  `vite.config.ts`, `index.html`, `src/app/main.ts`, `src/app/App.vue`,
+  `src/app/styles/main.css` and the tsconfig files.
+- Scaffold the kit no longer emits stays on disk: delete `components.json`,
+  `tailwind.config.ts` and `tests/integration/button.test.ts`,
+  `primitives.test.ts` and `splitter.test.ts`. The three suites import the
+  deleted kit and fail until removed.
+- The brand module lands in `src/custom/theme/`: `nuxt-ui.config.ts` (the
+  palettes, primary from `default_color_scheme`) and `tokens.css`. Forge writes
+  it once; later starter changes arrive as sidecars.
+- The stored colour mode moves from the `theme` key to VueUse's
+  `vueuse-color-scheme`; `system` becomes `auto`. Users see their system mode
+  once until they choose again.
+
+### Executable Postgres init script (unreleased)
+
+`deploy/compose/init-db.sh`, which creates each backend's database and
+Keycloak's, is now generated with mode 0755. On macOS with Docker Desktop the
+0644 file failed with `bad interpreter: Permission denied`, so `docker compose
+up` created only `POSTGRES_DB`.
+
+- An untouched `init-db.sh` gets the mode on the next update. If you edited it,
+  run `chmod +x deploy/compose/init-db.sh` yourself.
+- Postgres runs init scripts only on an empty data directory, and a failed run
+  still leaves it initialized. If your stack never created its databases,
+  delete the Postgres volume once after updating, for example with
+  `docker compose down -v`, which also deletes the other volumes.
+
+### Frontend content-security policy (unreleased)
+
+`security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,
+which nothing included. It now protects the Vue frontend itself, whichever UI
+kit it uses, unless the project has the AI chat:
+
+- `apps/<frontend>/nginx.conf` and the Helm chart's default server block send
+  X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
+  Permissions-Policy with every response, and with `index.html` a
+  Content-Security-Policy without `'unsafe-inline'` or `'unsafe-eval'` whose
+  nonce is nginx's `$request_id`. `index.html` is served `no-store`.
+  Strict-Transport-Security is left to your TLS terminator.
+- An untouched `nginx.conf` is updated in place; an edited one receives a
+  sidecar. `deploy/infra/nginx-csp.conf` is scaffold and stays on disk: delete
+  it. A project that serves its own policy keeps it and adopts the nonce by
+  merging the sidecar.
+- The build writes a nonce placeholder on its tags (`html.cspNonce` in
+  `vite.config.ts`). Every Vue project, the chat ones included, also changes
+  where the policy would need it: `index.html` loses its inline `style`
+  attribute, whose font family moves to `main.css`; the app reads the nonce,
+  when there is one, for the `<style>` elements its kit inserts
+  (`src/app/providers/csp.ts`, imported first by `main.ts`); zod parses
+  without `eval`; the e2e specs collect coverage only when
+  `FORGE_BROWSER_COVERAGE` is set.
+- Code of your own that inserts `<style>` elements or writes `style`
+  attributes as markup is blocked from now on; Vue's `:style` bindings are not.
+  Add the origins your frontend calls, such as an error tracker, to
+  `connect-src` in `nginx.conf`. To serve without the policy, set
+  `"security.csp" = false` under `[forge.options]` in `forge.toml`, and
+  `"security.csp" = "user"` under `[forge.option_origins]`, then update: the
+  update takes options from `forge.toml`, not from the recipe.
+- `scripts/serve-csp.mjs` and `playwright.csp.config.ts` run the browser suites
+  against the production build under the policy, with auth disabled since
+  nothing serves `/auth/*` there:
+  `VITE_AUTH_DISABLED=true npm run build && npx playwright test -c playwright.csp.config.ts`.
+  The sign-in flow, a same-origin `fetch` of `/auth/userinfo` and navigations
+  to `/auth/login` and `/logout`, is not run under the policy.
+- Svelte, Flutter and plugin frontends, and Vue projects with the AI chat, are
+  served as before, without a policy. The chat's MCP panels load remote
+  origins in frames, which the policy would block.
 
 ## 1.0 → 1.1
 

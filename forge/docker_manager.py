@@ -440,6 +440,12 @@ def render_init_db(
     init_path.parent.mkdir(parents=True, exist_ok=True)
     # Write with LF line endings (CRLF breaks shebang in Linux containers)
     init_path.write_bytes(output.replace("\r\n", "\n").encode("utf-8"))
+    # Executable, so the Postgres image runs it by its shebang. Its entrypoint
+    # executes a ``*.sh`` init script when ``[ -x ]`` holds and sources it
+    # otherwise; Docker Desktop's file sharing reports a bind-mounted 0644 file
+    # as executable yet refuses to execute it (exit 126), so no database but
+    # POSTGRES_DB was created there. On Windows, chmod only clears read-only.
+    init_path.chmod(0o755)
     return init_path
 
 
@@ -560,10 +566,23 @@ def render_service_registry(
 
 
 def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render nginx.conf into the frontend directory (static files + SPA fallback only)."""
+    """Render nginx.conf into the frontend directory.
+
+    It serves the static build with an SPA fallback and, under ``security.csp``,
+    the headers and nonce policy of :mod:`forge.frontend_csp`.
+    """
+    from forge import frontend_csp  # noqa: PLC0415
+
     env = _jinja_env()
     template = env.get_template("deploy/nginx.conf.j2")
-    output = template.render({})
+    output = template.render(
+        {
+            "security_headers": frontend_csp.security_headers(config),
+            "content_security_policy": frontend_csp.content_security_policy(config),
+            "nonce_placeholder": frontend_csp.NONCE_PLACEHOLDER,
+            "nonce_variable": frontend_csp.NONCE_VARIABLE,
+        }
+    )
     nginx_path = frontend_dir / "nginx.conf"
     nginx_path.write_text(output, encoding="utf-8")
     return nginx_path

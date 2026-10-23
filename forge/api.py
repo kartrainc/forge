@@ -136,7 +136,12 @@ if TYPE_CHECKING:
 #     priority config layer (:mod:`forge.platform_templates`). The platform-
 #     scale analogue of ``add_frontend_layout`` /
 #     ``add_backend_application_template``.
-SDK_VERSION = "1.5"
+#
+# 1.6 — additive: one new keyword argument —
+#   * ``ForgeAPI.add_frontend_layout(..., ui_kits=("shadcn",))`` lists the
+#     Vue UI kits (:mod:`forge.ui_kits`) a layout renders with, as a
+#     ``layout.toml`` does (ADR-011).
+SDK_VERSION = "1.6"
 
 
 _SDK_VERSION_RE = re.compile(r"^(\d+)\.(\d+)$")
@@ -725,6 +730,7 @@ class ForgeAPI:
         *,
         base_template_dir: str = "",
         supported: bool = True,
+        ui_kits: tuple[str, ...] = ("shadcn",),
     ) -> None:
         """Register a selectable UI app-shell layout (``--layout``) for a frontend.
 
@@ -736,9 +742,11 @@ class ForgeAPI:
         joins it under the templates root; an absolute path wins the join).
         When ``base_template_dir`` is set, the generator renders that shared
         base first and overlays this template (two-stage render); empty means
-        a self-contained single render.
+        a self-contained single render. ``ui_kits`` lists the Vue UI kits
+        (:mod:`forge.ui_kits`) the layout's files render with, as a
+        ``layout.toml`` does; a project on another kit is refused the layout.
 
-        Additive since SDK 1.3.
+        Additive since SDK 1.3; ``ui_kits`` since SDK 1.6.
         """
         from forge.config import (  # noqa: PLC0415
             FrontendFramework,
@@ -762,6 +770,7 @@ class ForgeAPI:
                 display_label=display_label,
                 supported=supported,
                 base_template_dir=base_template_dir,
+                ui_kits=tuple(ui_kits),
             )
         )
 

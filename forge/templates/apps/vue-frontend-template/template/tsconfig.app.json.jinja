@@ -16,7 +16,11 @@
     "skipLibCheck": true,
     "paths": {
       "@/*": ["./src/*"],
+{%- if ui_kit == 'nuxt-ui' %}
+      "#build/ui/*": ["./node_modules/.nuxt-ui/ui/*"]
+{%- else %}
       "@forge/canvas-core": ["./src/features/ai_chat/canvas-core/index.ts"]
+{%- endif %}
     },
     "types": ["vite/client"]
   },
@@ -25,7 +29,12 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.vue",
+{%- if ui_kit == 'nuxt-ui' %}
+    "src/auto-imports.d.ts",
+    "src/components.d.ts"
+{%- else %}
     "src/auto-imports.d.ts"
+{%- endif %}
   ],
   "exclude": [
     "src/**/__tests__/*",

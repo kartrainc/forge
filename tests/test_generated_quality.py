@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -83,6 +84,51 @@ def test_missing_protected_file_regenerated(project):
     path.unlink()
     assert update_owned_project(project)["passed"]
     assert path.read_bytes() == content
+
+
+_POSIX_MODES = pytest.mark.skipif(
+    os.name == "nt", reason="Windows has no executable bit; chmod only toggles read-only"
+)
+
+
+@pytest.fixture
+def two_database_project():
+    """Two backends: Postgres needs ``deploy/compose/init-db.sh`` for the second database."""
+    root = generate(
+        ProjectConfig(
+            project_name="init-db",
+            backends=[
+                BackendConfig(name="api"),
+                BackendConfig(name="billing", server_port=5001),
+            ],
+        ),
+        quiet=True,
+        dry_run=True,
+    )
+    yield root
+    shutil.rmtree(root.parent)
+
+
+@_POSIX_MODES
+def test_postgres_init_script_is_executable(two_database_project):
+    # Postgres executes an executable init script and sources the rest, but
+    # Docker Desktop reports a bind-mounted 0644 file as executable and then
+    # refuses to run it, so the script must carry the bit itself.
+    script = two_database_project / "deploy/compose/init-db.sh"
+    assert script.read_bytes().startswith(b"#!/bin/bash\n")
+    assert script.stat().st_mode & 0o777 == 0o755
+
+
+@_POSIX_MODES
+def test_update_makes_an_untouched_postgres_init_script_executable(two_database_project):
+    # A project generated before the fix holds the script at 0644; as untouched
+    # scaffold the update rewrites it with the regenerated file's mode.
+    script = two_database_project / "deploy/compose/init-db.sh"
+    content = script.read_bytes()
+    script.chmod(0o644)
+    assert update_owned_project(two_database_project)["passed"]
+    assert script.read_bytes() == content
+    assert script.stat().st_mode & 0o777 == 0o755
 
 
 def test_recipe_pin_and_shared_inventory(project):

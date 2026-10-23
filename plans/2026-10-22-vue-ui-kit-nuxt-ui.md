@@ -2,9 +2,13 @@
 
 Base: f1e7ba714fca490f8d72caa367f9e34697c72930.
 
-Date: 2026-10-22. Status: proposed. The decisions below were confirmed with the
-owner on 2026-10-22; F-01 is in progress on `feat/vue-ui-kit-option`. First
-consumer: kartra-ai, which plans its own adoption in its repository.
+Date: 2026-10-22. Status: accepted. The decisions below were confirmed with the
+owner on 2026-10-22, who approved ADR-011 and F-01 the same day. F-01 is
+merged (#376, `78f67083`) into `cchifor/forge` and Kartra's fork
+`kartrainc/forge`, which F-02 and F-03 target from now on. F-02 is built on
+`feat/vue-nuxt-ui-kit`, and §"F-02 as built" records where it settled the text
+above differently. First consumer:
+kartra-ai, which plans its own adoption in its repository.
 
 Requested scope: offer Nuxt UI 4 as a selectable kit of the Vue template,
 adopted by its documented model rather than adapted to the theming of the
@@ -462,9 +466,90 @@ uses:
 The first consumer's adoption, including its sidecar resolutions, is planned in
 kartra-ai (`docs/plans/2026-10-22-forge-nuxt-ui-kit.md`).
 
+## F-02 as built
+
+Both Vue lanes pass locally against the 2026-10-18 registry snapshot:
+
+| Lane | Coverage (gate > 80 %) | Suites | Content security |
+| --- | --- | --- | --- |
+| `vue` (shadcn, auth off, `items`) | 1114 / 1236 lines, 90.1 % | 162 unit, 16 integration, 2 e2e | no report |
+| `vue-nuxt-ui` (auth on, `items`, `orders`) | 1024 / 1154 lines, 88.7 % | 159 unit, 15 integration, 3 e2e | the two admitted elements only |
+
+Where the build settled the text above differently:
+
+- **Trusted Types is not enforced** (§F's fallback). In Vue mode, Nuxt UI
+  4.12's stub reports the app as hydrating, so its colour plugin writes a
+  temporary palette copy through `innerHTML`; Trusted Types blocks the write
+  and the app does not start. No option turns the copy off. ADR-011 records it.
+- **Two upstream elements are admitted.** That palette copy and VueUse's
+  colour-mode transition guard insert `<style>` elements without the nonce;
+  the browser blocks both without visible effect, since the palette applies
+  from the head entry that carries the nonce. `'report-sample'` in
+  `script-src` and `style-src` lets the check name them by their first
+  characters; any other report fails the lane.
+- **More of the app takes the nonce.** vaul-vue, behind `UDrawer` and the
+  dashboard's mobile menu, reads it from the `content` attribute of a
+  `csp-nonce` meta tag, so the `nuxt-ui` `index.html` carries a second one
+  beside Vite's, which the browser does not hide as it hides `nonce`. zod
+  probes for `eval` to compile its parsers; `src/app/providers/csp.ts`,
+  imported first by `main.ts` in both kits, sets `z.config({ jitless: true })`.
+- **The app's nonce wiring is unconditional.** `csp.ts`, the head hook
+  (`src/app/providers/head.ts`) and the `UApp` and `ConfigProvider` props read
+  the meta tag and do nothing without it. Only `html.cspNonce`, the vaul meta
+  tag and the files of the check follow whether the policy is served.
+- **The policy covers the Vue template without the AI chat.** Svelte, Flutter
+  and plugin frontends are served without it, since no lane proves them under
+  it, and so are projects with the chat: its MCP panels frame remote origins
+  that the policy would block. The
+  `security_csp` fragment is removed: the option enables no fragment, like
+  `auth.api_keys`, and is read by the renderers through `forge/frontend_csp.py`,
+  which also admits an external API's origin in `connect-src`.
+  Strict-Transport-Security is not sent; it is the TLS terminator's.
+- **The check reruns the e2e suites.** `scripts/serve-csp.mjs` serves `dist/`
+  with the policy read from `nginx.conf`, a fresh nonce per response and a
+  `report-uri`; `playwright.csp.config.ts` points the suites at it. Both are
+  common files copied when the policy is on. The check builds with auth
+  disabled, as the runner's browser suites do, so the sign-in flow runs
+  under the policy unproven. The e2e specs collect coverage only
+  when `FORGE_BROWSER_COVERAGE` is set, and `forge/quality/csp.py` judges the
+  reports. It passes only when Playwright exits cleanly with no global error,
+  and admits the two elements above only in a `nuxt-ui` project and only by
+  their exact sample; the palette copy's sample is also the real palette's, so
+  the Nuxt UI e2e spec asserts that the palette applies. The no-icon-fetch
+  check is the same run: a request to the Iconify API is a `connect-src`
+  violation.
+- **`ConfirmHost` stays** instead of `useOverlay`: it and `useConfirm` are
+  kit-free; only `ConfirmDialog` has a `UModal` variant. **`VerticalSplitter`
+  is not emitted** under `nuxt-ui`, nor its suite: no screen uses it.
+  `usePageHeader` takes an icon name besides a component under `nuxt-ui` only.
+- **`files-<kit>/` replaces paths.** Its files replace the same paths of
+  `files/` and may add their own; the update preview follows the same rule.
+- **Entry points.** The prompt asks for the kit before chat and skips chat for
+  `nuxt-ui`. `--color-scheme` offers every kit's schemes, and Svelte and
+  Flutter now refuse anything outside their eight at validation. `generate()`
+  runs the full frontend check, not only the kit name.
+- **The lane.** The workflow matrix gains a `kit` axis with one `include`
+  entry, since an entry that only adds a key merges into the existing job.
+  `scripts/check_generated_quality.py` takes `--ui-kit`, `--auth` and
+  `--features`. The runner sets `VITE_AUTH_DISABLED=true` for the browser
+  suites only; unit and integration suites keep the project's setting and so
+  exercise the real gateway flow.
+- **Smaller points.** The shadcn `index.html` loses its inline font style to
+  `main.css`. The `nuxt-ui` `build` script runs Vite before the type-check,
+  which reads the declarations Vite writes.
+
 ## Open points
 
 - Phase 2 scope and timing: the `ai_chat` UI, the layout overlays, the component
   features.
 - Self-hosting the font, which would let the policy drop the Google hosts.
-- Trusted Types, if F-02 has to drop the directive (§F).
+- Trusted Types, and the two admitted elements: ask Nuxt UI to skip the
+  temporary palette copy in Vue mode or give it `UApp`'s nonce, and to let
+  VueUse's transition guard take one.
+- A content-security policy for Svelte and Flutter, with a lane that proves it.
+- The AI chat under the policy: a `frame-src` for the MCP panels' origins,
+  and a lane that runs the chat.
+- The sign-in flow under the policy: a check that serves `/auth/*`.
+- vaul-vue reading the `nonce` property, so the `content` copy can go.
+- The reverse-sync harvester maps project files to a fragment's `files/` tree
+  and does not know `files-<kit>/` yet.

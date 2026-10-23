@@ -1,9 +1,10 @@
-"""Security-posture fragments — CSP headers, SBOM emission.
+"""Security-posture fragments — SBOM emission.
 
 Distinct from ``middleware.security_headers`` (which sets HTTP response
-headers in the request path); these fragments are project-scope
-(``security_csp`` ships an external CSP config) or build-time
-(``security_sbom`` emits a software-bill-of-materials artifact).
+headers in the request path). ``security_sbom`` emits a
+software-bill-of-materials artifact at build time. The ``security.csp``
+option needs no fragment: the frontend renderers read it
+(:mod:`forge.frontend_csp`).
 """
 
 from __future__ import annotations
@@ -21,25 +22,7 @@ def _impl(name: str, lang: str) -> str:
     return str(_TEMPLATES / name / lang)
 
 
-def _project(name: str) -> str:
-    """Project-scoped fragments don't have per-language subdirs."""
-    return str(_TEMPLATES / name)
-
-
 def register_all(api: ForgeAPI) -> None:
-    # Project-scoped: same nginx config for every backend.
-    _CSP_IMPL = FragmentImplSpec(fragment_dir=_project("security_csp"), scope="project")
-    api.add_fragment(
-        Fragment(
-            name="security_csp",
-            implementations={
-                BackendLanguage.PYTHON: _CSP_IMPL,
-                BackendLanguage.NODE: _CSP_IMPL,
-                BackendLanguage.RUST: _CSP_IMPL,
-            },
-        )
-    )
-
     api.add_fragment(
         Fragment(
             name="security_sbom",

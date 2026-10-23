@@ -1,0 +1,39 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import SettingsPage from '../../src/features/settings/ui/SettingsPage.vue'
+
+let wrapper: VueWrapper | undefined
+const html = document.documentElement
+
+beforeEach(() => {
+  localStorage.clear()
+  html.className = ''
+})
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = undefined
+  document.body.innerHTML = ''
+})
+
+async function choose(mode: string) {
+  await wrapper!.get('[data-test="theme-select"]').trigger('click')
+  await vi.waitFor(() => expect(document.querySelector('[role="listbox"]')).not.toBeNull())
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.trim() === mode)
+  expect(option, `option ${mode}`).toBeDefined()
+  option!.click()
+}
+
+it('applies and remembers the colour mode chosen on the settings page', async () => {
+  wrapper = mount(SettingsPage, { attachTo: document.body })
+  expect(wrapper.get('h1').text()).toBe('Settings')
+  expect(wrapper.text()).toContain('Appearance')
+
+  await choose('Dark')
+  await vi.waitFor(() => expect(html.classList.contains('dark')).toBe(true))
+  expect(localStorage.getItem('vueuse-color-scheme')).toBe('dark')
+
+  await choose('Light')
+  await vi.waitFor(() => expect(html.classList.contains('dark')).toBe(false))
+  expect(localStorage.getItem('vueuse-color-scheme')).toBe('light')
+  expect(wrapper.text()).toContain('Version')
+})

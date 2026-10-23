@@ -198,6 +198,7 @@ def apply_project_features(
     frontend_dir: Path | None = None,
     primary_server_port: int | None = None,
     topology: Mapping[str, Any] | None = None,
+    ui_kit: str | None = None,
 ) -> None:
     """Apply project-scoped fragment implementations at the project root.
 
@@ -212,7 +213,8 @@ def apply_project_features(
     and ``option_values`` semantics.
 
     ``frontend_framework`` and ``frontend_dir`` place frontend-targeted
-    fragments; see :func:`project_fragment_root`.
+    fragments; see :func:`project_fragment_root`. ``ui_kit`` is the Vue UI
+    kit, which selects a fragment's ``files-<kit>/`` tree.
     """
     if option_values is None:
         option_values = {}
@@ -251,6 +253,7 @@ def apply_project_features(
                     update_mode=update_mode,
                     file_baselines=file_baselines,
                     project_topology=topology,
+                    ui_kit=ui_kit,
                 )
                 # Project-scope fragments typically don't declare middlewares
                 # (they emit project-level files like AGENTS.md). Pass the

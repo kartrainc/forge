@@ -2,10 +2,10 @@
 
 ``frontend.ui_kit`` selects one. ``shadcn`` is the shadcn-vue kit the Vue
 template has always shipped and stays the default. ``nuxt-ui`` is Nuxt UI 4
-(``plans/2026-10-22-vue-ui-kit-nuxt-ui.md``); it is registered but not
-selectable until its rendering lands, the way a layout can be registered with
-``supported = false``. Svelte and Flutter keep their own kits, so the option
-applies to the Vue template only (ADR-011).
+(``plans/2026-10-22-vue-ui-kit-nuxt-ui.md``): the template renders its own
+screens on it, with the version held in :data:`NUXT_UI_VERSION`. Svelte and
+Flutter keep their own kits, so the option applies to the Vue template only
+(ADR-011).
 
 Compatibility is declared where each artifact lives: a layout lists its kits in
 ``layout.toml`` (``ui_kits``), a component feature in ``[feature.component]``
@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 #: The kit every existing project renders on.
 DEFAULT_UI_KIT = "shadcn"
+
+#: The ``@nuxt/ui`` release the ``nuxt-ui`` kit is written against; the
+#: template depends on it with a caret, so a project takes later 4.x minors.
+NUXT_UI_VERSION = "4.12.0"
 
 #: The colour schemes the Vue template offers (``default_color_scheme``).
 COLOR_SCHEMES: tuple[str, ...] = (
@@ -102,13 +106,18 @@ UI_KITS: dict[str, UiKit] = {
         name="nuxt-ui",
         display_label="Nuxt UI 4 (Reka UI + Tailwind CSS 4)",
         frameworks=(FrontendFramework.VUE,),
-        # Selectable once the template renders it (F-02 of the plan).
-        supported=False,
         # The AI chat UI is built on shadcn-vue until its Nuxt UI port.
         chat=False,
         color_schemes=COLOR_SCHEMES + tuple(p for p in TAILWIND_PALETTES if p not in COLOR_SCHEMES),
     ),
 }
+
+
+#: Every ``default_color_scheme`` value some kit accepts, for the CLI's
+#: choices; :func:`check_frontend` then holds each kit to its own list.
+COLOR_SCHEME_CHOICES: tuple[str, ...] = tuple(
+    dict.fromkeys(scheme for kit in UI_KITS.values() for scheme in kit.color_schemes)
+)
 
 
 def get_ui_kit(name: str) -> UiKit | None:
@@ -137,9 +146,7 @@ def check_kit(frontend: FrontendConfig) -> UiKit | None:
 
     Returns the kit when the framework has kits, ``None`` when it has none.
     Raises ``ValueError`` for a value that is not a name, a kit set on a
-    template without kits, and an unknown or unselectable kit. The generator
-    calls this too, so a programmatic config that skipped ``validate()`` cannot
-    render one kit while recording another.
+    template without kits, and an unknown or unselectable kit.
     """
     framework = frontend.framework
     name = frontend.ui_kit
@@ -167,10 +174,21 @@ def check_frontend(frontend: FrontendConfig) -> None:
     Raises ``ValueError`` (the error type ``FrontendConfig.validate`` uses) for
     everything :func:`check_kit` refuses, a layout that does not list the kit,
     chat on a kit without the chat UI, and a colour scheme the kit does not
-    accept.
+    accept. A template without kits (Svelte, Flutter) accepts the eight
+    :data:`COLOR_SCHEMES`. The generator calls this too, so a programmatic
+    config that skipped ``validate()`` cannot render one kit while recording
+    another, or render two variants of one file.
     """
     kit = check_kit(frontend)
     if kit is None:
+        if (
+            frontend.framework in (FrontendFramework.SVELTE, FrontendFramework.FLUTTER)
+            and frontend.default_color_scheme not in COLOR_SCHEMES
+        ):
+            raise ValueError(
+                f"Colour scheme '{frontend.default_color_scheme}' is not available for "
+                f"{frontend.framework.value}. Choose from: {', '.join(COLOR_SCHEMES)}"
+            )
         return
     framework = frontend.framework
     name = kit.name

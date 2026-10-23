@@ -89,8 +89,8 @@
       "sha256": "4c3d4296d9064a68"
     },
     "apps/frontend/index.html": {
-      "size": 709,
-      "sha256": "7bbd8915ab9b952f"
+      "size": 668,
+      "sha256": "613f554feece5b6c"
     },
     "apps/frontend/nginx.conf": {
       "size": 146,
@@ -106,7 +106,7 @@
     },
     "apps/frontend/package.json": {
       "size": 2433,
-      "sha256": "df74089a9c8b9258"
+      "sha256": "322557f6bed98c72"
     },
     "apps/frontend/playwright.quality.config.ts": {
       "size": 385,
@@ -121,24 +121,32 @@
       "sha256": "0f61424bd6ad73f8"
     },
     "apps/frontend/scripts/post_generate.py": {
-      "size": 18355,
-      "sha256": "81907fd696cc0e68"
+      "size": 19111,
+      "sha256": "717c3f6f81bd661d"
     },
     "apps/frontend/scripts/remap-browser.mjs": {
       "size": 778,
       "sha256": "078da64f2ee555a7"
     },
     "apps/frontend/src/app/App.vue": {
-      "size": 702,
-      "sha256": "06f8adb5d1537975"
+      "size": 957,
+      "sha256": "f3cf3d728833f42d"
     },
     "apps/frontend/src/app/NotFoundPage.vue": {
       "size": 528,
       "sha256": "5e29cf8f140381a5"
     },
     "apps/frontend/src/app/main.ts": {
-      "size": 1525,
-      "sha256": "c73e60b850d3d977"
+      "size": 1613,
+      "sha256": "637a9a10fb1365dc"
+    },
+    "apps/frontend/src/app/providers/csp.test.ts": {
+      "size": 544,
+      "sha256": "9b455141166e4259"
+    },
+    "apps/frontend/src/app/providers/csp.ts": {
+      "size": 961,
+      "sha256": "e97822f3320470d3"
     },
     "apps/frontend/src/app/providers/query-client.test.ts": {
       "size": 1175,
@@ -161,8 +169,8 @@
       "sha256": "feac198e6d894d28"
     },
     "apps/frontend/src/app/styles/main.css": {
-      "size": 6143,
-      "sha256": "eebba5b9c35a8a7d"
+      "size": 6181,
+      "sha256": "142445b3f8032448"
     },
     "apps/frontend/src/core/ui-protocol/types.ts": {
       "size": 457,
@@ -1205,12 +1213,12 @@
       "sha256": "e309286e33878d5e"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 1885,
-      "sha256": "f6a5b70552e39a32"
+      "size": 2058,
+      "sha256": "c1eb97a76e473daf"
     },
     "apps/frontend/tests/e2e/crud.ts": {
-      "size": 4391,
-      "sha256": "f34e8c5e1beafe7c"
+      "size": 4566,
+      "sha256": "c3516784c8a63a53"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1287,10 +1295,6 @@
     "apps/frontend/vitest.integration.config.ts": {
       "size": 242,
       "sha256": "121f68f0347a5788"
-    },
-    "deploy/infra/nginx-csp.conf": {
-      "size": 1661,
-      "sha256": "22237aeddb41cfae"
     },
     "docker-compose.yml": {
       "size": 6532,

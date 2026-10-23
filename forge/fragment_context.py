@@ -81,6 +81,11 @@ class FragmentContext:
     ``topology`` Jinja variable. ``None`` for every other fragment, so
     output is byte-identical for projects that don't opt into a
     topology-rendered artifact.
+
+    ``ui_kit`` is the project's Vue UI kit (:mod:`forge.ui_kits`), or
+    ``None`` without a Vue frontend. A fragment that ships a
+    ``files-<kit>/`` tree for it has those files replace the same paths of
+    its ``files/`` tree.
     """
 
     backend_config: BackendConfig
@@ -91,6 +96,7 @@ class FragmentContext:
     update_mode: UpdateMode = "strict"
     file_baselines: Mapping[str, str] = field(default_factory=dict)
     project_topology: Mapping[str, Any] | None = None
+    ui_kit: str | None = None
 
     @classmethod
     def filtered(
@@ -105,6 +111,7 @@ class FragmentContext:
         update_mode: UpdateMode = "strict",
         file_baselines: Mapping[str, str] | None = None,
         project_topology: Mapping[str, Any] | None = None,
+        ui_kit: str | None = None,
     ) -> FragmentContext:
         """Build a context where ``options`` contains only ``reads_options``.
 
@@ -125,4 +132,5 @@ class FragmentContext:
             update_mode=update_mode,
             file_baselines=file_baselines or {},
             project_topology=project_topology,
+            ui_kit=ui_kit,
         )

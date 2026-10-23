@@ -1,0 +1,18 @@
+/*
+ * Design tokens: the project's half of the design system, for Nuxt UI.
+ *
+ * forge writes this file once and never overwrites it. `@theme` sets Tailwind
+ * theme variables (fonts, custom palettes); the `--ui-*` variables restyle Nuxt
+ * UI in light mode (`:root`) and dark mode (`.dark`).
+ * https://ui.nuxt.com/docs/getting-started/theme/css-variables
+ */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --ui-radius: 0.375rem;
+}
+
+.dark {
+}

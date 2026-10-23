@@ -1,0 +1,74 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import type { BreadcrumbItem, ButtonProps } from '@nuxt/ui'
+import { activePageHeader, type PageHeaderAction } from '@/shared/composables/usePageHeader'
+
+const route = useRoute()
+
+// A page can register richer header content (icon / title / subtitle / back
+// target / actions) via `usePageHeader()`. When present it takes over the
+// leading slot; otherwise the navbar shows the route's breadcrumb trail.
+const pageHeader = activePageHeader
+
+const breadcrumbs = computed<BreadcrumbItem[]>(() => {
+  const matched = route.matched.filter((record) => record.meta.title)
+  return matched.map((record, index) => ({
+    label: record.meta.title as string,
+    to: index < matched.length - 1 ? record.path || '/' : undefined,
+  }))
+})
+
+// usePageHeader names its variants after shadcn-vue's buttons; these are the
+// Nuxt UI equivalents.
+const ACTION_PROPS: Record<NonNullable<PageHeaderAction['variant']>, ButtonProps> = {
+  default: { color: 'primary', variant: 'solid' },
+  destructive: { color: 'error', variant: 'solid' },
+  outline: { color: 'neutral', variant: 'outline' },
+  secondary: { color: 'neutral', variant: 'soft' },
+  ghost: { color: 'neutral', variant: 'ghost' },
+  link: { color: 'primary', variant: 'link' },
+}
+</script>
+
+<template>
+  <UDashboardNavbar :ui="{ right: 'gap-2' }">
+    <template #leading>
+      <UDashboardSidebarCollapse />
+      <template v-if="pageHeader">
+        <UButton
+          v-if="pageHeader.backTo"
+          :to="pageHeader.backTo"
+          icon="i-lucide-arrow-left"
+          color="neutral"
+          variant="ghost"
+          aria-label="Back"
+        />
+        <UIcon v-if="typeof pageHeader.icon === 'string'" :name="pageHeader.icon" class="size-5 shrink-0 text-muted" />
+        <component :is="pageHeader.icon" v-else-if="pageHeader.icon" class="size-5 shrink-0 text-muted" />
+        <div class="flex min-w-0 flex-col">
+          <span v-if="pageHeader.title" class="truncate text-sm font-semibold leading-tight text-highlighted">
+            {{ pageHeader.title }}
+          </span>
+          <span v-if="pageHeader.subtitle" class="truncate text-xs leading-tight text-muted">
+            {{ pageHeader.subtitle }}
+          </span>
+        </div>
+      </template>
+      <UBreadcrumb v-else :items="breadcrumbs" />
+    </template>
+
+    <template #right>
+      <UButton
+        v-for="action in pageHeader?.actions ?? []"
+        :key="action.key"
+        v-bind="ACTION_PROPS[action.variant ?? 'default']"
+        :label="action.label"
+        :icon="typeof action.icon === 'string' ? action.icon : undefined"
+        size="sm"
+        :disabled="action.disabled"
+        @click="action.onClick"
+      />
+    </template>
+  </UDashboardNavbar>
+</template>

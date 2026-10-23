@@ -150,6 +150,8 @@ def compute_topology(
     has_frontend = (
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
     )
+    from forge import frontend_csp  # noqa: PLC0415 — imports forge.config
+
     return {
         "project_slug": config.project_slug,
         "backends": backends,
@@ -177,4 +179,8 @@ def compute_topology(
         ),
         "database_mode": database_mode,
         "render_postgres": render_postgres,
+        # security.csp: what the frontend's nginx sends (forge.frontend_csp);
+        # empty when the option is off or the frontend is not the Vue template.
+        "frontend_security_headers": frontend_csp.security_headers(config),
+        "frontend_csp": frontend_csp.content_security_policy(config),
     }

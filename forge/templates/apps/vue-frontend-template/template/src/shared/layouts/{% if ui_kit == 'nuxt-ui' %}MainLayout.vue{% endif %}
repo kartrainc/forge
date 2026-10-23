@@ -1,0 +1,19 @@
+<script setup lang="ts">
+import AppSidebar from '@/shared/components/AppSidebar.vue'
+import AppHeader from '@/shared/components/AppHeader.vue'
+</script>
+
+<template>
+  <!-- Sidebar size and collapse persist in localStorage (cookies need Nuxt). -->
+  <UDashboardGroup unit="rem" storage="local">
+    <AppSidebar />
+    <UDashboardPanel id="main">
+      <template #header>
+        <AppHeader />
+      </template>
+      <template #body>
+        <RouterView />
+      </template>
+    </UDashboardPanel>
+  </UDashboardGroup>
+</template>

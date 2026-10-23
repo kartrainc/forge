@@ -1,0 +1,20 @@
+<script setup lang="ts">
+function retry() {
+  window.location.reload()
+}
+</script>
+
+<template>
+  <div class="flex min-h-svh items-center justify-center p-4">
+    <UEmpty
+      icon="i-lucide-hourglass"
+      title="Sign-in is taking longer than usual"
+      description="The authentication service hasn't responded yet. This is usually temporary."
+      :actions="[
+        { label: 'Try again', onClick: retry },
+        { label: 'Go to login', to: '/login', color: 'neutral', variant: 'outline' },
+      ]"
+      variant="naked"
+    />
+  </div>
+</template>
