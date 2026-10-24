@@ -94,6 +94,7 @@ jobs:
           - python-vue
           - node-svelte
           - rust-no-frontend
+          - go-no-frontend
           - multi-backend-with-keycloak
           # WS-5.1 — un-dark the chat-on type-check lanes. These map to
           # test_vue_chat_on_typechecks / test_svelte_chat_on_typechecks /
@@ -128,6 +129,12 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Install Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
 
       - name: Install Flutter (only for flutter presets)
         if: startsWith(matrix.preset, 'flutter-') || matrix.preset == 'multi-backend-keycloak'
@@ -195,6 +202,12 @@ jobs:
           node-version: "22"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Install Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
       - name: Install Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:

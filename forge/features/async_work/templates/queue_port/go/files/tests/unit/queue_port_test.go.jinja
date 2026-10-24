@@ -1,0 +1,86 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"iter"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/ports"
+)
+
+// memoryQueue is the smallest QueuePort: it proves the contract compiles and
+// shows the consume -> ack/nack loop a caller writes.
+type memoryQueue struct {
+	messages []ports.QueueMessage
+	inFlight map[string]bool
+}
+
+var _ ports.QueuePort = (*memoryQueue)(nil)
+
+func (q *memoryQueue) Enqueue(_ context.Context, _ string, body map[string]any, _ time.Duration) (string, error) {
+	id := fmt.Sprintf("m%d", len(q.messages)+1)
+	q.messages = append(q.messages, ports.QueueMessage{ID: id, Body: body, Receipt: id})
+	return id, nil
+}
+
+func (q *memoryQueue) Consume(context.Context, string, int) iter.Seq2[ports.QueueMessage, error] {
+	return func(yield func(ports.QueueMessage, error) bool) {
+		for _, message := range q.messages {
+			q.inFlight[message.Receipt] = true
+			if !yield(message, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (q *memoryQueue) Ack(_ context.Context, _, receipt string) error {
+	if !q.inFlight[receipt] {
+		return fmt.Errorf("%w: %s", ports.ErrQueueUnknownReceipt, receipt)
+	}
+	delete(q.inFlight, receipt)
+	return nil
+}
+
+func (q *memoryQueue) Nack(ctx context.Context, topic, receipt string, _ bool) error {
+	return q.Ack(ctx, topic, receipt)
+}
+
+func TestQueuePortConsumeAckLoop(t *testing.T) {
+	ctx := context.Background()
+	var queue ports.QueuePort = &memoryQueue{inFlight: map[string]bool{}}
+	for _, name := range []string{"a", "b"} {
+		if _, err := queue.Enqueue(ctx, "jobs", map[string]any{"name": name}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []string
+	for message, err := range queue.Consume(ctx, "jobs", 1) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen = append(seen, message.Body["name"].(string))
+		if err := queue.Ack(ctx, "jobs", message.Receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("consumed %v", seen)
+	}
+	if err := queue.Nack(ctx, "jobs", "m1", true); !errors.Is(err, ports.ErrQueueUnknownReceipt) {
+		t.Fatalf("a settled receipt is unknown: %v", err)
+	}
+}
+
+func TestQueuePortErrorsAreDistinct(t *testing.T) {
+	wrapped := fmt.Errorf("%w: %w", ports.ErrQueueTransport, errors.New("connection refused"))
+	if !errors.Is(wrapped, ports.ErrQueueTransport) || errors.Is(wrapped, ports.ErrQueueSerialization) {
+		t.Fatalf("transport errors classify: %v", wrapped)
+	}
+	if errors.Is(ports.ErrQueueSerialization, ports.ErrQueueUnknownReceipt) {
+		t.Fatal("sentinels are distinct")
+	}
+}

@@ -22,6 +22,7 @@ class BackendLanguage(Enum):
     PYTHON = "python"
     NODE = "node"
     RUST = "rust"
+    GO = "go"
 
 
 # Plugin-registered backend language values. Keyed by the wire value
@@ -86,7 +87,7 @@ def resolve_backend_language(value: str) -> BackendLanguage | _PluginLanguage:
 
 def available_backend_languages() -> list[str]:
     """Wire values of every backend language forge can generate right now —
-    the three built-ins plus any a plugin has registered via
+    the built-ins plus any a plugin has registered via
     :meth:`forge.api.ForgeAPI.add_backend`.
 
     Read at call time (not import time) so the CLI's ``--backend-language``
@@ -157,6 +158,12 @@ def _rust_toolchain_factory() -> Any:
     return RUST_TOOLCHAIN
 
 
+def _go_toolchain_factory() -> Any:
+    from forge.toolchains.go import GO_TOOLCHAIN  # noqa: PLC0415
+
+    return GO_TOOLCHAIN
+
+
 # BACKEND_REGISTRY keys are either real ``BackendLanguage`` members or
 # ``_PluginLanguage`` sentinels — both share the ``.value`` attribute so
 # downstream code can treat them uniformly.
@@ -185,7 +192,75 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         toolchain=_rust_toolchain_factory(),
         version="1.0.0",
     ),
+    BackendLanguage.GO: BackendSpec(
+        template_dir="services/go-service-template",
+        display_label="Go (chi)",
+        version_field="go_version",
+        version_choices=("1.27", "1.26"),
+        toolchain=_go_toolchain_factory(),
+        version="1.0.0",
+    ),
 }
+
+# A Go service's module path is its name, so a name equal to a top-level
+# standard-library package ("log", "net", ...) makes every import ambiguous.
+GO_RESERVED_MODULE_NAMES: frozenset[str] = frozenset(
+    {
+        "archive",
+        "bufio",
+        "builtin",
+        "bytes",
+        "cmd",
+        "cmp",
+        "compress",
+        "container",
+        "context",
+        "crypto",
+        "database",
+        "debug",
+        "embed",
+        "encoding",
+        "errors",
+        "expvar",
+        "flag",
+        "fmt",
+        "go",
+        "hash",
+        "html",
+        "image",
+        "index",
+        "internal",
+        "io",
+        "iter",
+        "log",
+        "maps",
+        "math",
+        "mime",
+        "net",
+        "os",
+        "path",
+        "plugin",
+        "reflect",
+        "regexp",
+        "runtime",
+        "slices",
+        "sort",
+        "strconv",
+        "strings",
+        "structs",
+        "sync",
+        "syscall",
+        "testing",
+        "text",
+        "time",
+        "unicode",
+        "unique",
+        "unsafe",
+        "uuid",
+        "vendor",
+        "weak",
+    }
+)
 
 
 @dataclass
@@ -200,6 +275,7 @@ class BackendConfig:
     python_version: str = "3.13"
     node_version: str = "22"
     rust_edition: str = "2024"
+    go_version: str = "1.27"
     server_port: int = 5000
     # Application-template variant — the backend analogue of
     # FrontendConfig.layout. Selects the Copier service shape via
@@ -226,6 +302,11 @@ class BackendConfig:
         validate_port(self.server_port, f"Backend '{self.name}' port")
         if not re.match(r"^[a-z][a-z0-9_-]*$", self.name):
             raise ValueError(f"Backend name '{self.name}' must be lowercase kebab/snake case.")
+        if self.language == BackendLanguage.GO and self.name in GO_RESERVED_MODULE_NAMES:
+            raise ValueError(
+                f"Go backend name '{self.name}' is a Go standard-library package; "
+                "it would make the service's module imports ambiguous. Choose another name."
+            )
         for dep in self.depends_on:
             if not re.match(r"^[a-z][a-z0-9_-]*$", dep):
                 raise ValueError(

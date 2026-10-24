@@ -1,0 +1,148 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	otelapi "go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/otel"
+)
+
+// otelCollector is a fake OTLP/HTTP collector that keeps every trace payload.
+type otelCollector struct {
+	mu       sync.Mutex
+	payloads [][]byte
+}
+
+func (c *otelCollector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	if r.URL.Path == "/v1/traces" {
+		c.mu.Lock()
+		c.payloads = append(c.payloads, body)
+		c.mu.Unlock()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (c *otelCollector) received(fragment string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, payload := range c.payloads {
+		if bytes.Contains(payload, []byte(fragment)) {
+			return true
+		}
+	}
+	return false
+}
+
+func resetOTelGlobals(t *testing.T) {
+	t.Helper()
+	otelapi.SetTracerProvider(noop.NewTracerProvider())
+	t.Cleanup(func() { otelapi.SetTracerProvider(noop.NewTracerProvider()) })
+}
+
+func TestOTelIsANoOpWithoutAnEndpoint(t *testing.T) {
+	resetOTelGlobals(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdown, err := otel.Configure(context.Background(), "orders")
+	if err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("configure without endpoint: %v", err)
+	}
+	if _, ok := otelapi.GetTracerProvider().(*sdktrace.TracerProvider); ok {
+		t.Fatal("no SDK provider is installed without an endpoint")
+	}
+	cfg := config.Defaults()
+	app.StartOTel(context.Background(), &cfg)()
+}
+
+func TestOTelExportsRouteNamedSpans(t *testing.T) {
+	resetOTelGlobals(t)
+	collector := &otelCollector{}
+	server := httptest.NewServer(collector)
+	defer server.Close()
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", server.URL)
+	t.Setenv("OTEL_SERVICE_NAME", "otel-unit-service")
+	cfg := config.Defaults()
+	stop := app.StartOTel(context.Background(), &cfg)
+	if _, ok := otelapi.GetTracerProvider().(*sdktrace.TracerProvider); !ok {
+		t.Fatal("an SDK provider is installed")
+	}
+	if shutdown, err := otel.Configure(context.Background(), "again"); err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("a second configure is a no-op: %v", err)
+	}
+
+	router := chi.NewRouter()
+	router.Use(otel.Middleware)
+	router.Get("/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/orders/42", nil))
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status %d", recorder.Code)
+	}
+	stop()
+	if !collector.received("GET /orders/{id}") || !collector.received("otel-unit-service") {
+		t.Fatal("the collector receives the route-named span with the service name")
+	}
+}
+
+func TestOTelMiddlewareDoesNotDuplicateSpans(t *testing.T) {
+	resetOTelGlobals(t)
+	recorder := tracetest.NewSpanRecorder()
+	otelapi.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	router := chi.NewRouter()
+	router.Use(otel.Middleware, otel.Middleware)
+	router.Get("/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/ping", nil))
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "GET /ping" {
+		t.Fatalf("spans %v", spans)
+	}
+}
+
+func TestOTelConfigureReportsExporterErrors(t *testing.T) {
+	resetOTelGlobals(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	shutdown, err := otel.Configure(ctx, "")
+	if err == nil {
+		t.Fatal("a cancelled context fails exporter start")
+	}
+	if shutdown(context.Background()) != nil {
+		t.Fatal("the fallback shutdown is a no-op")
+	}
+	cfg := config.Defaults()
+	app.StartOTel(ctx, &cfg)()
+}
+
+func TestOTelNamesApplicationSpansByRoute(t *testing.T) {
+	resetOTelGlobals(t)
+	recorder := tracetest.NewSpanRecorder()
+	otelapi.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	pool, err := db.NewPool(context.Background(), "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	cfg := config.Defaults()
+	app.New(&cfg, pool).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "GET /api/v1/info" {
+		t.Fatalf("one route-named span per request: %v", spans)
+	}
+}

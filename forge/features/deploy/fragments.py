@@ -52,6 +52,10 @@ def register_all(api: ForgeAPI) -> None:
                     fragment_dir=_impl("deploy_helm_chart", "all"),
                     scope="project",
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("deploy_helm_chart", "all"),
+                    scope="project",
+                ),
             },
         )
     )

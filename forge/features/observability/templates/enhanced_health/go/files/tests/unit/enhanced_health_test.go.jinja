@@ -1,0 +1,71 @@
+package unit_test
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"{{ project_name }}/internal/routes"
+	"{{ project_name }}/tests/testutil"
+)
+
+func TestDeepHealthReportsEachDependency(t *testing.T) {
+	redis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer redis.Close()
+	var keycloakStatus atomic.Int32
+	keycloakStatus.Store(http.StatusOK)
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(int(keycloakStatus.Load()))
+	}))
+	defer keycloak.Close()
+	t.Setenv("REDIS_URL", "redis://user:secret@"+redis.Addr().String()+"/0")
+	t.Setenv("KEYCLOAK_HEALTH_URL", keycloak.URL+"/health/ready")
+	router := chi.NewRouter()
+	routes.Register(router, routes.Deps{})
+
+	status, body := testutil.Do(t, router, http.MethodGet, "/api/v1/health/deep", nil)
+	components, _ := body["components"].(map[string]any)
+	if status != http.StatusOK || body["status"] != "up" || len(components) != 2 {
+		t.Fatalf("healthy: %d %v", status, body)
+	}
+	if status, _ := testutil.Do(t, router, http.MethodGet, "/api/v1/health/live", nil); status != http.StatusOK {
+		t.Fatalf("the base health routes stay mounted: %d", status)
+	}
+
+	keycloakStatus.Store(http.StatusServiceUnavailable)
+	redis.Close()
+	status, body = testutil.Do(t, router, http.MethodGet, "/api/v1/health/deep", nil)
+	components, _ = body["components"].(map[string]any)
+	keycloakCheck, _ := components["keycloak"].(map[string]any)
+	redisCheck, _ := components["redis"].(map[string]any)
+	if status != http.StatusServiceUnavailable || body["status"] != "down" ||
+		keycloakCheck["error"] != "http 503" || redisCheck["status"] != "down" {
+		t.Fatalf("unhealthy: %d %v", status, body)
+	}
+}
+
+func TestDependencyChecksRejectBadTargets(t *testing.T) {
+	ctx := context.Background()
+	for _, raw := range []string{"::not a url::", "redis://"} {
+		if check := routes.CheckRedis(ctx, raw); check.Status != "down" || !strings.Contains(check.Error, "invalid REDIS_URL") {
+			t.Fatalf("%q: %+v", raw, check)
+		}
+	}
+	if check := routes.CheckRedis(ctx, "redis://127.0.0.1"); check.Status == "down" && !strings.Contains(check.Error, ":6379") {
+		t.Fatalf("the default port is 6379: %+v", check)
+	}
+	for _, raw := range []string{"://bad", "http://127.0.0.1:1/health/ready"} {
+		if check := routes.CheckKeycloak(ctx, raw); check.Status != "down" || check.Error == "" {
+			t.Fatalf("%q: %+v", raw, check)
+		}
+	}
+}

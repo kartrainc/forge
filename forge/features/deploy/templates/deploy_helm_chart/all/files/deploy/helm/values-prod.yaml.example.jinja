@@ -24,6 +24,8 @@ ingress:
 #     secretEnv:
 #       # Real managed-Postgres DSN (driver prefix matches the backend language):
 #       APP__DB__URL: "postgresql+asyncpg://USER:PASS@your-postgres-host:5432/<db>"
+#       # Rust and Go backends read DATABASE_URL instead (Node sets both):
+#       # DATABASE_URL: "postgresql://USER:PASS@your-postgres-host:5432/<db>"
 
 # For demos only — spin up in-cluster Postgres/Redis instead of managed ones:
 # infra:

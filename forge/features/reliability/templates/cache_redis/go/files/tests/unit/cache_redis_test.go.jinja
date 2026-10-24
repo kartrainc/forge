@@ -1,0 +1,127 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+
+	"{{ project_name }}/internal/adapters/cacheredis"
+	"{{ project_name }}/internal/ports/cache"
+)
+
+func newCacheRedis(t *testing.T) (*cacheredis.Adapter, *miniredis.Miniredis) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	t.Setenv("CACHE_REDIS_URL", "redis://"+server.Addr()+"/3")
+	adapter, err := cacheredis.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	return adapter, server
+}
+
+func TestCacheRedisRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	adapter, server := newCacheRedis(t)
+	if err := adapter.Set(ctx, "k", map[string]int{"v": 1}, cache.NoExpiry); err != nil {
+		t.Fatal(err)
+	}
+	server.Select(3)
+	if stored, _ := server.Get("k"); stored != `{"v":1}` {
+		t.Fatalf("stored on db 3 as JSON: %q", stored)
+	}
+	if server.TTL("k") != 0 {
+		t.Fatalf("NoExpiry sets no TTL: %v", server.TTL("k"))
+	}
+	raw, found, err := adapter.Get(ctx, "k")
+	if err != nil || !found || string(raw) != `{"v":1}` {
+		t.Fatalf("get: %s %v %v", raw, found, err)
+	}
+	if err := adapter.Invalidate(ctx, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := adapter.Get(ctx, "k"); err != nil || found {
+		t.Fatalf("invalidated keys miss: %v %v", found, err)
+	}
+	if err := adapter.Invalidate(ctx, "missing"); err != nil {
+		t.Fatalf("invalidate is idempotent: %v", err)
+	}
+	if err := adapter.Set(ctx, "bad", make(chan int), time.Minute); !errors.Is(err, cache.ErrSerialization) {
+		t.Fatalf("non-JSON values: %v", err)
+	}
+}
+
+func TestCacheRedisHonoursTTL(t *testing.T) {
+	ctx := context.Background()
+	adapter, server := newCacheRedis(t)
+	server.Select(3)
+	if err := adapter.Set(ctx, "short", "v", 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if server.TTL("short") != 10*time.Second {
+		t.Fatalf("ttl: %v", server.TTL("short"))
+	}
+	if got, found, _ := cache.Lookup[string](ctx, adapter, "short"); !found || got != "v" {
+		t.Fatalf("before expiry: %q %v", got, found)
+	}
+	server.FastForward(11 * time.Second)
+	if _, found, _ := adapter.Get(ctx, "short"); found {
+		t.Fatal("expired entries miss")
+	}
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		if err := server.Set("gone", "1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := adapter.Set(ctx, "gone", "v", ttl); err != nil {
+			t.Fatal(err)
+		}
+		if server.Exists("gone") {
+			t.Fatalf("ttl %v invalidates", ttl)
+		}
+	}
+}
+
+func TestCacheRedisToleratesRawStrings(t *testing.T) {
+	ctx := context.Background()
+	adapter, server := newCacheRedis(t)
+	server.Select(3)
+	if err := server.Set("raw", "bar"); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := cache.Lookup[string](ctx, adapter, "raw"); err != nil || !found || got != "bar" {
+		t.Fatalf("raw value: %q %v %v", got, found, err)
+	}
+}
+
+func TestCacheRedisReportsTransportErrors(t *testing.T) {
+	ctx := context.Background()
+	server := miniredis.RunT(t)
+	adapter, err := cacheredis.NewWithURL("redis://" + server.Addr() + "/3?max_retries=-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	server.Close()
+	if _, _, err := adapter.Get(ctx, "k"); !errors.Is(err, cache.ErrTransport) {
+		t.Fatalf("get: %v", err)
+	}
+	if err := adapter.Set(ctx, "k", 1, time.Minute); !errors.Is(err, cache.ErrTransport) {
+		t.Fatalf("set: %v", err)
+	}
+	if err := adapter.Invalidate(ctx, "k"); !errors.Is(err, cache.ErrTransport) {
+		t.Fatalf("invalidate: %v", err)
+	}
+	if _, err := cacheredis.NewWithURL("http://not-redis"); !errors.Is(err, cache.ErrTransport) {
+		t.Fatalf("invalid url: %v", err)
+	}
+	t.Setenv("CACHE_REDIS_URL", "")
+	fallback, err := cacheredis.New()
+	if err != nil {
+		t.Fatalf("default url %s: %v", cacheredis.DefaultURL, err)
+	}
+	_ = fallback.Close()
+}

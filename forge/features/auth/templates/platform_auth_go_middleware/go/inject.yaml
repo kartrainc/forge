@@ -1,0 +1,17 @@
+# platform_auth_go_middleware: build the guard once at startup and run the
+# verifier after CORS in the middleware chain. Snippets call package-level
+# helpers from internal/app/platform_auth.go, so they need no new imports.
+
+- target: cmd/server/main.go
+  marker: FORGE:STARTUP_INIT
+  position: before
+  snippet: |-
+    if err := app.InitPlatformAuth(cfg); err != nil {
+    	slog.Error("platform auth configuration error", "error", err)
+    	return 1
+    }
+
+- target: internal/app/app.go
+  marker: FORGE:MIDDLEWARE_REGISTRATION
+  position: before
+  snippet: "platformAuth(cfg),"

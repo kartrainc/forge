@@ -9,7 +9,7 @@ extend, and upgrade that source.
 
 | Area | Checked-in capability | Main extension point |
 | --- | --- | --- |
-| Services | Python/FastAPI, Node/Fastify, Rust/Axum; CRUD entities, tests, migrations, Dockerfiles | Application composition and public ports |
+| Services | Python/FastAPI, Node/Fastify, Rust/Axum, Go/net/http with chi; CRUD entities, tests, migrations, Dockerfiles | Application composition and public ports |
 | Frontends | Vue, Svelte, Flutter; selectable shells, API clients, optional chat | Application pages/components and public shared runtime |
 | Platform topology | Monolithic, microservices, headless API, multitenant SaaS presets | Backend list, application templates, declared dependencies |
 | Data | PostgreSQL; schema-driven entities and shared types; optional tenancy | Entity schemas and repository/service contracts |

@@ -94,6 +94,7 @@ _PLATFORM_AUTH_MIDDLEWARE: dict[BackendLanguage, str] = {
     BackendLanguage.PYTHON: "platform_auth_python_middleware",
     BackendLanguage.NODE: "platform_auth_node_middleware",
     BackendLanguage.RUST: "platform_auth_rust_middleware",
+    BackendLanguage.GO: "platform_auth_go_middleware",
 }
 
 # The per-backend dependency manifest the deps applier appends to. Together
@@ -104,6 +105,7 @@ _BACKEND_MANIFEST_BY_LANG: dict[BackendLanguage, str] = {
     BackendLanguage.PYTHON: "pyproject.toml",
     BackendLanguage.NODE: "package.json",
     BackendLanguage.RUST: "Cargo.toml",
+    BackendLanguage.GO: "go.mod",
 }
 
 
@@ -923,7 +925,13 @@ def _finalize(
             *project_root.glob("services/*"),
             *project_root.glob("apps/*"),
         ]:
-            for filename in ("uv.lock", "package-lock.json", "Cargo.lock", "pubspec.lock"):
+            for filename in (
+                "uv.lock",
+                "package-lock.json",
+                "Cargo.lock",
+                "go.sum",
+                "pubspec.lock",
+            ):
                 lockfile = directory / filename
                 if lockfile.is_file():
                     collector.record(lockfile, origin="base-template")

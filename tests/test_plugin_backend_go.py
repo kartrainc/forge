@@ -1,7 +1,7 @@
 """End-to-end coverage for the reference Go backend plugin (#224).
 
 Proves the plugin SDK's ``add_backend`` surface is genuinely functional: a
-plugin-registered language (``go``) drives a full ``generate()`` through every
+plugin-registered language (``go-stdlib``) drives a full ``generate()`` through every
 language-agnostic generator path — specifically the four sites that used to
 coerce the language string with ``BackendLanguage(...)`` and raise
 ``ValueError`` on anything but python/node/rust (forge.toml writer, config-file
@@ -52,7 +52,7 @@ def go_backend_registered():
     from forge.backend_app_templates import BACKEND_APPLICATION_TEMPLATES
     from forge.config import BACKEND_REGISTRY, PLUGIN_LANGUAGES
 
-    already_registered = "go" in PLUGIN_LANGUAGES
+    already_registered = "go-stdlib" in PLUGIN_LANGUAGES
     reg_snapshot = dict(BACKEND_REGISTRY)
     lang_snapshot = dict(PLUGIN_LANGUAGES)
     app_snapshot = dict(BACKEND_APPLICATION_TEMPLATES)
@@ -90,7 +90,7 @@ def _make_go_config(tmp_path: Path):
     bc = BackendConfig(
         name="api",
         project_name="Go Svc",
-        language=resolve_backend_language("go"),  # type: ignore[arg-type]
+        language=resolve_backend_language("go-stdlib"),  # type: ignore[arg-type]
         features=["items"],
         server_port=8300,
     )
@@ -116,9 +116,9 @@ def test_add_backend_registers_language_and_variant(go_backend_registered: None)
         resolve_backend_language,
     )
 
-    go = resolve_backend_language("go")
+    go = resolve_backend_language("go-stdlib")
     assert go in BACKEND_REGISTRY
-    assert "go" in available_backend_languages()
+    assert "go-stdlib" in available_backend_languages()
     assert get_backend_application_template(go, DEFAULT_BACKEND_TEMPLATE) is not None
 
 
@@ -141,7 +141,7 @@ def test_go_backend_generates(tmp_path: Path, go_backend_registered: None) -> No
     assert "/api" in gitignore and "{{" not in gitignore
     # forge.toml's template-version walk (a former crash site) recorded the
     # plugin language's template without raising.
-    assert "go" in (project_root / "forge.toml").read_text(encoding="utf-8")
+    assert "go-stdlib" in (project_root / "forge.toml").read_text(encoding="utf-8")
 
     # The root compose must NOT emit a migrate sidecar for the stateless
     # plugin backend — doing so would deadlock `docker compose up` (the
@@ -165,7 +165,7 @@ def test_update_infers_plugin_backend(tmp_path: Path, go_backend_registered: Non
 
     backends = _infer_backends(project_root)
     assert [bc.name for bc in backends] == ["api"]
-    assert backends[0].language.value == "go"
+    assert backends[0].language.value == "go-stdlib"
 
 
 def test_update_fails_loud_on_unresolvable_backend(tmp_path: Path) -> None:

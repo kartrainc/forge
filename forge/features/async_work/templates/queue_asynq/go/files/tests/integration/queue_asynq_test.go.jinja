@@ -1,0 +1,268 @@
+package integration_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+
+	"{{ project_name }}/internal/adapters"
+	"{{ project_name }}/internal/ports"
+)
+
+// asynqRedisURL is REDIS_URL when set, otherwise an in-process miniredis so
+// the suite also runs where no Redis is provisioned.
+func asynqRedisURL(t *testing.T) string {
+	t.Helper()
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		return url
+	}
+	return "redis://" + miniredis.RunT(t).Addr() + "/0"
+}
+
+type asynqFixture struct {
+	adapter   *adapters.AsynqQueueAdapter
+	inspector *asynq.Inspector
+	redis     asynq.RedisConnOpt
+	topic     string
+}
+
+func newAsynqFixture(t *testing.T) asynqFixture {
+	t.Helper()
+	url := asynqRedisURL(t)
+	adapter, err := adapters.NewAsynqQueueAdapter(url, adapters.AsynqOptions{
+		RetryDelay:   10 * time.Millisecond,
+		PollInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	redis, err := asynq.ParseRedisURI(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := asynqFixture{adapter, asynq.NewInspector(redis), redis, "forge-test-" + uuid.NewString()}
+	t.Cleanup(func() {
+		_ = fixture.inspector.DeleteQueue(fixture.topic, true)
+		_ = fixture.inspector.Close()
+		_ = adapter.Close()
+	})
+	return fixture
+}
+
+func (f asynqFixture) state(id string) asynq.TaskState {
+	info, err := f.inspector.GetTaskInfo(f.topic, id)
+	if err != nil {
+		return 0
+	}
+	return info.State
+}
+
+// asynqReceive consumes one message, settles it with settle and stops consuming.
+func asynqReceive(t *testing.T, queue ports.QueuePort, topic string, settle func(ports.QueueMessage) error) (ports.QueueMessage, bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for message, err := range queue.Consume(ctx, topic, 1) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := settle(message); err != nil {
+			t.Fatal(err)
+		}
+		return message, true
+	}
+	return ports.QueueMessage{}, false
+}
+
+func asynqWaitFor(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	for range 300 {
+		if done() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestAsynqEnqueueConsumeAck(t *testing.T) {
+	f := newAsynqFixture(t)
+	adapter, topic := f.adapter, f.topic
+	ctx := context.Background()
+	id, err := adapter.Enqueue(ctx, topic, map[string]any{"name": "forge"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Ack(ctx, topic, m.Receipt)
+	})
+	if !ok || message.ID != id || message.Receipt != id || message.Body["name"] != "forge" {
+		t.Fatalf("delivered %+v", message)
+	}
+	asynqWaitFor(t, "the acked task to complete", func() bool {
+		_, err := f.inspector.GetTaskInfo(topic, id)
+		return errors.Is(err, asynq.ErrTaskNotFound)
+	})
+	if err := adapter.Ack(ctx, topic, id); !errors.Is(err, ports.ErrQueueUnknownReceipt) {
+		t.Fatalf("a settled receipt is unknown: %v", err)
+	}
+}
+
+func TestAsynqNackRequeueRedelivers(t *testing.T) {
+	f := newAsynqFixture(t)
+	adapter, topic := f.adapter, f.topic
+	ctx := context.Background()
+	id, err := adapter.Enqueue(ctx, topic, map[string]any{"attempt": 1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Nack(ctx, topic, m.Receipt, true)
+	}); !ok {
+		t.Fatal("first delivery")
+	}
+	redelivered, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Ack(ctx, topic, m.Receipt)
+	})
+	if !ok || redelivered.ID != id {
+		t.Fatalf("requeued message is redelivered: %+v", redelivered)
+	}
+}
+
+func TestAsynqNackDeadLetterArchives(t *testing.T) {
+	f := newAsynqFixture(t)
+	adapter, topic := f.adapter, f.topic
+	ctx := context.Background()
+	id, err := adapter.Enqueue(ctx, topic, map[string]any{"poison": true}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Nack(ctx, topic, m.Receipt, false)
+	}); !ok {
+		t.Fatal("delivery")
+	}
+	asynqWaitFor(t, "the dead-lettered task to be archived", func() bool {
+		return f.state(id) == asynq.TaskStateArchived
+	})
+}
+
+func TestAsynqUnackedMessageIsRedeliveredAfterConsumerStops(t *testing.T) {
+	f := newAsynqFixture(t)
+	adapter, topic := f.adapter, f.topic
+	ctx := context.Background()
+	id, err := adapter.Enqueue(ctx, topic, map[string]any{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, ok := asynqReceive(t, adapter, topic, func(ports.QueueMessage) error { return nil })
+	if !ok || first.ID != id {
+		t.Fatalf("first delivery %+v", first)
+	}
+	if err := adapter.Ack(ctx, topic, first.Receipt); !errors.Is(err, ports.ErrQueueUnknownReceipt) {
+		t.Fatalf("a stopped consumer forgets its receipts: %v", err)
+	}
+	second, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Ack(ctx, topic, m.Receipt)
+	})
+	if !ok || second.ID != id {
+		t.Fatalf("redelivery %+v", second)
+	}
+}
+
+func TestAsynqDelayedDelivery(t *testing.T) {
+	f := newAsynqFixture(t)
+	adapter, topic := f.adapter, f.topic
+	ctx := context.Background()
+	id, err := adapter.Enqueue(ctx, topic, map[string]any{"later": true}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := f.state(id); state != asynq.TaskStateScheduled {
+		t.Fatalf("a delayed message is scheduled, got %v", state)
+	}
+	message, ok := asynqReceive(t, adapter, topic, func(m ports.QueueMessage) error {
+		return adapter.Ack(ctx, topic, m.Receipt)
+	})
+	if !ok || message.ID != id {
+		t.Fatalf("delayed delivery %+v", message)
+	}
+}
+
+func TestAsynqConsumeStopsOnContextCancel(t *testing.T) {
+	f := newAsynqFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	for _, err := range f.adapter.Consume(ctx, f.topic, 0) {
+		t.Fatalf("an empty topic yields nothing: %v", err)
+	}
+}
+
+func TestAsynqMalformedPayloadIsArchived(t *testing.T) {
+	f := newAsynqFixture(t)
+	client := asynq.NewClient(f.redis)
+	defer client.Close()
+	info, err := client.Enqueue(asynq.NewTask(f.topic, []byte("not json")), asynq.Queue(f.topic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	yielded := make(chan int, 1)
+	go func() {
+		count := 0
+		for range f.adapter.Consume(ctx, f.topic, 1) {
+			count++
+		}
+		yielded <- count
+	}()
+	asynqWaitFor(t, "the malformed task to be archived", func() bool {
+		return f.state(info.ID) == asynq.TaskStateArchived
+	})
+	cancel()
+	if count := <-yielded; count != 0 {
+		t.Fatalf("a malformed payload is never yielded, got %d", count)
+	}
+}
+
+func TestAsynqErrors(t *testing.T) {
+	if _, err := adapters.NewAsynqQueueAdapter("http://not-redis", adapters.AsynqOptions{}); !errors.Is(err, ports.ErrQueueTransport) {
+		t.Fatalf("unsupported scheme: %v", err)
+	}
+	unreachable, err := adapters.NewAsynqQueueAdapter("redis://127.0.0.1:1/0", adapters.AsynqOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unreachable.Close()
+	ctx := context.Background()
+	if _, err := unreachable.Enqueue(ctx, "jobs", map[string]any{}, 0); !errors.Is(err, ports.ErrQueueTransport) {
+		t.Fatalf("enqueue without Redis: %v", err)
+	}
+	for _, err := range unreachable.Consume(ctx, "jobs", 1) {
+		if !errors.Is(err, ports.ErrQueueTransport) {
+			t.Fatalf("consume without Redis: %v", err)
+		}
+	}
+	if _, err := unreachable.Enqueue(ctx, "jobs", map[string]any{"bad": make(chan int)}, 0); !errors.Is(err, ports.ErrQueueSerialization) {
+		t.Fatalf("unencodable body: %v", err)
+	}
+	if err := unreachable.Nack(ctx, "jobs", "missing", true); !errors.Is(err, ports.ErrQueueUnknownReceipt) {
+		t.Fatalf("unknown receipt: %v", err)
+	}
+}
+
+func TestAsynqBrokerURL(t *testing.T) {
+	t.Setenv("TASKIQ_BROKER_URL", "")
+	if adapters.AsynqBrokerURL() != adapters.AsynqDefaultBrokerURL {
+		t.Fatal("default broker url")
+	}
+	t.Setenv("TASKIQ_BROKER_URL", "redis://example:6379/3")
+	if adapters.AsynqBrokerURL() != "redis://example:6379/3" {
+		t.Fatal("TASKIQ_BROKER_URL wins")
+	}
+}

@@ -8,11 +8,11 @@ pydantic-ai loop.
 
 The LLM provider stack ships ``llm_port`` (abstract interface) plus
 four adapters (OpenAI, Anthropic, Ollama, Bedrock). Pillar D.2
-promotes ``llm_port`` + ``llm_openai`` to tier-1 by adding Node + Rust
-implementations (matching the TypeSpec contract at
+promotes ``llm_port`` + ``llm_openai`` to tier-1 by adding Node, Rust and
+Go implementations (matching the TypeSpec contract at
 ``forge/templates/_shared/ports/llm/contract.tsp``). The remaining
 adapters (Anthropic, Ollama, Bedrock) stay Python-only / tier-3 —
-their SDK ecosystems aren't mature enough on Node/Rust to justify
+their SDK ecosystems aren't mature enough on Node/Rust/Go to justify
 in-tree adapters; plugin authors carry that gap (Featured Plugin
 tier — see ``docs/known-issues.md``).
 """
@@ -148,13 +148,18 @@ def register_all(api: ForgeAPI) -> None:
                         'thiserror = "2.0.21"',
                     ),
                 ),
+                # Go packages need no registration: the port is
+                # ``internal/ports/llm`` and adapters import it.
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("llm_port", "go"),
+                ),
             },
         )
     )
 
     # Pillar D.2 — ``llm_openai`` is the first tier-1 LLM adapter (Python +
-    # Node + Rust). Node uses the Vercel AI SDK (``ai`` + ``@ai-sdk/openai``);
-    # Rust uses the ``async-openai`` crate. Both stream
+    # Node + Rust + Go). Node uses the Vercel AI SDK (``ai`` + ``@ai-sdk/openai``);
+    # Rust uses the ``async-openai`` crate; Go uses ``openai-go``. All stream
     # ``LlmChunk`` events behind the same port contract as the Python
     # adapter (text delta, role assistant, tool-call delta, finish reason).
     # The Rust adapter INJECTS ``pub mod llm_openai;`` into the base
@@ -196,6 +201,16 @@ def register_all(api: ForgeAPI) -> None:
                     dependencies=(
                         'async-openai = { version = "0.42.1", features = ["chat-completion", "embedding"] }',
                     ),
+                    env_vars=(
+                        ("OPENAI_API_KEY", ""),
+                        ("OPENAI_BASE_URL", ""),
+                    ),
+                ),
+                # Official SDK (``openai-go``), matching the SDK-backed Python
+                # and Rust adapters; tests point it at an httptest server.
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("llm_openai", "go"),
+                    dependencies=("github.com/openai/openai-go/v3@v3.86.0",),
                     env_vars=(
                         ("OPENAI_API_KEY", ""),
                         ("OPENAI_BASE_URL", ""),

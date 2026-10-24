@@ -45,10 +45,10 @@ itsdangerous.""",
 A registry + HMAC-SHA256 signed outbound delivery pipeline. Clients
 POST to /api/v1/webhooks to register a target URL; your code calls
 ``fireEvent`` to deliver a signed JSON payload. Receiver verifies the
-same way across all three backends — the signature header format is
+same way across every backend — the signature header format is
 identical.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: /api/v1/webhooks (CRUD + /{id}/test fire)""",
             category=FeatureCategory.PLATFORM,
             stability="beta",
@@ -118,7 +118,7 @@ option stamp, backend layout, test commands, and the house
 conventions so agents ship PRs that match the project's style on the
 first try.
 
-BACKENDS: python, node, rust (same content, project-scoped)""",
+BACKENDS: python, node, rust, go (same content, project-scoped)""",
             category=FeatureCategory.PLATFORM,
             enables={True: ("agents_md",)},
         )

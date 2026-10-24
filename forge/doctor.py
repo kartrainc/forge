@@ -399,6 +399,7 @@ def run(project_path: Path | None = None) -> DoctorReport:
     report.results.append(check_tool_on_path("node", kind="tool"))
     report.results.append(check_tool_on_path("npm", kind="tool"))
     report.results.append(check_tool_on_path("cargo", kind="tool"))
+    report.results.append(check_tool_on_path("go", kind="tool"))
     report.results.append(check_tool_on_path("flutter", kind="tool"))
     report.results.append(check_docker_reachable())
     # P1.4 — surface ts-morph reachability so users planning to enable

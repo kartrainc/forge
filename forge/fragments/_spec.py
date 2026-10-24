@@ -99,13 +99,13 @@ class FragmentImplSpec:
 ParityTier = Literal[1, 2, 3]
 """RFC-006 cross-backend parity tiers.
 
-Tier 1: must land on every registered backend (Python, Node, Rust, plus
+Tier 1: must land on every registered backend (Python, Node, Rust, Go, plus
     any plugin-registered backends that forge ships support for). A new
     tier-1 fragment can't merge without an implementation for each.
 Tier 2: best-effort — may land on a subset, with a documented migration
     path in RFC-006 for the backends that don't yet have it.
 Tier 3: Python-only, explicitly scoped. Used for AI / RAG / LLM features
-    whose Python SDK ecosystem has no Node / Rust equivalent. The CLI
+    whose Python SDK ecosystem has no Node / Rust / Go equivalent. The CLI
     surfaces this so users picking a non-Python backend know upfront.
 
 The parity tier is authoritative metadata — the tier must match the
@@ -114,6 +114,9 @@ that: a tier-1 fragment missing a built-in backend implementation is
 a hard CI failure; a tier-3 fragment shipping a Node implementation is
 a tier bump, not a silent success.
 """
+
+# Every built-in backend; tier 1 means an implementation for each of them.
+PARITY_BACKENDS: frozenset[BackendLanguage] = frozenset(BackendLanguage)
 
 
 @dataclass(frozen=True)
@@ -329,7 +332,7 @@ def _validate_explicit_parity_tier(
     mismatches on plugin load rather than waiting for forge's own test
     suite (``tests/test_fragment_parity.py``) to run in CI.
     """
-    built_ins = {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST}
+    built_ins = PARITY_BACKENDS
     covered = {lang for lang in implementations if lang in built_ins}
 
     if tier == 1 and covered != built_ins:
@@ -360,20 +363,20 @@ def _auto_parity_tier(
 ) -> ParityTier:
     """Derive a :data:`ParityTier` from the implementations dict.
 
-    - All three built-in backends present ⇒ **tier 1** (cross-backend
+    - Every built-in backend present ⇒ **tier 1** (cross-backend
       parity target met).
     - Only Python present ⇒ **tier 3** (Python-only — honest scope for
-      AI/RAG/LLM features whose ecosystem has no Node/Rust equivalent).
+      AI/RAG/LLM features whose ecosystem has no Node/Rust/Go equivalent).
     - Any other mixture (Python + Node, Python + Rust, Node + Rust,
       etc.) ⇒ **tier 2** (best-effort — some backends are pending).
 
     Plugin-registered backends do not bump the tier: parity is measured
-    against the three built-ins. A plugin fragment that supplies both
-    a Python and a Go implementation (but no Node/Rust) is still tier
+    against the built-ins. A plugin fragment that supplies both
+    a Python and a Kotlin implementation (but no Node/Rust/Go) is still tier
     2 — the built-in parity target is not yet met. This is a conscious
     choice so the tier's meaning stays stable across plugin registries.
     """
-    built_ins = {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST}
+    built_ins = PARITY_BACKENDS
     present = {k for k in implementations if k in built_ins}
     if present == built_ins:
         return 1

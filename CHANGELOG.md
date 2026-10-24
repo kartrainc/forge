@@ -69,6 +69,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Finish Git's automatic maintenance before generation returns, so background
   object repacking cannot race the unchanged-file check.
 
+### Go backend
+
+- Add Go as the fourth built-in backend (`language: go`, `--go-version`
+  1.27/1.26): `net/http` handlers on the chi router, pgx, goose migrations
+  embedded in a `migrate` binary, RFC-007 errors, RFC-008 layered config and
+  `log/slog` JSON logs. Services keep tenant-scoped repositories behind
+  interfaces and ship unit, integration and E2E suites.
+- Gate Go services like the other languages: `go mod tidy` locks,
+  `go mod download`/`verify` installs, `go test -coverpkg` coverprofiles
+  converted to LCOV, and E2E coverage from `go build -cover` binaries merged
+  with `go tool covdata`. A `go` lane joins the generated-quality workflow.
+- Emit Go enums and entity structs from domain specs, apply fragment
+  dependencies to `go.mod`, scaffold `go/` plugin fragment trees, and recognise
+  `go.mod` services on update.
+- Reject Go service names that equal a standard-library package; the name is
+  the module path.
+- The reference `forge-go-backend` plugin now registers `go-stdlib`.
+
 ### Vue UI kits
 
 - Add `frontend.ui_kit` (`--ui-kit`) to choose the Vue template's component

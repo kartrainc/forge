@@ -306,6 +306,10 @@ jobs:
         # The setup-rust actions add churn; one-liner is stable + cached
         # implicitly by the runner image on ubuntu-latest.
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
       # Generated projects' post_generate.py runs `git init && git commit` to
       # seed an initial commit; without a configured identity that fails with
       # "fatal: empty ident name not allowed" and the verify lane's toolchain
@@ -451,6 +455,12 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Install Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
 
       - name: Install forge + parity deps
         run: uv sync --locked --all-extras --dev --group auth-parity

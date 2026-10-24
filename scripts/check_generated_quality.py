@@ -85,7 +85,7 @@ def check(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--language", choices=["python", "node", "rust", "vue", "svelte"], required=True
+        "--language", choices=["python", "node", "rust", "go", "vue", "svelte"], required=True
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ui-kit", default="shadcn", help="Vue UI kit to render (forge.ui_kits).")

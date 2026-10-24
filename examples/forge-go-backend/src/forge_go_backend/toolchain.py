@@ -71,7 +71,7 @@ def _run(backend_dir: Path, cmd: list[str], description: str, *, quiet: bool) ->
 class GoToolchain:
     """Install / verify hooks for a generated Go (net/http) service."""
 
-    name = "go"
+    name = "go-stdlib"
 
     def install(self, backend_dir: Path, *, quiet: bool = False) -> None:
         # The reference service is standard-library-only, so ``go mod

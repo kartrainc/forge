@@ -1,0 +1,151 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/adapters/cachememory"
+	"{{ project_name }}/internal/ports/cache"
+)
+
+func TestCacheMemoryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	adapter := cachememory.New(cachememory.WithMaxEntries(8))
+	if err := adapter.Set(ctx, "k", map[string]int{"v": 1}, cache.NoExpiry); err != nil {
+		t.Fatal(err)
+	}
+	raw, found, err := adapter.Get(ctx, "k")
+	if err != nil || !found || string(raw) != `{"v":1}` {
+		t.Fatalf("get: %s %v %v", raw, found, err)
+	}
+	raw[0] = 'x'
+	if got, _, _ := adapter.Get(ctx, "k"); string(got) != `{"v":1}` {
+		t.Fatalf("callers get a copy: %s", got)
+	}
+	if err := adapter.Invalidate(ctx, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := adapter.Get(ctx, "k"); found {
+		t.Fatal("invalidated keys miss")
+	}
+	if err := adapter.Invalidate(ctx, "missing"); err != nil {
+		t.Fatalf("invalidate is idempotent: %v", err)
+	}
+	if err := adapter.Set(ctx, "bad", make(chan int), cache.NoExpiry); !errors.Is(err, cache.ErrSerialization) {
+		t.Fatalf("non-JSON values: %v", err)
+	}
+}
+
+func TestCacheMemoryExpiresEntries(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+	adapter := cachememory.New(cachememory.WithClock(func() time.Time { return now }))
+	if err := adapter.Set(ctx, "short", "v", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Set(ctx, "forever", "v", cache.NoExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, _ := cache.Lookup[string](ctx, adapter, "short"); !found || got != "v" {
+		t.Fatalf("before expiry: %q %v", got, found)
+	}
+	now = now.Add(time.Second)
+	if _, found, _ := adapter.Get(ctx, "short"); found {
+		t.Fatal("expired entries miss")
+	}
+	if adapter.Len() != 1 {
+		t.Fatalf("expired entries are dropped on read: %d", adapter.Len())
+	}
+	now = now.Add(24 * 365 * time.Hour)
+	if _, found, _ := adapter.Get(ctx, "forever"); !found {
+		t.Fatal("NoExpiry entries never expire")
+	}
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		if err := adapter.Set(ctx, "forever", "replaced", ttl); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, _ := adapter.Get(ctx, "forever"); found {
+			t.Fatalf("ttl %v invalidates", ttl)
+		}
+	}
+}
+
+func TestCacheMemoryEvictsLeastRecentlyUsed(t *testing.T) {
+	ctx := context.Background()
+	adapter := cachememory.New(cachememory.WithMaxEntries(3), cachememory.WithMaxEntries(0))
+	for i, key := range []string{"a", "b", "c"} {
+		if err := adapter.Set(ctx, key, i, cache.NoExpiry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, found, _ := adapter.Get(ctx, "a"); !found {
+		t.Fatal("a is present")
+	}
+	if err := adapter.Set(ctx, "c", 30, cache.NoExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Set(ctx, "d", 4, cache.NoExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := adapter.Get(ctx, "b"); found {
+		t.Fatal("the least recently used entry is evicted")
+	}
+	for key, want := range map[string]int{"a": 0, "c": 30, "d": 4} {
+		if got, found, _ := cache.Lookup[int](ctx, adapter, key); !found || got != want {
+			t.Fatalf("%s: %d %v", key, got, found)
+		}
+	}
+	if adapter.Len() != 3 {
+		t.Fatalf("capacity is enforced: %d", adapter.Len())
+	}
+}
+
+func TestCacheMemoryReadsCapacityFromEnv(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("CACHE_MEMORY_MAX_ENTRIES", "2")
+	adapter := cachememory.New()
+	for i := range 5 {
+		if err := adapter.Set(ctx, strconv.Itoa(i), i, cache.NoExpiry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if adapter.Len() != 2 {
+		t.Fatalf("env capacity: %d", adapter.Len())
+	}
+	for _, raw := range []string{"0", "-1", "lots"} {
+		t.Setenv("CACHE_MEMORY_MAX_ENTRIES", raw)
+		adapter = cachememory.New()
+		for i := range cachememory.DefaultMaxEntries + 1 {
+			_ = adapter.Set(ctx, strconv.Itoa(i), i, cache.NoExpiry)
+		}
+		if adapter.Len() != cachememory.DefaultMaxEntries {
+			t.Fatalf("%q falls back to the default: %d", raw, adapter.Len())
+		}
+	}
+}
+
+func TestCacheMemoryIsSafeForConcurrentUse(t *testing.T) {
+	ctx := context.Background()
+	adapter := cachememory.New(cachememory.WithMaxEntries(16))
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 100 {
+				key := strconv.Itoa((worker + i) % 32)
+				_ = adapter.Set(ctx, key, i, time.Minute)
+				_, _, _ = adapter.Get(ctx, key)
+				_ = adapter.Invalidate(ctx, strconv.Itoa(i%32))
+			}
+		}()
+	}
+	wg.Wait()
+	if adapter.Len() > 16 {
+		t.Fatalf("capacity holds under contention: %d", adapter.Len())
+	}
+}

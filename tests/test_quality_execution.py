@@ -16,9 +16,11 @@ from forge.config import (
     FrontendFramework,
     ProjectConfig,
 )
+from forge.quality.coverage import has_executable_source, source_inventory
 from forge.quality.csp import admitted, check_content_security
 from forge.quality.dependencies import dependencies
-from forge.quality.model import write_recipe
+from forge.quality.go_coverage import go_modules, go_profiles_to_lcov
+from forge.quality.model import ownership, subjects, write_recipe
 from forge.quality.runner import _test_count, run_native, run_suites
 from tests.test_generated_quality import project as _project_fixture
 
@@ -553,3 +555,231 @@ def test_cli_execution_dispatch(project, monkeypatch, capsys, operation):
     )
     assert run_quality(args) == (12 if operation == "coverage" else 0)
     assert "passed" in json.loads(capsys.readouterr().out)
+
+
+# -- Go ---------------------------------------------------------------------
+
+_GO_MOD = """module orders
+
+go 1.27.0
+
+require (
+\tgithub.com/google/uuid v1.6.0
+\tgolang.org/x/text v0.43.0 // indirect
+)
+
+require github.com/jackc/pgx/v5 v5.11.0
+
+replace forge.local/platform-auth-go => ../../packages/platform-auth-go
+
+replace (
+\tforge.local/other => ../other // local fork
+\texample.com/remote => example.com/fork v1.0.0
+)
+"""
+
+
+@pytest.fixture
+def go_service(tmp_path: Path) -> tuple[Path, Path]:
+    service = tmp_path / "services" / "orders"
+    (service / "internal" / "app").mkdir(parents=True)
+    (service / "go.mod").write_text(_GO_MOD, encoding="utf-8")
+    (service / "internal" / "app" / "app.go").write_text(
+        "package app\n\n// New builds.\nfunc New() int {\n\tx := 1\n\n\treturn x\n}\n",
+        encoding="utf-8",
+    )
+    return tmp_path, service
+
+
+def test_go_modules_maps_main_module_and_local_replacements(go_service) -> None:
+    _, service = go_service
+    modules = go_modules(service)
+    assert modules["orders"] == service
+    assert (
+        modules["forge.local/platform-auth-go"]
+        == (service / "../../packages/platform-auth-go").resolve()
+    )
+    assert modules["forge.local/other"] == (service / "../other").resolve()
+    assert "example.com/remote" not in modules
+    (service / "go.mod").write_text("go 1.27.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="module directive"):
+        go_modules(service)
+
+
+def test_coverprofiles_become_lcov_for_application_source(go_service, tmp_path) -> None:
+    _, service = go_service
+    first = tmp_path / "unit.out"
+    first.write_text(
+        "mode: atomic\n"
+        "orders/internal/app/app.go:4.18,5.9 1 0\n"
+        "orders/internal/app/app.go:5.9,8.2 2 3\n"
+        "orders/internal/app/app.go:9.1,9.2 0 1\n"
+        "orders/tests/testutil/helpers.go:1.1,2.2 1 1\n"
+        "github.com/other/module/file.go:1.1,2.2 1 1\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "e2e.out"
+    second.write_text("mode: set\norders/internal/app/app.go:4.18,5.9 1 1\n", encoding="utf-8")
+    output = tmp_path / "suite.lcov"
+    go_profiles_to_lcov([first, second], go_modules(service), output)
+    text = output.read_text(encoding="utf-8")
+    assert text.count("SF:") == 1
+    assert f"SF:{service / 'internal/app/app.go'}" in text
+    # Line 4 (func) and 5 hit by both profiles; the blank line 6 and the brace
+    # line 8 carry no counter; the comment line 3 is outside every block.
+    assert "DA:4,1\nDA:5,3\nDA:7,3\nend_of_record" in text
+
+
+def test_go_inventory_covers_the_module_but_not_tests(go_service) -> None:
+    root, service = go_service
+    (service / "cmd" / "server").mkdir(parents=True)
+    (service / "cmd" / "server" / "main.go").write_text(
+        "package main\n\nfunc main() {\n\trun()\n}\n", encoding="utf-8"
+    )
+    (service / "internal" / "app" / "app_test.go").write_text(
+        "package app\n\nfunc TestX() {\n\tNew()\n}\n", encoding="utf-8"
+    )
+    (service / "internal" / "app" / "types.go").write_text(
+        "package app\n\ntype Handler func(int) error\n", encoding="utf-8"
+    )
+    (service / "tests" / "unit").mkdir(parents=True)
+    (service / "tests" / "unit" / "helper.go").write_text(
+        "package unit\n\nfunc helper() {\n\treturn\n}\n", encoding="utf-8"
+    )
+    assert source_inventory(root, "services/orders") == {
+        "services/orders/cmd/server/main.go",
+        "services/orders/internal/app/app.go",
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "executable"),
+    [
+        ("package x\n\ntype A struct{ F func() }\n", False),
+        ("package x\n\nfunc A() {}\n", False),
+        ("package x\n\nfunc A() {\n}\n", False),
+        ("package x\n\nfunc F() int { return 1 }\n", True),
+        ("package x\n\nfunc (a *A) M(x struct{}) error { // note\n\treturn nil\n}\n", True),
+        ("package x\n\nvar handler = func(w int) {\n\tuse(w)\n}\n", True),
+        ("package x\n\ntype I interface {\n\tM() error\n}\n", False),
+    ],
+)
+def test_go_files_without_function_bodies_have_no_denominator(tmp_path, source, executable) -> None:
+    path = tmp_path / "file.go"
+    path.write_text(source, encoding="utf-8")
+    assert has_executable_source(path) is executable
+
+
+def test_go_ownership_policy() -> None:
+    assert ownership("services/orders/internal/middleware/cors.go") == "generated"
+    assert ownership("services/orders/internal/middleware/cors_test.go") == "scaffold"
+    assert ownership("services/orders/internal/routes/items.go") == "scaffold"
+    assert ownership("services/orders/internal/routes/items.go", origin="fragment") == "generated"
+    assert ownership("services/orders/go.mod") == "scaffold"
+
+
+def test_go_subjects_record_runtime_and_shared_modules(tmp_path) -> None:
+    config = ProjectConfig(
+        project_name="shop",
+        backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
+        frontend=None,
+    )
+    package = tmp_path / "packages" / "platform-auth-go"
+    package.mkdir(parents=True)
+    (package / "go.mod").write_text("module forge.local/platform-auth-go\n", encoding="utf-8")
+    items = subjects(config, tmp_path)
+    assert items[0] == {
+        "name": "orders",
+        "path": "services/orders",
+        "language": "go",
+        "runtime": "1.27",
+    }
+    assert items[1]["language"] == "go" and items[1]["shared"] is True
+
+
+def test_go_dependency_commands(tmp_path, monkeypatch) -> None:
+    config = ProjectConfig(
+        project_name="shop",
+        backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
+        frontend=None,
+    )
+    write_recipe(tmp_path, config)
+    executed: list[list[str]] = []
+    monkeypatch.setattr(
+        "forge.quality.dependencies._execute", lambda argv, cwd, env: executed.append(argv)
+    )
+    monkeypatch.setattr("forge.quality.model.source_fingerprint", lambda: "fixed")
+    monkeypatch.setattr("forge.quality.dependencies.read_recipe", lambda root: config)
+    dependencies(tmp_path, lock=True)
+    assert executed == [["go", "mod", "tidy"]]
+    executed.clear()
+    dependencies(tmp_path, lock=False)
+    assert executed == [["go", "mod", "download"], ["go", "mod", "verify"]]
+
+
+def _go_test_runner(service: Path, *, passed: int = 2, returncode: int = 0, covdata: bool = True):
+    calls: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        profile = Path(next(a.split("=", 1)[1] for a in argv if a.startswith("-coverprofile=")))
+        profile.write_text("mode: atomic\norders/internal/app/app.go:4.18,8.2 2 1\n", "utf-8")
+        events = [{"Action": "pass", "Test": f"Test{i}"} for i in range(passed)]
+        events.append({"Action": "pass", "Test": "Test0/sub"})
+        events.append({"Action": "output", "Output": "ok\n"})
+        kwargs["stdout"].write("\n".join(json.dumps(e) for e in events) + "\nbuild noise\n")
+        coverdir = kwargs["env"].get("FORGE_GO_COVERDIR")
+        if coverdir and covdata:
+            (Path(coverdir) / "covcounters.1").write_text("x", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, returncode)
+
+    return calls, run
+
+
+@pytest.mark.parametrize("suite", ["unit", "integration", "e2e"])
+def test_go_runner_binds_reports_to_executed_source(go_service, monkeypatch, suite) -> None:
+    root, service = go_service
+    (service / "tests" / suite).mkdir(parents=True)
+    (service / "cmd" / "server").mkdir(parents=True)
+    calls, run = _go_test_runner(service)
+    executed: list[list[str]] = []
+
+    def execute(argv, cwd, env):
+        executed.append(argv)
+        if argv[:3] == ["go", "tool", "covdata"]:
+            target = Path(next(a.split("=", 1)[1] for a in argv if a.startswith("-o=")))
+            target.write_text("mode: set\norders/internal/app/app.go:4.18,5.9 1 1\n", "utf-8")
+        else:
+            assert env["FORGE_TEST_SUITE"] == suite
+
+    monkeypatch.setattr("forge.quality.runner.subprocess.run", run)
+    monkeypatch.setattr("forge.quality.runner._execute", execute)
+    item = {"name": "orders", "path": "services/orders", "language": "go"}
+    report = json.loads((root / run_native(root, item, suite)).read_text(encoding="utf-8"))
+    assert report["tests"] == 2
+    assert report["files"]["services/orders/internal/app/app.go"]["lines"]["4"] == 1
+    assert calls[0][-1] == f"./tests/{suite}/..."
+    coverpkg = next(a for a in calls[0] if a.startswith("-coverpkg="))
+    assert "orders/..." in coverpkg and "forge.local/platform-auth-go/..." in coverpkg
+    if suite == "e2e":
+        assert executed[0][:3] == ["go", "build", "-cover"]
+        assert executed[0][-1] == "./cmd/server"
+        assert executed[-1][:3] == ["go", "tool", "covdata"]
+    else:
+        assert executed == []
+
+
+def test_go_runner_fails_closed(go_service, monkeypatch) -> None:
+    root, service = go_service
+    item = {"name": "orders", "path": "services/orders", "language": "go"}
+    with pytest.raises(ValueError, match="tests/unit"):
+        run_native(root, item, "unit")
+    (service / "tests" / "unit").mkdir(parents=True)
+    _, failing = _go_test_runner(service, returncode=1)
+    monkeypatch.setattr("forge.quality.runner.subprocess.run", failing)
+    with pytest.raises(ValueError, match="go tests failed"):
+        run_native(root, item, "unit")
+    _, empty = _go_test_runner(service, passed=0)
+    monkeypatch.setattr("forge.quality.runner.subprocess.run", empty)
+    with pytest.raises(ValueError, match="no tests executed"):
+        run_native(root, item, "unit")

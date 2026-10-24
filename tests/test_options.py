@@ -722,8 +722,8 @@ class TestYamlRoundTrip:
 
 
 def _multi_backend_project(options: dict[str, object] | None = None) -> ProjectConfig:
-    """Project with python + node + rust backends so fragment-per-backend
-    resolution exercises all three language branches."""
+    """Project with python + node + rust + go backends so fragment-per-backend
+    resolution exercises every language branch."""
     options = options or {}
     # Platform-auth requires Keycloak (the gatekeeper stack depends on the
     # keycloak+redis services); the resolver coerces auth.mode→none when keycloak
@@ -753,6 +753,9 @@ def _multi_backend_project(options: dict[str, object] | None = None) -> ProjectC
             ),
             BackendConfig(
                 name="api-rs", project_name="p", language=BackendLanguage.RUST, server_port=5003
+            ),
+            BackendConfig(
+                name="api-go", project_name="p", language=BackendLanguage.GO, server_port=5004
             ),
         ],
         options=options,

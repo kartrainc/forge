@@ -16,6 +16,14 @@ from forge.fragments._spec import Fragment, FragmentImplSpec
 
 _TEMPLATES = Path(__file__).resolve().parent / "templates"
 
+_GO_OTEL_DEPENDENCIES = (
+    "go.opentelemetry.io/otel@v1.47.0",
+    "go.opentelemetry.io/otel/sdk@v1.47.0",
+    "go.opentelemetry.io/otel/trace@v1.47.0",
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.47.0",
+    "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.72.0",
+)
+
 
 def _impl(name: str, lang: str) -> str:
     return str(_TEMPLATES / name / lang)
@@ -62,6 +70,14 @@ def register_all(api: ForgeAPI) -> None:
                         ("OTEL_SERVICE_NAME", "forge-service"),
                     ),
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("observability", "go"),
+                    dependencies=_GO_OTEL_DEPENDENCIES,
+                    env_vars=(
+                        ("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                        ("OTEL_SERVICE_NAME", "forge-service"),
+                    ),
+                ),
             },
         )
     )
@@ -88,6 +104,13 @@ def register_all(api: ForgeAPI) -> None:
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(
                     fragment_dir=_impl("enhanced_health", "rust"),
+                    env_vars=(
+                        ("REDIS_URL", "redis://redis:6379/0"),
+                        ("KEYCLOAK_HEALTH_URL", "http://keycloak:9000/health/ready"),
+                    ),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("enhanced_health", "go"),
                     env_vars=(
                         ("REDIS_URL", "redis://redis:6379/0"),
                         ("KEYCLOAK_HEALTH_URL", "http://keycloak:9000/health/ready"),
@@ -129,6 +152,9 @@ def register_all(api: ForgeAPI) -> None:
                         'serde_json = "1.0.151"',
                         'thiserror = "2.0.21"',
                     ),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("error_port", "go"),
                 ),
             },
         )
@@ -176,6 +202,14 @@ def register_all(api: ForgeAPI) -> None:
                         "opentelemetry-otlp@0.33.0",
                         "tracing-opentelemetry@0.34.0",
                     ),
+                    env_vars=(
+                        ("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                        ("OTEL_SERVICE_NAME", ""),
+                    ),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("observability_otel", "go"),
+                    dependencies=_GO_OTEL_DEPENDENCIES,
                     env_vars=(
                         ("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
                         ("OTEL_SERVICE_NAME", ""),

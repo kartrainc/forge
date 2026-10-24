@@ -30,6 +30,7 @@ class TestTier1Validation:
                 BackendLanguage.PYTHON: _impl(),
                 BackendLanguage.NODE: _impl(),
                 BackendLanguage.RUST: _impl(),
+                BackendLanguage.GO: _impl(),
             },
         )
 
@@ -104,6 +105,7 @@ class TestAutoDerivationUnaffected:
                 BackendLanguage.PYTHON: _impl(),
                 BackendLanguage.NODE: _impl(),
                 BackendLanguage.RUST: _impl(),
+                BackendLanguage.GO: _impl(),
             },
         )
         assert frag.parity_tier == 1

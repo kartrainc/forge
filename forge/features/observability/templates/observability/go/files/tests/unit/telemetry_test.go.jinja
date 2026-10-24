@@ -1,0 +1,162 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/telemetry"
+)
+
+// telemetryCollector is a fake OTLP/HTTP collector that keeps trace payloads.
+type telemetryCollector struct {
+	mu       sync.Mutex
+	payloads bytes.Buffer
+}
+
+func (c *telemetryCollector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	if r.URL.Path == "/v1/traces" {
+		c.mu.Lock()
+		c.payloads.Write(body)
+		c.mu.Unlock()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (c *telemetryCollector) received(fragment string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return bytes.Contains(c.payloads.Bytes(), []byte(fragment))
+}
+
+func isolateTelemetry(t *testing.T) {
+	t.Helper()
+	logger := slog.Default()
+	otel.SetTracerProvider(noop.NewTracerProvider())
+	t.Cleanup(func() {
+		otel.SetTracerProvider(noop.NewTracerProvider())
+		slog.SetDefault(logger)
+	})
+}
+
+func TestTelemetryIsANoOpWithoutAnEndpoint(t *testing.T) {
+	isolateTelemetry(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdown, err := telemetry.Setup(context.Background(), "orders", "1.0.0")
+	if err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("setup without endpoint: %v", err)
+	}
+	if _, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); ok {
+		t.Fatal("no SDK provider is installed without an endpoint")
+	}
+	cfg := config.Defaults()
+	cfg.Logging.Level = "error"
+	app.StartTelemetry(context.Background(), &cfg)()
+}
+
+func TestTelemetryExportsSpansWithServiceIdentity(t *testing.T) {
+	isolateTelemetry(t)
+	collector := &telemetryCollector{}
+	server := httptest.NewServer(collector)
+	defer server.Close()
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", server.URL)
+	t.Setenv("OTEL_SERVICE_VERSION", "9.9.9")
+	cfg := config.Defaults()
+	cfg.App.Name = "telemetry-unit-service"
+	cfg.Logging.Level = "error"
+	stop := app.StartTelemetry(context.Background(), &cfg)
+	if shutdown, err := telemetry.Setup(context.Background(), "again", ""); err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("a second setup is a no-op: %v", err)
+	}
+	router := chi.NewRouter()
+	router.Use(telemetry.Middleware)
+	router.Get("/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/orders/7", nil))
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
+	stop()
+	for _, want := range []string{"GET /orders/{id}", "telemetry-unit-service", "9.9.9"} {
+		if !collector.received(want) {
+			t.Fatalf("collector payload lacks %q", want)
+		}
+	}
+}
+
+func TestTelemetrySetupReportsExporterErrors(t *testing.T) {
+	isolateTelemetry(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := telemetry.Setup(ctx, "", ""); err == nil {
+		t.Fatal("a cancelled context fails exporter start")
+	}
+	cfg := config.Defaults()
+	cfg.Logging.Level = "error"
+	app.StartTelemetry(ctx, &cfg)()
+}
+
+func TestTelemetryLogsCarryTraceIDs(t *testing.T) {
+	isolateTelemetry(t)
+	recorder := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	var output bytes.Buffer
+	logger := slog.New(telemetry.LogHandler(slog.NewJSONHandler(&output, nil))).With("component", "test").WithGroup("request")
+	router := chi.NewRouter()
+	router.Use(telemetry.Middleware, telemetry.Middleware)
+	router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		logger.InfoContext(r.Context(), "handled", "status", 200)
+		w.WriteHeader(http.StatusOK)
+	})
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/ping", nil))
+	logger.InfoContext(context.Background(), "untraced")
+
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "GET /ping" {
+		t.Fatalf("nested middleware records one span: %v", spans)
+	}
+	lines := bytes.Split(bytes.TrimSpace(output.Bytes()), []byte("\n"))
+	var traced, untraced map[string]any
+	if len(lines) != 2 || json.Unmarshal(lines[0], &traced) != nil || json.Unmarshal(lines[1], &untraced) != nil {
+		t.Fatalf("log output %s", output.String())
+	}
+	group, _ := traced["request"].(map[string]any)
+	if group["trace_id"] != spans[0].SpanContext().TraceID().String() || group["span_id"] == nil {
+		t.Fatalf("traced record %v", traced)
+	}
+	if _, ok := untraced["request"]; ok {
+		t.Fatalf("untraced record %v", untraced)
+	}
+}
+
+func TestTelemetryNamesApplicationSpansByRoute(t *testing.T) {
+	isolateTelemetry(t)
+	recorder := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	pool, err := db.NewPool(context.Background(), "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	cfg := config.Defaults()
+	app.New(&cfg, pool).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "GET /api/v1/info" {
+		t.Fatalf("one route-named span per request: %v", spans)
+	}
+}

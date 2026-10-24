@@ -1,0 +1,6 @@
+# webhooks/go: mount /api/v1/webhooks. In-memory registry, like Node and Rust.
+
+- target: internal/routes/routes.go
+  marker: FORGE:ROUTES_REGISTRATION
+  position: before
+  snippet: 'api.Route("/webhooks", registerWebhooks)'

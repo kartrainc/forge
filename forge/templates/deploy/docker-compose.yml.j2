@@ -43,6 +43,10 @@ services:
 {% elif be.language == "rust" %}
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
     command: ["/app/migrate"]
+{% elif be.language == "go" %}
+      ENV: development
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
+    command: ["/app/migrate"]
 {% endif %}
     depends_on:
       postgres:
@@ -102,6 +106,12 @@ services:
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
 {% endif %}
       RUST_LOG: info
+{% elif be.language == "go" %}
+      ENV: development
+      PORT: "{{ be.port }}"
+{% if database_mode != "none" %}
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
+{% endif %}
 {% endif %}
 {% if include_keycloak %}
       APP__SECURITY__AUTH__ENABLED: "true"

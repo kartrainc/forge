@@ -1,8 +1,8 @@
 """Reliability fragments — DB connection pools + circuit breakers.
 
 These wrap the per-backend persistence + outbound-HTTP layers with
-production-shape defaults: pool sizing for SQLAlchemy/Prisma/sqlx,
-circuit breaker thresholds for Purgatory/Opossum.
+production-shape defaults: pool sizing for SQLAlchemy/Prisma/sqlx/pgx,
+circuit breaker thresholds for Purgatory/Opossum and the Rust/Go breakers.
 """
 
 from __future__ import annotations
@@ -53,6 +53,15 @@ def register_all(api: ForgeAPI) -> None:
                         ("SQLX_IDLE_TIMEOUT_SECS", "600"),
                     ),
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("reliability_connection_pool", "go"),
+                    env_vars=(
+                        ("PGX_MAX_CONNECTIONS", "20"),
+                        ("PGX_MIN_CONNECTIONS", "2"),
+                        ("PGX_CONNECT_TIMEOUT_SECS", "10"),
+                        ("PGX_IDLE_TIMEOUT_SECS", "600"),
+                    ),
+                ),
             },
         )
     )
@@ -80,6 +89,13 @@ def register_all(api: ForgeAPI) -> None:
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(
                     fragment_dir=_impl("reliability_circuit_breaker", "rust"),
+                    env_vars=(
+                        ("CIRCUIT_BREAKER_THRESHOLD", "5"),
+                        ("CIRCUIT_BREAKER_RESET_TIMEOUT", "30"),
+                    ),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("reliability_circuit_breaker", "go"),
                     env_vars=(
                         ("CIRCUIT_BREAKER_THRESHOLD", "5"),
                         ("CIRCUIT_BREAKER_RESET_TIMEOUT", "30"),
@@ -138,6 +154,9 @@ def register_all(api: ForgeAPI) -> None:
                         'thiserror = "2.0.21"',
                     ),
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("cache_port", "go"),
+                ),
             },
         )
     )
@@ -161,6 +180,10 @@ def register_all(api: ForgeAPI) -> None:
                         'lru = "0.18.5"',
                         'tokio = { version = "1.53.2", features = ["sync"] }',
                     ),
+                    env_vars=(("CACHE_MEMORY_MAX_ENTRIES", "1024"),),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("cache_memory", "go"),
                     env_vars=(("CACHE_MEMORY_MAX_ENTRIES", "1024"),),
                 ),
             },
@@ -188,6 +211,15 @@ def register_all(api: ForgeAPI) -> None:
                     dependencies=(
                         'redis = { version = "1.7.1", features = ["tokio-comp"] }',
                         'tokio = { version = "1.53.2", features = ["sync"] }',
+                    ),
+                    env_vars=(("CACHE_REDIS_URL", "redis://redis:6379/3"),),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("cache_redis", "go"),
+                    # miniredis backs the generated unit tests.
+                    dependencies=(
+                        "github.com/redis/go-redis/v9@v9.23.0",
+                        "github.com/alicebob/miniredis/v2@v2.40.0",
                     ),
                     env_vars=(("CACHE_REDIS_URL", "redis://redis:6379/3"),),
                 ),

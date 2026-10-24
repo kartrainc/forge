@@ -1,0 +1,244 @@
+// Package adapters holds the concrete implementations of internal/ports.
+package adapters
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"iter"
+	"log/slog"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+
+	"{{ project_name }}/internal/ports"
+)
+
+// AsynqDefaultBrokerURL is used when TASKIQ_BROKER_URL is unset; the env var
+// name is shared with the Python, Node and Rust queues.
+const AsynqDefaultBrokerURL = "redis://redis:6379/2"
+
+var _ ports.QueuePort = (*AsynqQueueAdapter)(nil)
+
+// errAsynqConsumerStopped fails an un-acked message when its consumer stops;
+// it is not counted as a failed attempt, so the message is simply redelivered.
+var errAsynqConsumerStopped = errors.New("queue consumer stopped")
+
+// AsynqOptions tunes an AsynqQueueAdapter. Zero values keep asynq defaults.
+type AsynqOptions struct {
+	// RetryDelay is the redelivery delay after Nack(requeue=true); zero keeps
+	// asynq's exponential backoff.
+	RetryDelay time.Duration
+	// PollInterval is how often an idle consumer polls Redis and promotes
+	// delayed messages.
+	PollInterval time.Duration
+}
+
+// asynqEnvelope is the cross-language {id, topic, body} message shape.
+type asynqEnvelope struct {
+	ID    string         `json:"id"`
+	Topic string         `json:"topic"`
+	Body  map[string]any `json:"body"`
+}
+
+// AsynqQueueAdapter implements ports.QueuePort on asynq + Redis. A topic is
+// an asynq queue. Consume runs an asynq server whose handler hands each
+// message to the caller and waits for its Ack or Nack, so asynq keeps owning
+// retries (Nack requeue) and the archive (Nack dead-letter, the DLQ).
+type AsynqQueueAdapter struct {
+	redis   asynq.RedisConnOpt
+	client  *asynq.Client
+	options AsynqOptions
+
+	mu      sync.Mutex
+	pending map[string]asynqPending
+}
+
+// AsynqBrokerURL returns TASKIQ_BROKER_URL or the compose default.
+func AsynqBrokerURL() string {
+	if url := os.Getenv("TASKIQ_BROKER_URL"); url != "" {
+		return url
+	}
+	return AsynqDefaultBrokerURL
+}
+
+// NewAsynqQueueAdapter connects lazily to the Redis at url.
+func NewAsynqQueueAdapter(url string, options AsynqOptions) (*AsynqQueueAdapter, error) {
+	redis, err := asynq.ParseRedisURI(url)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ports.ErrQueueTransport, err)
+	}
+	return &AsynqQueueAdapter{
+		redis:   redis,
+		client:  asynq.NewClient(redis),
+		options: options,
+		pending: map[string]asynqPending{},
+	}, nil
+}
+
+// Close releases the producer connection.
+func (a *AsynqQueueAdapter) Close() error {
+	return a.client.Close()
+}
+
+// Enqueue stores body on topic; delay > 0 schedules it.
+func (a *AsynqQueueAdapter) Enqueue(ctx context.Context, topic string, body map[string]any, delay time.Duration) (string, error) {
+	id := uuid.NewString()
+	payload, err := json.Marshal(asynqEnvelope{ID: id, Topic: topic, Body: body})
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ports.ErrQueueSerialization, err)
+	}
+	options := []asynq.Option{asynq.Queue(topic), asynq.TaskID(id)}
+	if delay > 0 {
+		options = append(options, asynq.ProcessIn(delay))
+	}
+	if _, err := a.client.EnqueueContext(ctx, asynq.NewTask(topic, payload), options...); err != nil {
+		return "", fmt.Errorf("%w: %w", ports.ErrQueueTransport, err)
+	}
+	return id, nil
+}
+
+type asynqDelivery struct {
+	message  ports.QueueMessage
+	decision chan error
+}
+
+type asynqPending struct {
+	decision chan error
+	consumer chan struct{}
+}
+
+// Consume yields messages from topic; batchSize bounds the un-acked messages
+// in flight. Stopping the range (or cancelling ctx) stops the asynq server
+// and redelivers every message that was not acked or nacked.
+func (a *AsynqQueueAdapter) Consume(ctx context.Context, topic string, batchSize int) iter.Seq2[ports.QueueMessage, error] {
+	return func(yield func(ports.QueueMessage, error) bool) {
+		if err := a.client.Ping(); err != nil {
+			yield(ports.QueueMessage{}, fmt.Errorf("%w: %w", ports.ErrQueueTransport, err))
+			return
+		}
+		deliveries := make(chan asynqDelivery)
+		stopped := make(chan struct{})
+		server := asynq.NewServer(a.redis, asynq.Config{
+			Concurrency:              max(batchSize, 1),
+			Queues:                   map[string]int{topic: 1},
+			TaskCheckInterval:        a.options.PollInterval,
+			DelayedTaskCheckInterval: a.options.PollInterval,
+			RetryDelayFunc:           a.retryDelay,
+			IsFailure:                func(err error) bool { return !errors.Is(err, errAsynqConsumerStopped) },
+			Logger:                   asynqLogger{},
+			LogLevel:                 asynq.WarnLevel,
+		})
+		handler := asynq.HandlerFunc(func(taskCtx context.Context, task *asynq.Task) error {
+			var envelope asynqEnvelope
+			if err := json.Unmarshal(task.Payload(), &envelope); err != nil {
+				return fmt.Errorf("%w: %w", ports.ErrQueueSerialization, errors.Join(err, asynq.SkipRetry))
+			}
+			delivery := asynqDelivery{
+				message:  ports.QueueMessage{ID: envelope.ID, Body: envelope.Body, Receipt: envelope.ID},
+				decision: make(chan error, 1),
+			}
+			select {
+			case deliveries <- delivery:
+			case <-stopped:
+				return errAsynqConsumerStopped
+			case <-taskCtx.Done():
+				return taskCtx.Err()
+			}
+			select {
+			case err := <-delivery.decision:
+				return err
+			case <-stopped:
+				// An Ack sent just before the consumer stopped still wins.
+				select {
+				case err := <-delivery.decision:
+					return err
+				default:
+					return errAsynqConsumerStopped
+				}
+			case <-taskCtx.Done():
+				return taskCtx.Err()
+			}
+		})
+		if err := server.Start(handler); err != nil {
+			yield(ports.QueueMessage{}, fmt.Errorf("%w: %w", ports.ErrQueueTransport, err))
+			return
+		}
+		defer func() {
+			close(stopped)
+			server.Shutdown()
+			a.mu.Lock()
+			for receipt, entry := range a.pending {
+				if entry.consumer == stopped {
+					delete(a.pending, receipt)
+				}
+			}
+			a.mu.Unlock()
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case delivery := <-deliveries:
+				a.mu.Lock()
+				a.pending[delivery.message.Receipt] = asynqPending{decision: delivery.decision, consumer: stopped}
+				a.mu.Unlock()
+				if !yield(delivery.message, nil) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Ack completes an in-flight message.
+func (a *AsynqQueueAdapter) Ack(_ context.Context, _, receipt string) error {
+	return a.settle(receipt, nil)
+}
+
+// Nack retries an in-flight message (requeue) or archives it (dead-letter).
+func (a *AsynqQueueAdapter) Nack(_ context.Context, _, receipt string, requeue bool) error {
+	if requeue {
+		return a.settle(receipt, errors.New("nack: requeue"))
+	}
+	return a.settle(receipt, fmt.Errorf("nack: dead-letter: %w", asynq.SkipRetry))
+}
+
+func (a *AsynqQueueAdapter) settle(receipt string, outcome error) error {
+	a.mu.Lock()
+	entry, ok := a.pending[receipt]
+	delete(a.pending, receipt)
+	a.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: %s", ports.ErrQueueUnknownReceipt, receipt)
+	}
+	entry.decision <- outcome
+	return nil
+}
+
+func (a *AsynqQueueAdapter) retryDelay(attempt int, err error, task *asynq.Task) time.Duration {
+	switch {
+	case errors.Is(err, errAsynqConsumerStopped):
+		return 0
+	case a.options.RetryDelay > 0:
+		return a.options.RetryDelay
+	default:
+		return asynq.DefaultRetryDelayFunc(attempt, err, task)
+	}
+}
+
+// asynqLogger routes asynq's internal logs through slog.
+type asynqLogger struct{}
+
+func (asynqLogger) Debug(args ...any) { slog.Debug(fmt.Sprint(args...), "component", "asynq") }
+func (asynqLogger) Info(args ...any)  { slog.Info(fmt.Sprint(args...), "component", "asynq") }
+func (asynqLogger) Warn(args ...any)  { slog.Warn(fmt.Sprint(args...), "component", "asynq") }
+func (asynqLogger) Error(args ...any) { slog.Error(fmt.Sprint(args...), "component", "asynq") }
+func (asynqLogger) Fatal(args ...any) {
+	slog.Error(fmt.Sprint(args...), "component", "asynq")
+	os.Exit(1)
+}

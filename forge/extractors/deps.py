@@ -178,6 +178,8 @@ def _manifest_path(backend_dir: Path, lang: BackendLanguage) -> Path | None:
         return backend_dir / "package.json"
     if lang is BackendLanguage.RUST:
         return backend_dir / "Cargo.toml"
+    if lang is BackendLanguage.GO:
+        return backend_dir / "go.mod"
     return None
 
 
@@ -194,6 +196,8 @@ def _read_project_deps(manifest_path: Path, lang: BackendLanguage) -> dict[str, 
     * **Node** — value is the npm version range as stored
       (``"^1.2.3"``, ``"workspace:*"``, ``"file:..."``); key is the
       package name verbatim (scoped or unscoped).
+    * **Go** — value is the exact required version; key is the module path.
+      ``// indirect`` requirements are resolver output, not declared deps.
     * **Rust** — value is the version string for shorthand entries; for
       inline-table entries (``{ version = "...", features = [...] }``)
       the value is the version field's string form. The full table
@@ -207,6 +211,8 @@ def _read_project_deps(manifest_path: Path, lang: BackendLanguage) -> dict[str, 
         return _read_node_deps(manifest_path)
     if lang is BackendLanguage.RUST:
         return _read_rust_deps(manifest_path)
+    if lang is BackendLanguage.GO:
+        return _read_go_deps(manifest_path)
     return {}
 
 
@@ -247,6 +253,28 @@ def _read_rust_deps(cargo_toml: Path) -> dict[str, str]:
         # etc.) is implicitly part of the "spec" but we report drift at
         # the version-string level for now.
         out[str(name)] = _rust_value_version(value)
+    return out
+
+
+def _read_go_deps(go_mod: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    in_block = False
+    for raw in go_mod.read_text(encoding="utf-8").splitlines():
+        line, _, comment = raw.partition("//")
+        line = line.strip()
+        if in_block and line == ")":
+            in_block = False
+            continue
+        if line == "require (":
+            in_block = True
+            continue
+        if not in_block:
+            if not line.startswith("require "):
+                continue
+            line = line.removeprefix("require ").strip()
+        parts = line.split()
+        if len(parts) == 2 and comment.strip() != "indirect":
+            out[parts[0]] = parts[1]
     return out
 
 
@@ -293,6 +321,10 @@ def _parse_fragment_deps(
     elif lang is BackendLanguage.RUST:
         for dep in deps:
             name, version = _split_rust_dep(dep)
+            out[name] = version
+    elif lang is BackendLanguage.GO:
+        for dep in deps:
+            name, _, version = dep.strip().rpartition("@")
             out[name] = version
     return out
 

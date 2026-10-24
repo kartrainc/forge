@@ -16,15 +16,16 @@ def register_all(api: ForgeAPI) -> None:
             path="async.task_queue",
             type=OptionType.BOOL,
             default=False,
-            summary="Redis-backed job queue (Taskiq / BullMQ / Apalis).",
+            summary="Redis-backed job queue (Taskiq / BullMQ / Apalis / asynq).",
             description="""\
 A Redis-backed job queue + example task + worker binary. Define jobs as
 regular async functions, enqueue them from request handlers, process
 them out-of-process in a dedicated worker container. Ships with Taskiq
-(Python), BullMQ + ioredis (Node), and Apalis (Rust) — three different
-ecosystems with the same env-var convention (TASKIQ_BROKER_URL).
+(Python), BullMQ + ioredis (Node), Apalis (Rust) and asynq (Go, with a
+``cmd/worker`` binary) — four ecosystems with the same env-var convention
+(TASKIQ_BROKER_URL).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 REQUIRES: TASKIQ_BROKER_URL → Redis.""",
             category=FeatureCategory.ASYNC_WORK,
             stability="beta",
@@ -61,7 +62,7 @@ REQUIRES: rag.backend ≠ none + async.task_queue = true.""",
             path="queue.backend",
             type=OptionType.ENUM,
             default="none",
-            options=("none", "redis", "sqs", "bullmq", "apalis"),
+            options=("none", "redis", "sqs", "bullmq", "apalis", "asynq"),
             summary="Background-work queue — selects the QueuePort adapter (per RFC-012).",
             description="""\
 Selects which queue implementation the ``QueuePort`` resolves to.
@@ -72,6 +73,7 @@ per-language mapping:
 - ``redis`` / ``sqs``: Python adapters (Taskiq broker, AWS SQS).
 - ``bullmq``: Node adapter (BullMQ + ioredis).
 - ``apalis``: Rust adapter (Apalis + Redis).
+- ``asynq``: Go adapter (asynq + Redis).
 
 In a polyglot project, the resolver targets the adapter only at the
 backend language whose ecosystem it belongs to. Other backends in
@@ -79,10 +81,10 @@ the same project receive the port (typing only, no concrete adapter)
 unless paired with their own queue.backend value via per-language
 overrides (future work; see RFC-012 §"Drawbacks").
 
-OPTIONS: none | redis | sqs | bullmq | apalis
-BACKENDS: python (redis, sqs), node (bullmq), rust (apalis)
+OPTIONS: none | redis | sqs | bullmq | apalis | asynq
+BACKENDS: python (redis, sqs), node (bullmq), rust (apalis), go (asynq)
 DEPENDENCY: redis-py (redis), aioboto3 (sqs), bullmq+ioredis
-    (bullmq), apalis+apalis-redis (apalis)
+    (bullmq), apalis+apalis-redis (apalis), hibiken/asynq (asynq)
 ENV: REDIS_URL / AWS_REGION / TASKIQ_BROKER_URL""",
             category=FeatureCategory.ASYNC_WORK,
             enables={
@@ -90,6 +92,7 @@ ENV: REDIS_URL / AWS_REGION / TASKIQ_BROKER_URL""",
                 "sqs": ("queue_port", "queue_sqs"),
                 "bullmq": ("queue_port", "queue_bullmq"),
                 "apalis": ("queue_port", "queue_apalis"),
+                "asynq": ("queue_port", "queue_asynq"),
             },
         )
     )

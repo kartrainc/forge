@@ -1,0 +1,38 @@
+// Command worker drains the {{ project_name }} background-job queue
+// (asynq + Redis at TASKIQ_BROKER_URL). Run it next to the server:
+//
+//	go run ./cmd/worker
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/worker"
+)
+
+func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	cfg, err := config.Load(config.LoadOptions{})
+	if err != nil {
+		slog.Error("configuration error", "error", err)
+		return 1
+	}
+	slog.SetDefault(app.Logger(cfg.Logging.Level, cfg.Logging.Pretty))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := worker.Run(ctx, worker.BrokerURL()); err != nil {
+		slog.Error("worker failed", "error", err)
+		return 1
+	}
+	return 0
+}

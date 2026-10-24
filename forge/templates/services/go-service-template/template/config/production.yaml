@@ -1,0 +1,12 @@
+logging:
+  level: "info"
+  pretty: false
+
+security:
+  auth:
+    enabled: true
+
+server:
+  cors:
+    allow_origins: []
+    allow_credentials: true

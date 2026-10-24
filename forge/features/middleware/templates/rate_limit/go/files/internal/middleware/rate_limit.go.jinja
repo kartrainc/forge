@@ -1,0 +1,141 @@
+package middleware
+
+import (
+	"container/list"
+	"math"
+	"net"
+	"net/http"
+	"net/netip"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+)
+
+// maxRateLimitBuckets bounds the client map; the least recently used bucket is
+// evicted first so a flood of unique clients cannot exhaust memory.
+const maxRateLimitBuckets = 4096
+
+// RateLimitOptions tunes the token bucket. Zero values mean 120 requests per
+// minute, a burst of the same size, and probes under /health, /metrics and
+// /api/v1/health skipped.
+//
+// State is in memory, per replica.
+type RateLimitOptions struct {
+	RequestsPerMinute int
+	Burst             int
+	SkipPaths         []string
+}
+
+// RateLimit keys requests by tenant when an identity is bound, else by client
+// IP, and answers 429 RATE_LIMITED with Retry-After once a bucket is empty.
+func RateLimit(options RateLimitOptions) Middleware {
+	if options.RequestsPerMinute <= 0 {
+		options.RequestsPerMinute = 120
+	}
+	if options.Burst <= 0 {
+		options.Burst = options.RequestsPerMinute
+	}
+	if options.SkipPaths == nil {
+		options.SkipPaths = []string{"/health", "/metrics", "/api/v1/health"}
+	}
+	limiter := &rateLimiter{
+		rate:     float64(options.RequestsPerMinute) / 60,
+		capacity: float64(options.Burst),
+		buckets:  map[string]*list.Element{},
+		lru:      list.New(),
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, prefix := range options.SkipPaths {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			allowed, wait := limiter.take(rateLimitKey(r), time.Now())
+			if !allowed {
+				retryAfter := int(math.Ceil(wait.Seconds()))
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				err := apperrors.New(apperrors.RateLimited, "Rate limit exceeded. Please slow down.")
+				err.Context = map[string]any{"retry_after": retryAfter}
+				apperrors.Write(w, r, err)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+type rateLimiter struct {
+	mu       sync.Mutex
+	rate     float64
+	capacity float64
+	buckets  map[string]*list.Element
+	lru      *list.List
+}
+
+type tokenBucket struct {
+	key        string
+	tokens     float64
+	lastRefill time.Time
+}
+
+// take spends one token for key, or reports how long until one is available.
+func (l *rateLimiter) take(key string, now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	element, ok := l.buckets[key]
+	if ok {
+		l.lru.MoveToFront(element)
+	} else {
+		for l.lru.Len() >= maxRateLimitBuckets {
+			oldest := l.lru.Back()
+			l.lru.Remove(oldest)
+			delete(l.buckets, oldest.Value.(*tokenBucket).key)
+		}
+		element = l.lru.PushFront(&tokenBucket{key: key, tokens: l.capacity, lastRefill: now})
+		l.buckets[key] = element
+	}
+	bucket := element.Value.(*tokenBucket)
+	bucket.tokens = min(l.capacity, bucket.tokens+now.Sub(bucket.lastRefill).Seconds()*l.rate)
+	bucket.lastRefill = now
+	if bucket.tokens < 1 {
+		return false, time.Duration((1 - bucket.tokens) / l.rate * float64(time.Second))
+	}
+	bucket.tokens--
+	return true, 0
+}
+
+// rateLimitKey prefers the tenant, then the client address. X-Forwarded-For is
+// honoured only when the transport peer is a trusted in-cluster proxy
+// (loopback, private or link-local), so internet clients cannot spoof it.
+func rateLimitKey(r *http.Request) string {
+	if id, ok := identity.FromContext(r.Context()); ok && id.TenantID != uuid.Nil {
+		return "tenant:" + id.TenantID.String()
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		if host == "" {
+			return "anonymous"
+		}
+		return "ip:" + host
+	}
+	peer = peer.Unmap()
+	if peer.IsLoopback() || peer.IsPrivate() || peer.IsLinkLocalUnicast() {
+		forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
+		if client := strings.TrimSpace(forwarded); client != "" {
+			return "ip:" + client
+		}
+	}
+	return "ip:" + peer.String()
+}

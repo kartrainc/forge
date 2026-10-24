@@ -1,6 +1,6 @@
 # Cross-SDK parity contract
 
-The `platform-auth` SDK ships in three languages (Python, Node, Rust). Cross-language parity is the load-bearing claim: **the same JWT must yield the same `IdentityContext` (or the same `AuthError` variant) across all three**.
+The `platform-auth` SDK ships in four languages (Python, Node, Rust, Go). Cross-language parity is the load-bearing claim: **the same JWT must yield the same `IdentityContext` (or the same `AuthError` variant) across all of them**.
 
 This directory is the canonical scenario spec.
 
@@ -108,6 +108,22 @@ Skipped at collection time if `cargo` isn't on PATH (no
 on first run, though the cold build is slow enough that the
 orchestrator's timeout is set to 10 minutes).
 
+### Go runner — `go test` parity test
+
+The Go-side runner lives in the Go SDK at
+`forge/features/auth/templates/platform_auth_sdk_go/go/files/packages/platform-auth-go/parity_test.go`.
+It loads the scenarios JSON from `PARITY_FIXTURES` and skips itself when the
+variable is unset; an `httptest` server serves the JWKS document.
+
+```bash
+cd <project>/packages/platform-auth-go
+PARITY_FIXTURES=/tmp/scenarios.json go test -run "^TestCrossSDKParity$" -v .
+```
+
+**Forge-CI orchestrator**: `tests/contract/auth_sdk_parity/test_go_runner.py`
+runs the same command from the SDK directory. Skipped at collection time if
+`go` isn't on PATH.
+
 ## Adding a new scenario
 
 1. Add a `Scenario(...)` entry to `SCENARIOS` in `scenarios.py`. Keep the `name` snake_case + verb-first.
@@ -129,3 +145,4 @@ Pre-baked JWT fixtures couple to specific keypair material. A change to the test
 - Python SDK: `forge/features/auth/templates/platform_auth_sdk/python/files/sdks/platform-auth/`.
 - Node SDK: `forge/features/auth/templates/platform_auth_sdk_node/node/files/sdks/platform-auth-node/`.
 - Rust SDK: `forge/features/auth/templates/platform_auth_sdk_rust/rust/files/sdks/platform-auth-rs/`.
+- Go SDK: `forge/features/auth/templates/platform_auth_sdk_go/go/files/packages/platform-auth-go/`.

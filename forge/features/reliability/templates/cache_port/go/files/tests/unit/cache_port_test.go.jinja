@@ -1,0 +1,51 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/ports/cache"
+)
+
+type cachePortStub struct {
+	raw   json.RawMessage
+	found bool
+	err   error
+}
+
+func (s cachePortStub) Get(context.Context, string) (json.RawMessage, bool, error) {
+	return s.raw, s.found, s.err
+}
+
+func (cachePortStub) Set(context.Context, string, any, time.Duration) error { return nil }
+
+func (cachePortStub) Invalidate(context.Context, string) error { return nil }
+
+var _ cache.Port = cachePortStub{}
+
+func TestCachePortLookupDecodesValues(t *testing.T) {
+	ctx := context.Background()
+	type payload struct {
+		Count int `json:"count"`
+	}
+	got, found, err := cache.Lookup[payload](ctx, cachePortStub{raw: json.RawMessage(`{"count":3}`), found: true}, "k")
+	if err != nil || !found || got.Count != 3 {
+		t.Fatalf("hit: %+v %v %v", got, found, err)
+	}
+	if _, found, err := cache.Lookup[payload](ctx, cachePortStub{}, "k"); err != nil || found {
+		t.Fatalf("miss: %v %v", found, err)
+	}
+	if _, _, err := cache.Lookup[payload](ctx, cachePortStub{err: cache.ErrTransport}, "k"); !errors.Is(err, cache.ErrTransport) {
+		t.Fatalf("transport errors propagate: %v", err)
+	}
+	_, found, err = cache.Lookup[payload](ctx, cachePortStub{raw: json.RawMessage(`"text"`), found: true}, "k")
+	if found || !errors.Is(err, cache.ErrSerialization) {
+		t.Fatalf("type mismatch: %v %v", found, err)
+	}
+	if cache.NoExpiry <= 0 {
+		t.Fatal("NoExpiry must not read as an invalidate")
+	}
+}

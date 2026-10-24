@@ -1,0 +1,12 @@
+# reliability_connection_pool — Go.
+#
+# Applies TunePool (internal/db/pool_tuning.go) to every pool db.NewPool builds.
+
+- target: internal/db/db.go
+  marker: FORGE:DB_POOL_CONFIG
+  position: before
+  zone: generated
+  snippet: |-
+    if err := TunePool(cfg, os.Getenv); err != nil {
+    	return nil, err
+    }

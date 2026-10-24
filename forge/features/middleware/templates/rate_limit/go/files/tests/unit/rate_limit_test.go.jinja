@@ -1,0 +1,152 @@
+package unit_test
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/tests/testutil"
+)
+
+func limitedHandler(options middleware.RateLimitOptions) http.Handler {
+	return middleware.RateLimit(options)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+}
+
+func sendFrom(handler http.Handler, remoteAddr, path string, header map[string]string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.RemoteAddr = remoteAddr
+	for name, value := range header {
+		request.Header.Set(name, value)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestRateLimitDefaultsAllowBurstThenRejectWithEnvelope(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{})
+	for i := range 120 {
+		if code := sendFrom(handler, "198.51.100.7:4000", "/api/v1/items", nil).Code; code != http.StatusNoContent {
+			t.Fatalf("request %d: status %d", i, code)
+		}
+	}
+	recorder := sendFrom(handler, "198.51.100.7:4000", "/api/v1/items", nil)
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d", recorder.Code)
+	}
+	retryAfter, err := strconv.Atoi(recorder.Header().Get("Retry-After"))
+	if err != nil || retryAfter < 1 {
+		t.Fatalf("Retry-After %q", recorder.Header().Get("Retry-After"))
+	}
+	var envelope testutil.Envelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "RATE_LIMITED" || envelope.Error.Context["retry_after"] != float64(retryAfter) {
+		t.Fatalf("envelope %+v", envelope)
+	}
+	if code := sendFrom(handler, "198.51.100.8:4000", "/api/v1/items", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("another client shares the bucket: %d", code)
+	}
+}
+
+func TestRateLimitSkipsProbePaths(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	for _, path := range []string{"/health", "/metrics", "/api/v1/health/live", "/api/v1/health/ready"} {
+		for range 3 {
+			if code := sendFrom(handler, "198.51.100.7:4000", path, nil).Code; code != http.StatusNoContent {
+				t.Fatalf("%s: status %d", path, code)
+			}
+		}
+	}
+	custom := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1, SkipPaths: []string{"/open"}})
+	sendFrom(custom, "198.51.100.7:4000", "/api/v1/health/live", nil)
+	if code := sendFrom(custom, "198.51.100.7:4000", "/api/v1/health/live", nil).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("custom skip paths replace the defaults: %d", code)
+	}
+}
+
+func TestRateLimitKeysTenantsAcrossAddresses(t *testing.T) {
+	limiter := middleware.RateLimit(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	tenant := identity.New(uuid.New(), "subject")
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limiter(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})).ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), tenant)))
+	})
+	if code := sendFrom(handler, "198.51.100.1:1", "/api/v1/items", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("first tenant request: %d", code)
+	}
+	if code := sendFrom(handler, "198.51.100.2:1", "/api/v1/items", nil).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("the tenant bucket follows the tenant, not the address: %d", code)
+	}
+}
+
+func TestRateLimitTrustsForwardedForOnlyFromPrivatePeers(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	for p, proxy := range []string{"10.0.0.2:80", "127.0.0.1:80", "[fd00::1]:80", "[fe80::1]:80", "[::ffff:192.168.1.1]:80"} {
+		clients := []string{fmt.Sprintf("203.0.113.%d", 2*p+1), fmt.Sprintf("203.0.113.%d, 10.0.0.9", 2*p+2)}
+		for _, client := range clients {
+			if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": client}).Code; code != http.StatusNoContent {
+				t.Fatalf("%s via %s: %d", client, proxy, code)
+			}
+		}
+		sendFrom(handler, proxy, "/", nil)
+		if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": " "}).Code; code != http.StatusTooManyRequests {
+			t.Fatalf("a blank forwarded address falls back to the peer: %d", code)
+		}
+	}
+	public := "198.51.100.9:80"
+	sendFrom(handler, public, "/", map[string]string{"X-Forwarded-For": "203.0.113.50"})
+	if code := sendFrom(handler, public, "/", map[string]string{"X-Forwarded-For": "203.0.113.51"}).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("a public peer cannot pick its bucket via X-Forwarded-For: %d", code)
+	}
+}
+
+func TestRateLimitUnusualRemoteAddresses(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	for _, remote := range []string{"", "not-an-ip", "198.51.100.20"} {
+		sendFrom(handler, remote, "/", nil)
+		if code := sendFrom(handler, remote, "/", nil).Code; code != http.StatusTooManyRequests {
+			t.Fatalf("remote %q: %d", remote, code)
+		}
+	}
+}
+
+func TestRateLimitRefillsOverTime(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 60000, Burst: 1})
+	sendFrom(handler, "198.51.100.7:1", "/", nil)
+	if code := sendFrom(handler, "198.51.100.7:1", "/", nil).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("burst of one: %d", code)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if code := sendFrom(handler, "198.51.100.7:1", "/", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("bucket refills: %d", code)
+	}
+}
+
+func TestRateLimitEvictsLeastRecentlyUsedClients(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	first := "198.51.100.7:1"
+	sendFrom(handler, first, "/", nil)
+	sendFrom(handler, "198.51.100.8:1", "/", nil)
+	if code := sendFrom(handler, first, "/", nil).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("exhausted: %d", code)
+	}
+	for i := range 4096 {
+		sendFrom(handler, fmt.Sprintf("[2001:db8::%x]:1", i+1), "/", nil)
+	}
+	if code := sendFrom(handler, first, "/", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("evicted clients start with a full bucket: %d", code)
+	}
+}

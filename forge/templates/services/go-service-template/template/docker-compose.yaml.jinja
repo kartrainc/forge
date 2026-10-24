@@ -1,0 +1,53 @@
+services:
+  app:
+    build: .
+    ports:
+      - "{{ server_port }}:{{ server_port }}"
+    environment:
+      # The image pins ENV=production (a bare `docker run` is fail-closed); the
+      # local stack runs in development.
+      ENV: development
+      PORT: "{{ server_port }}"
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ db_name }}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build: .
+    command: ["/app/migrate"]
+    environment:
+      ENV: development
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ db_name }}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: {{ db_name }}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:9
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@localhost.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    profiles:
+      - tools
+
+volumes:
+  pgdata:

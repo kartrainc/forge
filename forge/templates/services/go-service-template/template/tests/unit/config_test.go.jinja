@@ -1,0 +1,137 @@
+package unit_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/tests/testutil"
+)
+
+func TestTestingConfigurationLoadsDefaultsAndProfile(t *testing.T) {
+	cfg, err := config.Load(config.LoadOptions{ProjectRoot: testutil.ServiceRoot(), Env: "testing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port <= 0 || !cfg.Server.CORS.Enabled || cfg.App.Env != "testing" {
+		t.Fatalf("unexpected config %+v", cfg)
+	}
+	if !strings.HasSuffix(cfg.DB.URL, "_test") || cfg.Logging.Level != "warn" {
+		t.Fatalf("testing profile not applied: %+v", cfg)
+	}
+}
+
+func TestMissingConfigFilesUseSafeDefaults(t *testing.T) {
+	cfg, err := config.Load(config.LoadOptions{ProjectRoot: t.TempDir(), Env: "testing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port <= 0 || cfg.Server.CORS.AllowCredentials || cfg.DB.PoolMax < cfg.DB.PoolMin {
+		t.Fatalf("unsafe defaults %+v", cfg)
+	}
+}
+
+func TestEnvironmentAndSecretsOverrideFiles(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "config", "defaults.yaml"), "server:\n  port: 7000\napp:\n  name: base\n")
+	write(t, filepath.Join(root, ".secrets.yaml"), "app:\n  version: \"9.9.9\"\n")
+	t.Setenv("APP__SERVER__PORT", "8081")
+	t.Setenv("APP__SERVER__CORS__ALLOW_ORIGINS", "https://a.example, https://b.example")
+	t.Setenv("APP__LOGGING__PRETTY", "true")
+	t.Setenv("APP__APP__NAME", "from-env")
+	t.Setenv("APP__DB__URL", "postgresql://db:5432/app?sslmode=disable")
+	cfg, err := config.Load(config.LoadOptions{ProjectRoot: root, Env: "testing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port != 8081 || !cfg.Logging.Pretty || cfg.App.Name != "from-env" || cfg.App.Version != "9.9.9" {
+		t.Fatalf("overrides not applied: %+v", cfg)
+	}
+	if len(cfg.Server.CORS.AllowOrigins) != 2 || cfg.Server.CORS.AllowOrigins[1] != "https://b.example" {
+		t.Fatalf("list override: %v", cfg.Server.CORS.AllowOrigins)
+	}
+	if cfg.DB.URL != "postgresql://db:5432/app?sslmode=disable" {
+		t.Fatalf("string override: %s", cfg.DB.URL)
+	}
+}
+
+func TestProfileSelectionFromEnvironment(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "config", "staging.yaml"), "app:\n  name: staging\n")
+	t.Setenv("ENV", "")
+	t.Setenv("APP_ENV", "staging")
+	cfg, err := config.Load(config.LoadOptions{ProjectRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.Name != "staging" || cfg.App.Env != "staging" {
+		t.Fatalf("profile not selected: %+v", cfg.App)
+	}
+}
+
+func TestInvalidConfigurationFails(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "config", "defaults.yaml"), "server: [unclosed\n")
+	if _, err := config.Load(config.LoadOptions{ProjectRoot: root, Env: "testing"}); err == nil {
+		t.Fatal("malformed YAML must fail")
+	}
+	write(t, filepath.Join(root, "config", "defaults.yaml"), "server:\n  port: not-a-number\n")
+	if _, err := config.Load(config.LoadOptions{ProjectRoot: root, Env: "testing"}); err == nil {
+		t.Fatal("type mismatch must fail")
+	}
+	write(t, filepath.Join(root, "config", "defaults.yaml"), "db:\n  pool_min: 5\n  pool_max: 1\n")
+	if _, err := config.Load(config.LoadOptions{ProjectRoot: root, Env: "testing"}); err == nil {
+		t.Fatal("inverted pool bounds must fail")
+	}
+}
+
+func TestProductionAuthGuardFailsClosed(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = true
+	empty := func(string) string { return "" }
+	if err := cfg.Validate("production", empty); err == nil || !strings.Contains(err.Error(), "GATEKEEPER_ISSUER") {
+		t.Fatalf("expected fail-closed guard, got %v", err)
+	}
+	set := func(string) string { return "value" }
+	if err := cfg.Validate("production", set); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate("development", empty); err != nil {
+		t.Fatal("development is exempt")
+	}
+	cfg.Security.Auth.Enabled = false
+	if err := cfg.Validate("production", empty); err != nil {
+		t.Fatal("auth disabled needs no issuer")
+	}
+	root := t.TempDir()
+	write(t, filepath.Join(root, "config", "production.yaml"), "security:\n  auth:\n    enabled: true\n")
+	t.Setenv("ENV", "")
+	t.Setenv("APP_ENV", "")
+	t.Setenv("GATEKEEPER_ISSUER", "")
+	if _, err := config.Load(config.LoadOptions{ProjectRoot: root, Env: "production"}); err == nil {
+		t.Fatal("production load must fail closed")
+	}
+}
+
+func TestDefaultsReadDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://env/db")
+	if config.Defaults().DB.URL != "postgresql://env/db" {
+		t.Fatal("DATABASE_URL must seed the default url")
+	}
+	t.Setenv("DATABASE_URL", "")
+	if config.Defaults().DB.URL == "" {
+		t.Fatal("default url must not be empty")
+	}
+}
+
+func write(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

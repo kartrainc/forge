@@ -1,0 +1,149 @@
+// Package cachememory is the in-process LRU cache.Port adapter.
+//
+// Single-replica only; multi-replica deployments should use the Redis adapter
+// so eviction is consistent across pods. TTL expiry is checked lazily on read.
+package cachememory
+
+import (
+	"container/list"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"sync"
+	"time"
+
+	"{{ project_name }}/internal/ports/cache"
+)
+
+// DefaultMaxEntries applies when CACHE_MEMORY_MAX_ENTRIES is unset or invalid.
+const DefaultMaxEntries = 1024
+
+type entry struct {
+	key       string
+	value     json.RawMessage
+	expiresAt time.Time
+}
+
+// Adapter is safe for concurrent use.
+type Adapter struct {
+	mu         sync.Mutex
+	maxEntries int
+	now        func() time.Time
+	order      *list.List
+	items      map[string]*list.Element
+}
+
+var _ cache.Port = (*Adapter)(nil)
+
+// Option configures an Adapter.
+type Option func(*Adapter)
+
+// WithMaxEntries caps the number of entries; values below 1 are ignored.
+func WithMaxEntries(n int) Option {
+	return func(a *Adapter) {
+		if n > 0 {
+			a.maxEntries = n
+		}
+	}
+}
+
+// WithClock replaces the wall clock used for TTL checks.
+func WithClock(now func() time.Time) Option {
+	return func(a *Adapter) { a.now = now }
+}
+
+// New builds an adapter capped at CACHE_MEMORY_MAX_ENTRIES entries.
+func New(options ...Option) *Adapter {
+	a := &Adapter{
+		maxEntries: maxEntriesFromEnv(),
+		now:        time.Now,
+		order:      list.New(),
+		items:      map[string]*list.Element{},
+	}
+	for _, option := range options {
+		option(a)
+	}
+	return a
+}
+
+func maxEntriesFromEnv() int {
+	n, err := strconv.Atoi(os.Getenv("CACHE_MEMORY_MAX_ENTRIES"))
+	if err != nil || n <= 0 {
+		return DefaultMaxEntries
+	}
+	return n
+}
+
+// Get returns a copy of the stored JSON and bumps the entry's recency.
+func (a *Adapter) Get(_ context.Context, key string) (json.RawMessage, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	element, ok := a.items[key]
+	if !ok {
+		return nil, false, nil
+	}
+	stored := element.Value.(*entry)
+	if !stored.expiresAt.IsZero() && !a.now().Before(stored.expiresAt) {
+		a.remove(element)
+		return nil, false, nil
+	}
+	a.order.MoveToFront(element)
+	return append(json.RawMessage(nil), stored.value...), true, nil
+}
+
+// Set stores value, evicting the least recently used entries over capacity.
+func (a *Adapter) Set(_ context.Context, key string, value any, ttl time.Duration) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if ttl <= 0 {
+		a.drop(key)
+		return nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("%w: %v", cache.ErrSerialization, err)
+	}
+	var expiresAt time.Time
+	if ttl != cache.NoExpiry {
+		expiresAt = a.now().Add(ttl)
+	}
+	stored := &entry{key: key, value: encoded, expiresAt: expiresAt}
+	if element, ok := a.items[key]; ok {
+		element.Value = stored
+		a.order.MoveToFront(element)
+	} else {
+		a.items[key] = a.order.PushFront(stored)
+	}
+	for a.order.Len() > a.maxEntries {
+		a.remove(a.order.Back())
+	}
+	return nil
+}
+
+// Invalidate drops key.
+func (a *Adapter) Invalidate(_ context.Context, key string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.drop(key)
+	return nil
+}
+
+// Len reports the number of stored entries, including expired ones not yet read.
+func (a *Adapter) Len() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.order.Len()
+}
+
+func (a *Adapter) drop(key string) {
+	if element, ok := a.items[key]; ok {
+		a.remove(element)
+	}
+}
+
+func (a *Adapter) remove(element *list.Element) {
+	a.order.Remove(element)
+	delete(a.items, element.Value.(*entry).key)
+}

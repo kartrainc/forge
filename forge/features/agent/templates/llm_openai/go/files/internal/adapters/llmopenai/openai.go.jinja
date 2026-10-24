@@ -1,0 +1,271 @@
+// Package llmopenai implements the LLM port with the official OpenAI Go SDK.
+//
+// It speaks the chat-completions streaming API and the embeddings API, so it
+// also works with OpenAI-compatible servers reached through OPENAI_BASE_URL.
+package llmopenai
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"iter"
+	"os"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/ssestream"
+	"github.com/openai/openai-go/v3/shared"
+
+	"{{ project_name }}/internal/ports/llm"
+)
+
+const (
+	// DefaultBaseURL is used when OPENAI_BASE_URL is unset or empty.
+	DefaultBaseURL = "https://api.openai.com/v1/"
+	// EmbeddingModel is the model Embed uses.
+	EmbeddingModel = openai.EmbeddingModelTextEmbedding3Small
+)
+
+// Config holds the adapter settings.
+type Config struct {
+	APIKey  string
+	BaseURL string
+}
+
+// ConfigFromEnv reads OPENAI_API_KEY and OPENAI_BASE_URL.
+func ConfigFromEnv() Config {
+	return Config{APIKey: os.Getenv("OPENAI_API_KEY"), BaseURL: os.Getenv("OPENAI_BASE_URL")}
+}
+
+// Adapter implements llm.Port. One instance per process: the SDK client is
+// safe for concurrent use and pools connections.
+type Adapter struct {
+	client openai.Client
+}
+
+var _ llm.Port = (*Adapter)(nil)
+
+// New builds an adapter from cfg. Extra SDK options (HTTP client, retries,
+// headers) are applied last.
+func New(cfg Config, extra ...option.RequestOption) *Adapter {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
+	}
+	opts := append([]option.RequestOption{option.WithAPIKey(cfg.APIKey), option.WithBaseURL(baseURL)}, extra...)
+	return &Adapter{client: openai.NewClient(opts...)}
+}
+
+// NewFromEnv builds an adapter from ConfigFromEnv.
+func NewFromEnv(extra ...option.RequestOption) *Adapter {
+	return New(ConfigFromEnv(), extra...)
+}
+
+// Complete streams a chat completion. A provider chunk carrying several
+// parallel tool calls fans out into one llm.Chunk per call, each tagged with
+// the call's id.
+func (a *Adapter) Complete(ctx context.Context, prompt llm.Prompt, options llm.Options) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		params, err := chatParams(prompt, options)
+		if err != nil {
+			yield(llm.Chunk{}, err)
+			return
+		}
+		stream := a.client.Chat.Completions.NewStreaming(ctx, params)
+		defer func() { _ = stream.Close() }()
+		callIDs := map[int64]string{}
+		for stream.Next() {
+			for _, chunk := range toChunks(stream.Current(), callIDs) {
+				if !yield(chunk, nil) {
+					return
+				}
+			}
+		}
+		if err := stream.Err(); err != nil {
+			yield(llm.Chunk{}, mapError(err))
+		}
+	}
+}
+
+// Embed embeds texts in one request and returns the vectors in input order.
+func (a *Adapter) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return [][]float32{}, nil
+	}
+	resp, err := a.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model: EmbeddingModel,
+		Input: openai.EmbeddingNewParamsInputUnion{OfArrayOfStrings: texts},
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	if len(resp.Data) != len(texts) {
+		return nil, serializationError(fmt.Errorf("expected %d embeddings, got %d", len(texts), len(resp.Data)))
+	}
+	vectors := make([][]float32, len(texts))
+	for _, item := range resp.Data {
+		if item.Index < 0 || item.Index >= int64(len(texts)) || vectors[item.Index] != nil {
+			return nil, serializationError(fmt.Errorf("invalid embedding index %d", item.Index))
+		}
+		vector := make([]float32, len(item.Embedding))
+		for i, value := range item.Embedding {
+			vector[i] = float32(value)
+		}
+		vectors[item.Index] = vector
+	}
+	return vectors, nil
+}
+
+func chatParams(prompt llm.Prompt, options llm.Options) (openai.ChatCompletionNewParams, error) {
+	params := openai.ChatCompletionNewParams{Model: options.ModelID}
+	for _, message := range prompt.Messages {
+		converted, err := toMessage(message)
+		if err != nil {
+			return openai.ChatCompletionNewParams{}, err
+		}
+		params.Messages = append(params.Messages, converted)
+	}
+	for _, tool := range prompt.Tools {
+		params.Tools = append(params.Tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+			Name:        tool.Name,
+			Description: openai.String(tool.Description),
+			Parameters:  shared.FunctionParameters(tool.InputSchema),
+		}))
+	}
+	if options.Temperature != nil {
+		params.Temperature = openai.Float(*options.Temperature)
+	}
+	if options.MaxTokens != nil {
+		params.MaxCompletionTokens = openai.Int(*options.MaxTokens)
+	}
+	return params, nil
+}
+
+func toMessage(message llm.Message) (openai.ChatCompletionMessageParamUnion, error) {
+	switch message.Role {
+	case llm.RoleSystem:
+		return openai.SystemMessage(message.Content), nil
+	case llm.RoleUser:
+		return openai.UserMessage(message.Content), nil
+	case llm.RoleTool:
+		return openai.ToolMessage(message.Content, message.ToolCallID), nil
+	case llm.RoleAssistant:
+		calls, err := toToolCalls(message.ToolCalls)
+		if err != nil {
+			return openai.ChatCompletionMessageParamUnion{}, err
+		}
+		assistant := openai.ChatCompletionAssistantMessageParam{ToolCalls: calls}
+		if message.Content != "" || len(calls) == 0 {
+			assistant.Content.OfString = openai.String(message.Content)
+		}
+		return openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant}, nil
+	}
+	return openai.ChatCompletionMessageParamUnion{}, serializationError(fmt.Errorf("unknown chat role %q", message.Role))
+}
+
+// toolCallInput accepts the OpenAI wire shape ({id, function: {name,
+// arguments}}) and the flat shape ({id, name, arguments}); arguments may be a
+// JSON string or a JSON value.
+type toolCallInput struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+	Function  *struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	} `json:"function"`
+}
+
+func toToolCalls(raw []map[string]any) ([]openai.ChatCompletionMessageToolCallUnionParam, error) {
+	var calls []openai.ChatCompletionMessageToolCallUnionParam
+	for _, entry := range raw {
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return nil, serializationError(err)
+		}
+		var input toolCallInput
+		if err := json.Unmarshal(encoded, &input); err != nil {
+			return nil, serializationError(err)
+		}
+		name, arguments := input.Name, input.Arguments
+		if input.Function != nil {
+			name, arguments = input.Function.Name, input.Function.Arguments
+		}
+		if input.ID == "" || name == "" {
+			return nil, serializationError(errors.New("assistant tool call needs an id and a name"))
+		}
+		calls = append(calls, openai.ChatCompletionMessageToolCallUnionParam{
+			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+				ID: input.ID,
+				Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+					Name:      name,
+					Arguments: argumentsText(arguments),
+				},
+			},
+		})
+	}
+	return calls, nil
+}
+
+func argumentsText(raw json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return "{}"
+	}
+	return string(raw)
+}
+
+// toChunks translates one provider chunk. callIDs remembers each tool call's
+// id by stream index, because OpenAI sends the id only on a call's first delta.
+func toChunks(resp openai.ChatCompletionChunk, callIDs map[int64]string) []llm.Chunk {
+	if len(resp.Choices) == 0 {
+		return nil
+	}
+	choice := resp.Choices[0]
+	first := llm.Chunk{Delta: choice.Delta.Content, FinishReason: choice.FinishReason}
+	var rest []llm.Chunk
+	for i, call := range choice.Delta.ToolCalls {
+		if call.ID != "" {
+			callIDs[call.Index] = call.ID
+		}
+		delta := &llm.ToolCallChunk{
+			ID:             callIDs[call.Index],
+			Name:           call.Function.Name,
+			ArgumentsDelta: call.Function.Arguments,
+		}
+		if i == 0 {
+			first.ToolCall = delta
+			continue
+		}
+		rest = append(rest, llm.Chunk{ToolCall: delta})
+	}
+	if first == (llm.Chunk{}) {
+		return nil
+	}
+	return append([]llm.Chunk{first}, rest...)
+}
+
+func mapError(err error) error {
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		return &llm.Error{Kind: llm.KindProvider, StatusCode: apiErr.StatusCode, Err: err}
+	}
+	var streamErr *ssestream.StreamError
+	if errors.As(err, &streamErr) {
+		return &llm.Error{Kind: llm.KindProvider, Err: err}
+	}
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+		return serializationError(err)
+	}
+	return &llm.Error{Kind: llm.KindTransport, Err: err}
+}
+
+func serializationError(err error) error {
+	return &llm.Error{Kind: llm.KindSerialization, Err: err}
+}

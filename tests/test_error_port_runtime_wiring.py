@@ -366,3 +366,23 @@ def test_rendered_handler_keeps_rfc007_wire_shape(handler: Path, context_label: 
             f"{context_label}: rendered handler missing RFC-007 wire field "
             f"{field!r} (looking for {needle!r})"
         )
+
+
+GO_APP = TEMPLATES_ROOT / "go-service-template/template/internal/app/app.go.jinja"
+
+
+@pytest.mark.parametrize("include_error_envelope", [True, False])
+def test_go_composition_root_wires_error_port_only_in_plan(include_error_envelope: bool) -> None:
+    from jinja2 import Environment  # noqa: PLC0415
+
+    rendered = (
+        Environment(keep_trailing_newline=True, autoescape=False)
+        .from_string(GO_APP.read_text(encoding="utf-8"))
+        .render(
+            include_error_envelope=include_error_envelope,
+            include_platform_auth=False,
+            project_name="orders",
+            project_description="Orders",
+        )
+    )
+    assert ("useErrorPort()" in rendered) is include_error_envelope
