@@ -14,5 +14,8 @@
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "check:toolchains": "node scripts/check-canvas-toolchains.mjs"
+  },
+  "overrides": {
+    "zod": "^4.6.6"
   }
 }
