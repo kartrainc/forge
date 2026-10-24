@@ -71,6 +71,7 @@ _LANGUAGE_BY_BACKEND: dict[BackendLanguage, SupportedLanguage] = {
     BackendLanguage.PYTHON: "python",
     BackendLanguage.NODE: "typescript",
     BackendLanguage.RUST: "rust",
+    BackendLanguage.GO: "go",
 }
 
 

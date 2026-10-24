@@ -1,0 +1,98 @@
+// Package cacheredis is the Redis cache.Port adapter (go-redis).
+//
+// Values are stored as JSON. Cross-replica safe; eviction follows Redis's
+// maxmemory-policy. Cache traffic defaults to db 3 so eviction pressure does
+// not clobber queue or rate-limit keys sharing the Redis sidecar.
+package cacheredis
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+
+	"{{ project_name }}/internal/ports/cache"
+)
+
+// DefaultURL applies when CACHE_REDIS_URL is unset.
+const DefaultURL = "redis://redis:6379/3"
+
+// Adapter is safe for concurrent use; go-redis pools its connections.
+type Adapter struct {
+	client *redis.Client
+}
+
+var _ cache.Port = (*Adapter)(nil)
+
+// New connects lazily to CACHE_REDIS_URL.
+func New() (*Adapter, error) {
+	url := os.Getenv("CACHE_REDIS_URL")
+	if url == "" {
+		url = DefaultURL
+	}
+	return NewWithURL(url)
+}
+
+// NewWithURL connects lazily to url.
+func NewWithURL(url string) (*Adapter, error) {
+	options, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid redis url: %v", cache.ErrTransport, err)
+	}
+	return &Adapter{client: redis.NewClient(options)}, nil
+}
+
+// Get returns the stored JSON. Raw non-JSON strings written by ops tools
+// (redis-cli SET foo bar) are returned as a JSON string.
+func (a *Adapter) Get(ctx context.Context, key string) (json.RawMessage, bool, error) {
+	raw, err := a.client.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, transport(err)
+	}
+	if !json.Valid(raw) {
+		raw, _ = json.Marshal(string(raw))
+	}
+	return raw, true, nil
+}
+
+// Set stores value with the given ttl.
+func (a *Adapter) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
+	if ttl <= 0 {
+		return a.Invalidate(ctx, key)
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("%w: %v", cache.ErrSerialization, err)
+	}
+	if ttl == cache.NoExpiry {
+		ttl = 0
+	}
+	if err := a.client.Set(ctx, key, payload, ttl).Err(); err != nil {
+		return transport(err)
+	}
+	return nil
+}
+
+// Invalidate deletes key.
+func (a *Adapter) Invalidate(ctx context.Context, key string) error {
+	if err := a.client.Del(ctx, key).Err(); err != nil {
+		return transport(err)
+	}
+	return nil
+}
+
+// Close releases the connection pool.
+func (a *Adapter) Close() error {
+	return a.client.Close()
+}
+
+func transport(err error) error {
+	return fmt.Errorf("%w: %v", cache.ErrTransport, err)
+}

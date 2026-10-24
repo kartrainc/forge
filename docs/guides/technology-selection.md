@@ -22,7 +22,9 @@ splitting a service solely for performance.
 
 The implementation gives the preferred workload language 4 points, an existing
 runtime 3 points, a team language 2 points, and Rust another 3 points for
-`cpu_intensive: true`. Library and capability constraints eliminate candidates
+`cpu_intensive: true`. Go is scored like every other candidate but is never a
+workload's default; it is selected through `existing_stack`, `team_languages`,
+or an explicit `language`. Library and capability constraints eliminate candidates
 before selection. An explicit compatible `language` wins regardless of score;
 an incompatible explicit choice fails with an explanation. `latency_ms` and
 `memory_mb` are recorded as benchmark assumptions, not guaranteed capacities.

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 # sidecar in compose / a migrate Job in Helm). Mirrors the ``_BUILTIN_MIGRATING``
 # set ``docker_manager`` used inline before this extraction.
 BUILTIN_MIGRATING: frozenset[BackendLanguage] = frozenset(
-    {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST}
+    {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST, BackendLanguage.GO}
 )
 
 

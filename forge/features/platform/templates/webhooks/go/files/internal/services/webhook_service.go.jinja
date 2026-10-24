@@ -1,0 +1,341 @@
+package services
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+)
+
+// Outbound webhooks: an in-memory, tenant-scoped registry (single replica,
+// like the Node and Rust services) and HMAC-SHA256 signed delivery. The
+// headers match the other backends: X-Webhook-Signature =
+// hex(HMAC_SHA256(secret, "<timestamp>.<nonce>.<body>")), plus
+// X-Webhook-Timestamp, X-Webhook-Nonce, X-Webhook-Event and X-Webhook-Id.
+// Receivers must reject stale timestamps (> ~5 min) and replayed nonces.
+
+// ErrWebhookRefused marks a target the SSRF guard rejected.
+var ErrWebhookRefused = errors.New("webhook target refused")
+
+// Webhook is a registered delivery target.
+type Webhook struct {
+	ID           uuid.UUID         `json:"id"`
+	Name         string            `json:"name"`
+	URL          string            `json:"url"`
+	Secret       string            `json:"secret"`
+	Events       []string          `json:"events"`
+	IsActive     bool              `json:"is_active"`
+	ExtraHeaders map[string]string `json:"extra_headers"`
+	CreatedAt    time.Time         `json:"created_at"`
+}
+
+// WebhookCreate is the registration request body.
+type WebhookCreate struct {
+	Name         string            `json:"name"`
+	URL          string            `json:"url"`
+	Events       []string          `json:"events"`
+	ExtraHeaders map[string]string `json:"extra_headers"`
+}
+
+// WebhookDeliveryResult reports one delivery attempt.
+type WebhookDeliveryResult struct {
+	WebhookID  uuid.UUID `json:"webhook_id"`
+	StatusCode *int      `json:"status_code"`
+	OK         bool      `json:"ok"`
+	Error      *string   `json:"error"`
+	DurationMS int64     `json:"duration_ms"`
+}
+
+// WebhookOptions tunes a WebhookService.
+type WebhookOptions struct {
+	// AllowPrivateTargets turns the SSRF guard off so a local receiver is
+	// reachable. Never enable it in production.
+	AllowPrivateTargets bool
+	// Timeout bounds one delivery; zero means 10 seconds.
+	Timeout time.Duration
+}
+
+type webhookRecord struct {
+	tenantID uuid.UUID
+	webhook  Webhook
+}
+
+// WebhookService owns the registry and the signed delivery client.
+type WebhookService struct {
+	guarded bool
+	client  *http.Client
+
+	mu       sync.RWMutex
+	webhooks map[uuid.UUID]webhookRecord
+}
+
+var defaultWebhooks = NewWebhookService(WebhookOptions{})
+
+// DefaultWebhookService is the process-wide registry behind /api/v1/webhooks;
+// call its FireEvent from business code to notify subscribers.
+func DefaultWebhookService() *WebhookService { return defaultWebhooks }
+
+// NewWebhookService builds a registry whose client never follows redirects
+// and, unless AllowPrivateTargets is set, refuses to connect to non-public
+// addresses. The check runs on the resolved address at connect time, so DNS
+// names that resolve (or rebind) to internal hosts are refused too.
+func NewWebhookService(options WebhookOptions) *WebhookService {
+	timeout := options.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	dialer := &net.Dialer{Timeout: timeout}
+	if !options.AllowPrivateTargets {
+		dialer.Control = refuseNonPublicWebhookDial
+	}
+	transport := &http.Transport{
+		// No proxy: a proxy would hide the dialled address from the guard.
+		Proxy:               nil,
+		DialContext:         dialer.DialContext,
+		TLSHandshakeTimeout: timeout,
+		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
+	}
+	return &WebhookService{
+		guarded: !options.AllowPrivateTargets,
+		client: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		webhooks: map[uuid.UUID]webhookRecord{},
+	}
+}
+
+// List returns the caller's webhooks, newest first.
+func (s *WebhookService) List(ident identity.IdentityContext) []Webhook {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	webhooks := []Webhook{}
+	for _, record := range s.webhooks {
+		if record.tenantID == ident.TenantID {
+			webhooks = append(webhooks, record.webhook)
+		}
+	}
+	slices.SortFunc(webhooks, func(a, b Webhook) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	return webhooks
+}
+
+// Create registers a webhook with a fresh signing secret.
+func (s *WebhookService) Create(ident identity.IdentityContext, data WebhookCreate) (Webhook, error) {
+	if strings.TrimSpace(data.Name) == "" || strings.TrimSpace(data.URL) == "" {
+		return Webhook{}, apperrors.NewValidation("'name' and 'url' are required")
+	}
+	if err := s.validateTarget(data.URL); err != nil {
+		return Webhook{}, apperrors.NewValidation(err.Error())
+	}
+	webhook := Webhook{
+		ID:           uuid.New(),
+		Name:         data.Name,
+		URL:          data.URL,
+		Secret:       generateWebhookSecret(),
+		Events:       data.Events,
+		IsActive:     true,
+		ExtraHeaders: data.ExtraHeaders,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if webhook.Events == nil {
+		webhook.Events = []string{}
+	}
+	if webhook.ExtraHeaders == nil {
+		webhook.ExtraHeaders = map[string]string{}
+	}
+	s.mu.Lock()
+	s.webhooks[webhook.ID] = webhookRecord{tenantID: ident.TenantID, webhook: webhook}
+	s.mu.Unlock()
+	return webhook, nil
+}
+
+// Get returns the caller's webhook or NOT_FOUND.
+func (s *WebhookService) Get(ident identity.IdentityContext, id uuid.UUID) (Webhook, error) {
+	s.mu.RLock()
+	record, ok := s.webhooks[id]
+	s.mu.RUnlock()
+	if !ok || record.tenantID != ident.TenantID {
+		return Webhook{}, apperrors.NewNotFound("Webhook", id.String())
+	}
+	return record.webhook, nil
+}
+
+// Delete removes the caller's webhook or returns NOT_FOUND.
+func (s *WebhookService) Delete(ident identity.IdentityContext, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.webhooks[id]
+	if !ok || record.tenantID != ident.TenantID {
+		return apperrors.NewNotFound("Webhook", id.String())
+	}
+	delete(s.webhooks, id)
+	return nil
+}
+
+// FireEvent delivers event to every active webhook of the caller subscribed
+// to it. An empty event list subscribes to everything; patterns use glob
+// syntax ("item.*").
+func (s *WebhookService) FireEvent(ctx context.Context, ident identity.IdentityContext, event string, payload any) []WebhookDeliveryResult {
+	results := []WebhookDeliveryResult{}
+	for _, webhook := range s.List(ident) {
+		if webhook.IsActive && webhookMatches(webhook.Events, event) {
+			results = append(results, s.Deliver(ctx, webhook, event, payload))
+		}
+	}
+	return results
+}
+
+// Deliver POSTs a signed {"event", "data"} body to the webhook. It never
+// fails: refusals, transport errors and non-2xx answers land on the result.
+func (s *WebhookService) Deliver(ctx context.Context, webhook Webhook, event string, payload any) WebhookDeliveryResult {
+	start := time.Now()
+	result := WebhookDeliveryResult{WebhookID: webhook.ID}
+	fail := func(message string) WebhookDeliveryResult {
+		result.Error = &message
+		result.DurationMS = time.Since(start).Milliseconds()
+		return result
+	}
+	if err := validateWebhookURL(webhook.URL); err != nil {
+		return fail("refused: " + err.Error())
+	}
+	body, err := json.Marshal(map[string]any{"event": event, "data": payload})
+	if err != nil {
+		return fail("encode payload: " + err.Error())
+	}
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce := strings.ReplaceAll(uuid.NewString(), "-", "")
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook.URL, bytes.NewReader(body))
+	if err != nil {
+		return fail(err.Error())
+	}
+	for name, value := range webhook.ExtraHeaders {
+		request.Header.Set(name, value)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Webhook-Signature", SignWebhook(webhook.Secret, timestamp, nonce, body))
+	request.Header.Set("X-Webhook-Timestamp", timestamp)
+	request.Header.Set("X-Webhook-Nonce", nonce)
+	request.Header.Set("X-Webhook-Event", event)
+	request.Header.Set("X-Webhook-Id", webhook.ID.String())
+	response, err := s.client.Do(request)
+	if err != nil {
+		if errors.Is(err, ErrWebhookRefused) {
+			return fail("refused: " + err.Error())
+		}
+		return fail(err.Error())
+	}
+	response.Body.Close()
+	code := response.StatusCode
+	result.StatusCode = &code
+	result.OK = code >= 200 && code < 300
+	if !result.OK {
+		return fail(fmt.Sprintf("http %d", code))
+	}
+	result.DurationMS = time.Since(start).Milliseconds()
+	return result
+}
+
+// SignWebhook returns hex(HMAC_SHA256(secret, timestamp "." nonce "." body)).
+func SignWebhook(secret, timestamp, nonce string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp + "." + nonce + "."))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// validateWebhookURL accepts absolute http(s) URLs only.
+func validateWebhookURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%w: invalid webhook URL", ErrWebhookRefused)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return fmt.Errorf("%w: unsupported URL scheme %q; use https", ErrWebhookRefused, scheme)
+	}
+	if parsed.Hostname() == "" {
+		return fmt.Errorf("%w: webhook URL has no host", ErrWebhookRefused)
+	}
+	return nil
+}
+
+// validateTarget adds fast feedback at registration: localhost names and
+// non-public address literals are refused before any delivery is attempted.
+func (s *WebhookService) validateTarget(raw string) error {
+	if err := validateWebhookURL(raw); err != nil || !s.guarded {
+		return err
+	}
+	parsed, _ := url.Parse(raw)
+	host := strings.ToLower(parsed.Hostname())
+	addr, err := netip.ParseAddr(host)
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || (err == nil && isNonPublicWebhookAddress(addr)) {
+		return fmt.Errorf("%w: %s is a non-public address", ErrWebhookRefused, host)
+	}
+	return nil
+}
+
+// refuseNonPublicWebhookDial is the dialer hook: address is the resolved ip:port.
+func refuseNonPublicWebhookDial(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrWebhookRefused, err)
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil || isNonPublicWebhookAddress(addr) {
+		return fmt.Errorf("%w: %s is a non-public address", ErrWebhookRefused, host)
+	}
+	return nil
+}
+
+// isNonPublicWebhookAddress covers loopback, RFC 1918 / unique-local, link-local
+// (incl. the 169.254.169.254 metadata endpoint), multicast, 0.0.0.0/8 and the
+// unspecified address. IPv4-mapped IPv6 is unwrapped first.
+func isNonPublicWebhookAddress(addr netip.Addr) bool {
+	addr = addr.Unmap().WithZone("")
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() ||
+		(addr.Is4() && addr.As4()[0] == 0)
+}
+
+func webhookMatches(patterns []string, event string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, pattern := range patterns {
+		if matched, _ := path.Match(pattern, event); matched {
+			return true
+		}
+	}
+	return false
+}
+
+func generateWebhookSecret() string {
+	secret := make([]byte, 32)
+	_, _ = rand.Read(secret)
+	return hex.EncodeToString(secret)
+}

@@ -36,6 +36,7 @@ Or, with per-value labels:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -221,6 +222,31 @@ def emit_rust(spec: EnumSpec) -> str:
     return "\n".join(lines)
 
 
+def emit_go(spec: EnumSpec) -> str:
+    """Emit a Go string type with one typed constant per value.
+
+    Constants are ``<Name><Variant>`` (the Rust variant mangling), aligned the
+    way gofmt aligns a const block. Declaration-only: no functions, so the
+    file carries no coverage denominator.
+    """
+    names = [f"{spec.name}{_rust_variant(v.value)}" for v in spec.values]
+    width = max((len(n) for n in names), default=0)
+    lines: list[str] = [
+        f"// Generated from {spec.name}.yaml — do not edit by hand.",
+        "",
+        "package enums",
+        "",
+        f"type {spec.name} string",
+        "",
+        "const (",
+    ]
+    for name, v in zip(names, spec.values, strict=True):
+        lines.append(f"\t{name.ljust(width)} {spec.name} = {json.dumps(v.value)}")
+    lines.append(")")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def emit_dart(spec: EnumSpec) -> str:
     """Emit a Dart enum with `JsonValue` annotations for json_serializable."""
     lines: list[str] = [
@@ -338,12 +364,13 @@ def emit_all(spec: EnumSpec) -> dict[str, str]:
     """Convenience: every supported target in one call.
 
     Keyed by target name (``python``, ``typescript``, ``zod``, ``rust``,
-    ``dart``). Callers decide which ones to write.
+    ``go``, ``dart``). Callers decide which ones to write.
     """
     return {
         "python": emit_python(spec),
         "typescript": emit_typescript(spec),
         "zod": emit_zod(spec),
         "rust": emit_rust(spec),
+        "go": emit_go(spec),
         "dart": emit_dart(spec),
     }

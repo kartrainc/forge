@@ -1,0 +1,18 @@
+// Package ports holds the capability contracts fragments plug adapters into.
+package ports
+
+import "{{ project_name }}/internal/apperrors"
+
+// ErrorEnvelope is the RFC-007 wire shape:
+// {"error": {"code", "message", "type", "context", "correlation_id"}}.
+type ErrorEnvelope = apperrors.Envelope
+
+// ErrorPort serializes an error into the RFC-007 envelope.
+//
+// Implementations are pure: no I/O, no mutation of err. apperrors.Write calls
+// Serialize once per failed request, derives the HTTP status from the code and
+// fills correlation_id, so adapters return it empty. Custom adapters must keep
+// the five fields; new codes get a mapping in internal/apperrors.
+type ErrorPort interface {
+	Serialize(err error) ErrorEnvelope
+}

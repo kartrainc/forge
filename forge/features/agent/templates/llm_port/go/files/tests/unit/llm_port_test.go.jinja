@@ -1,0 +1,38 @@
+package unit_test
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"testing"
+
+	"{{ project_name }}/internal/ports/llm"
+)
+
+func TestLLMErrorWrapsCause(t *testing.T) {
+	err := error(&llm.Error{Kind: llm.KindTransport, Err: io.ErrUnexpectedEOF})
+	if err.Error() != "llm transport error: unexpected EOF" {
+		t.Fatalf("message %q", err.Error())
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatal("cause must unwrap")
+	}
+	var portErr *llm.Error
+	if !errors.As(err, &portErr) || portErr.Kind != llm.KindTransport {
+		t.Fatalf("kind %+v", portErr)
+	}
+}
+
+func TestLLMChunkUsesContractFieldNames(t *testing.T) {
+	encoded, err := json.Marshal([]llm.Chunk{
+		{Delta: "Hi"},
+		{ToolCall: &llm.ToolCallChunk{ID: "a", Name: "search", ArgumentsDelta: "{}"}, FinishReason: "tool_calls"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"delta":"Hi"},{"delta":"","finishReason":"tool_calls","toolCall":{"id":"a","name":"search","argumentsDelta":"{}"}}]`
+	if string(encoded) != want {
+		t.Fatalf("chunks %s", encoded)
+	}
+}

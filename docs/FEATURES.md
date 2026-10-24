@@ -321,7 +321,7 @@ ENDPOINTS: none — ambient context via service.observability.correlation
 
 ### `observability.error_envelope`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _RFC-007 error envelope serialised via a swappable port (default on)._
 
@@ -340,7 +340,7 @@ existing strip mechanism (follow-up — until the strip lands, ``False``
 is equivalent to ``True`` minus the port adapter on Python; a node /
 rust strip pass is pending).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 PORT: ``ErrorPort.serialize(exc) -> {error: {code, message, type, context, correlation_id}}``
 
 **Enables fragments:**
@@ -348,7 +348,7 @@ PORT: ``ErrorPort.serialize(exc) -> {error: {code, message, type, context, corre
 
 ### `observability.health`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** go, node, python, rust
 
 _/health aggregates Postgres + Redis + Keycloak readiness._
 
@@ -358,7 +358,7 @@ reachability. Each dependency reports individually so an orchestrator
 (Kubernetes readiness gate, load balancer) sees which specific
 downstream is down rather than an opaque 503.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: /health (replaces the shallow default)
 REQUIRES: REDIS_URL, KEYCLOAK_HEALTH_URL.
 
@@ -390,7 +390,7 @@ DEPENDENCY: none (stdlib + forge_core correlation).
 
 ### `observability.otel`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _OpenTelemetry traces + metrics via OTLP exporter (agent.run, tool.call spans)._
 
@@ -401,11 +401,12 @@ and the service runs without a collector). Python emits ``app/core/otel.py``
 OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK +
 ``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust emits
 ``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
-HTTP/protobuf). Spans of interest for agentic workloads: ``agent.run`` (per
-agent invocation), ``tool.call`` (per tool invocation).
+HTTP/protobuf); Go emits ``internal/otel`` (otelhttp server spans named by
+chi route, OTLP/HTTP exporter). Spans of interest for agentic workloads:
+``agent.run`` (per agent invocation), ``tool.call`` (per tool invocation).
 
-BACKENDS: python, node, rust
-DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry
+BACKENDS: python, node, rust, go
+DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / otlptracehttp / otelhttp
 ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES).
 
 **Enables fragments:**
@@ -413,19 +414,20 @@ ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESO
 
 ### `observability.tracing`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _Distributed tracing -- Logfire / OTel SDK / OTLP gRPC._
 
 Distributed tracing + structured logs wired out of the box. Python uses
 Logfire (which exports OTLP under the hood); Node uses @opentelemetry
 auto-instrumentations for HTTP / DB / Fastify spans; Rust uses
-tracing-opentelemetry + OTLP gRPC. All three honour the same OTel
+tracing-opentelemetry + OTLP gRPC; Go uses otelhttp + OTLP/HTTP and adds
+trace_id/span_id to slog records. All four honour the same OTel
 semantic-convention service name so your tracing backend (Jaeger,
 Tempo, Honeycomb, Datadog APM, Logfire) sees one service-map across
 languages.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 REQUIRES: OTEL_EXPORTER_OTLP_ENDPOINT (or LOGFIRE_TOKEN on Python).
 
 **Enables fragments:**
@@ -471,17 +473,17 @@ ENDPOINTS: none — applies to logger output globally.
 
 ### `middleware.rate_limit`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _Token-bucket limiter keyed by tenant or IP._
 
 Token-bucket rate limiter, keyed by tenant when authenticated or by
 client IP otherwise. Protects downstream services from hot callers and
-smooths burst traffic. Ships three first-class implementations with
+smooths burst traffic. Ships four first-class implementations with
 matching knobs — Python (in-memory), Node (@fastify/rate-limit), Rust
-(Axum tower layer).
+(Axum tower layer), Go (net/http middleware, in-memory).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: returns 429 on limit breach; /health and /metrics skipped.
 REQUIRES: nothing by default; set REDIS_URL to share state across replicas.
 
@@ -509,7 +511,7 @@ REQUIRES: RESPONSE_CACHE_URL pointing at Redis (recommended for prod).
 
 ### `middleware.security_headers`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _CSP + XFO + HSTS + Referrer-Policy + Permissions-Policy._
 
@@ -518,7 +520,7 @@ X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and HSTS
 on HTTPS responses) to every request. Turning this off is a deliberate
 choice for intentionally-insecure demos.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: none — middleware decorates every response.
 
 **Enables fragments:**
@@ -526,7 +528,7 @@ ENDPOINTS: none — middleware decorates every response.
 
 ### `reliability.cache`
 
-**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 **Allowed values:** `none`, `memory`, `redis`
 
@@ -544,13 +546,13 @@ shape via fastapi-cache2).
   defaults to db=3 so cache eviction doesn't clobber queue keysets.
 - ``none``: cache port + adapters stripped from the build.
 
-Tier-1 across Python, Node, and Rust — the contract is identical on
-all three backends.
+Tier-1 across Python, Node, Rust and Go — the contract is identical on
+every backend.
 
 OPTIONS: none | memory | redis
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 DEPENDENCY: redis-py (python+redis), ioredis (node+redis), redis crate
-    (rust+redis); none for ``memory``.
+    (rust+redis), go-redis/v9 (go+redis); none for ``memory``.
 ENV: CACHE_REDIS_URL (redis), CACHE_MEMORY_MAX_ENTRIES (memory).
 
 **Enables fragments:**
@@ -559,7 +561,7 @@ ENV: CACHE_REDIS_URL (redis), CACHE_MEMORY_MAX_ENTRIES (memory).
 
 ### `reliability.circuit_breaker`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _Circuit breaker for outbound HTTP calls (LLM, vector store, auth)._
 
@@ -567,16 +569,18 @@ Emits ``app/core/circuit_breaker.py`` backed by the purgatory library.
 Wraps downstream dependencies so a flaky provider doesn't cascade
 failures into every request.
 
-BACKENDS: python
-DEPENDENCY: purgatory>=3.0.0
-TUNABLE VIA ENV: CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_RESET_TIMEOUT.
+Go emits ``internal/circuitbreaker`` (standard library only).
+
+BACKENDS: python, node, rust, go
+DEPENDENCY: purgatory>=3.0.0 (python), opossum (node)
+TUNABLE VIA ENV: CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_RESET_TIMEOUT (python, rust, go).
 
 **Enables fragments:**
 - on `true` → `reliability_circuit_breaker`
 
 ### `reliability.connection_pool`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _Sane SQLAlchemy async pool defaults (size=20, overflow=10, pre_ping, recycle=30m)._
 
@@ -585,9 +589,15 @@ settings and env-var overrides. Without this fragment, generated
 projects run on SQLAlchemy's default pool_size=5, which saturates under
 moderate burst traffic and produces mysterious 99p tail latency.
 
-BACKENDS: python
+Go applies ``internal/db/pool_tuning.go`` to every ``db.NewPool`` pool
+(max=db.pool_max unless PGX_MAX_CONNECTIONS is set, min=2, connect timeout
+10s, idle timeout 10m).
+
+BACKENDS: python, node, rust, go
 TUNABLE VIA ENV: SQLALCHEMY_POOL_SIZE, SQLALCHEMY_MAX_OVERFLOW,
-SQLALCHEMY_POOL_PRE_PING, SQLALCHEMY_POOL_RECYCLE.
+SQLALCHEMY_POOL_PRE_PING, SQLALCHEMY_POOL_RECYCLE (python);
+PGX_MAX_CONNECTIONS, PGX_MIN_CONNECTIONS, PGX_CONNECT_TIMEOUT_SECS,
+PGX_IDLE_TIMEOUT_SECS (go).
 
 **Enables fragments:**
 - on `true` → `reliability_connection_pool`
@@ -638,17 +648,18 @@ REQUIRES: rag.backend ≠ none + async.task_queue = true.
 
 ### `async.task_queue`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** go, node, python, rust
 
-_Redis-backed job queue (Taskiq / BullMQ / Apalis)._
+_Redis-backed job queue (Taskiq / BullMQ / Apalis / asynq)._
 
 A Redis-backed job queue + example task + worker binary. Define jobs as
 regular async functions, enqueue them from request handlers, process
 them out-of-process in a dedicated worker container. Ships with Taskiq
-(Python), BullMQ + ioredis (Node), and Apalis (Rust) — three different
-ecosystems with the same env-var convention (TASKIQ_BROKER_URL).
+(Python), BullMQ + ioredis (Node), Apalis (Rust) and asynq (Go, with a
+``cmd/worker`` binary) — four ecosystems with the same env-var convention
+(TASKIQ_BROKER_URL).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 REQUIRES: TASKIQ_BROKER_URL → Redis.
 
 **Enables fragments:**
@@ -702,9 +713,9 @@ BACKENDS: python
 
 ### `queue.backend`
 
-**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
-**Allowed values:** `none`, `redis`, `sqs`, `bullmq`, `apalis`
+**Allowed values:** `none`, `redis`, `sqs`, `bullmq`, `apalis`, `asynq`
 
 _Background-work queue — selects the QueuePort adapter (per RFC-012)._
 
@@ -716,6 +727,7 @@ per-language mapping:
 - ``redis`` / ``sqs``: Python adapters (Taskiq broker, AWS SQS).
 - ``bullmq``: Node adapter (BullMQ + ioredis).
 - ``apalis``: Rust adapter (Apalis + Redis).
+- ``asynq``: Go adapter (asynq + Redis).
 
 In a polyglot project, the resolver targets the adapter only at the
 backend language whose ecosystem it belongs to. Other backends in
@@ -723,10 +735,10 @@ the same project receive the port (typing only, no concrete adapter)
 unless paired with their own queue.backend value via per-language
 overrides (future work; see RFC-012 §"Drawbacks").
 
-OPTIONS: none | redis | sqs | bullmq | apalis
-BACKENDS: python (redis, sqs), node (bullmq), rust (apalis)
+OPTIONS: none | redis | sqs | bullmq | apalis | asynq
+BACKENDS: python (redis, sqs), node (bullmq), rust (apalis), go (asynq)
 DEPENDENCY: redis-py (redis), aioboto3 (sqs), bullmq+ioredis
-    (bullmq), apalis+apalis-redis (apalis)
+    (bullmq), apalis+apalis-redis (apalis), hibiken/asynq (asynq)
 ENV: REDIS_URL / AWS_REGION / TASKIQ_BROKER_URL
 
 **Enables fragments:**
@@ -734,6 +746,7 @@ ENV: REDIS_URL / AWS_REGION / TASKIQ_BROKER_URL
 - on `sqs` → `queue_port`, `queue_sqs`
 - on `bullmq` → `queue_port`, `queue_bullmq`
 - on `apalis` → `queue_port`, `queue_apalis`
+- on `asynq` → `queue_port`, `queue_asynq`
 
 ### `streaming.sse`
 
@@ -860,7 +873,7 @@ REQUIRES: migration 0002 applied (``alembic upgrade head``).
 
 ### `llm.provider`
 
-**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 **Allowed values:** `none`, `openai`, `anthropic`, `ollama`, `bedrock`
 
@@ -875,7 +888,7 @@ by changing one env var — no regeneration.
 
 OPTIONS: none | openai | anthropic | ollama | bedrock
 BACKENDS:
-  - openai     python, node, rust    (Pillar D.2 — tier-1, three built-ins)
+  - openai     python, node, rust, go (Pillar D.2 — tier-1, every built-in)
   - anthropic  python                (Python-only — Anthropic SDK ecosystem)
   - ollama     python                (Python-only — ollama-python is the canonical client)
   - bedrock    python                (Python-only — aioboto3)
@@ -884,11 +897,11 @@ Selecting ``anthropic`` / ``ollama`` / ``bedrock`` on a project with no
 Python backend is REJECTED at config time: the adapter is Python-only, so
 the service would otherwise start with the abstract ``llm_port`` wired to
 no adapter and fail at the first call. Add a Python backend, pick
-``openai`` (works on all three), or install a plugin-provided adapter
+``openai`` (works on every built-in backend), or install a plugin-provided adapter
 (Featured Plugin tier — see ``docs/known-issues.md``).
 
 DEPENDENCY: provider-specific SDK (openai / @ai-sdk/openai / async-openai
-            / anthropic / ollama / aioboto3)
+            / openai-go / anthropic / ollama / aioboto3)
 ENV: provider-specific API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
 
 **Enables fragments:**
@@ -1070,7 +1083,7 @@ Keys are disabled by default, including their management routes.
 
 ### `auth.provider`
 
-**Type:** `enum` · **Default:** `gatekeeper` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `enum` · **Default:** `gatekeeper` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 **Allowed values:** `gatekeeper`, `in_memory`, `oidc_generic`, `none`
 
@@ -1226,7 +1239,7 @@ BACKENDS: python. Inert unless ``database.multitenancy != none``.
 
 ### `deploy.target`
 
-**Type:** `enum` · **Default:** `none` · **Stability:** `beta` · **Backends:** node, python, rust
+**Type:** `enum` · **Default:** `none` · **Stability:** `beta` · **Backends:** go, node, python, rust
 
 **Allowed values:** `none`, `docker-compose`, `kubernetes`
 
@@ -1252,7 +1265,7 @@ EXTERNAL by default (managed Postgres/Redis/Keycloak via values); set
 are derived on demand via ``helm template`` (see the generated Makefile),
 so ``deploy/k8s/`` can never drift from the chart.
 
-BACKENDS: python, node, rust (tier 1 — the chart is language-agnostic).
+BACKENDS: python, node, rust, go (tier 1 — the chart is language-agnostic).
 
 **Enables fragments:**
 - on `kubernetes` → `deploy_helm_chart`
@@ -1364,7 +1377,7 @@ itsdangerous.
 
 ### `platform.agents_md`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, node, python, rust
 
 _Drops AGENTS.md + CLAUDE.md for AI-coding-agent orientation._
 
@@ -1375,7 +1388,7 @@ option stamp, backend layout, test commands, and the house
 conventions so agents ship PRs that match the project's style on the
 first try.
 
-BACKENDS: python, node, rust (same content, project-scoped)
+BACKENDS: python, node, rust, go (same content, project-scoped)
 
 **Enables fragments:**
 - on `true` → `agents_md`
@@ -1441,17 +1454,17 @@ ENDPOINTS: none — test infrastructure only.
 
 ### `platform.webhooks`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** node, python, rust
+**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** go, node, python, rust
 
 _Outbound registry + HMAC-signed delivery (ts + nonce + body)._
 
 A registry + HMAC-SHA256 signed outbound delivery pipeline. Clients
 POST to /api/v1/webhooks to register a target URL; your code calls
 ``fireEvent`` to deliver a signed JSON payload. Receiver verifies the
-same way across all three backends — the signature header format is
+same way across every backend — the signature header format is
 identical.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: /api/v1/webhooks (CRUD + /{id}/test fire)
 
 **Enables fragments:**

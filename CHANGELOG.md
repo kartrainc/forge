@@ -69,6 +69,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Finish Git's automatic maintenance before generation returns, so background
   object repacking cannot race the unchanged-file check.
 
+### Go backend
+
+- Add Go as the fourth built-in backend (`language: go`, `--go-version`
+  1.27/1.26): `net/http` handlers on the chi router, pgx, goose migrations
+  embedded in a `migrate` binary, RFC-007 errors, RFC-008 layered config and
+  `log/slog` JSON logs. Services keep tenant-scoped repositories behind
+  interfaces and ship unit, integration and E2E suites.
+- Gate Go services like the other languages: `go mod tidy` locks,
+  `go mod download`/`verify` installs, `go test -coverpkg` coverprofiles
+  converted to LCOV, and E2E coverage from `go build -cover` binaries merged
+  with `go tool covdata`. A `go` lane joins the generated-quality workflow.
+- Emit Go enums and entity structs from domain specs, apply fragment
+  dependencies to `go.mod`, scaffold `go/` plugin fragment trees, and recognise
+  `go.mod` services on update.
+- Reject Go service names that equal a standard-library package; the name is
+  the module path.
+- The reference `forge-go-backend` plugin now registers `go-stdlib`.
+- Parity tier 1 now covers Go. Fragments that cover only Python, Node and Rust
+  keep tier 1 with a `DeprecationWarning` until 1.3 (UPGRADING).
+- Go services resolve the rate-limit client from the trusted end of
+  `X-Forwarded-For`, key token-exchange caches by a SHA-256 digest of the subject
+  token, refetch a JWKS for an unknown `kid` at most once per 10 s, keep
+  `db.pool_max` unless `PGX_MAX_CONNECTIONS` is set, ship every `cmd/*` binary in
+  the image, and enable production authentication only with platform auth.
+
 ### Vue UI kits
 
 - Add `frontend.ui_kit` (`--ui-kit`) to choose the Vue template's component

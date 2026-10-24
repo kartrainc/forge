@@ -923,7 +923,7 @@ def _infer_backends(
 
     Each ``services/<name>/`` is a backend. Language is inferred from the
     language-specific marker file present: ``pyproject.toml`` → python,
-    ``package.json`` → node, ``Cargo.toml`` → rust.
+    ``package.json`` → node, ``Cargo.toml`` → rust, ``go.mod`` → go.
 
     ``manifest_frontend`` (Initiative #3) is a no-op for built-in
     backend discovery — it's accepted so the harvester / planner /
@@ -943,6 +943,7 @@ def _infer_backends(
         "pyproject.toml": BackendLanguage.PYTHON,
         "package.json": BackendLanguage.NODE,
         "Cargo.toml": BackendLanguage.RUST,
+        "go.mod": BackendLanguage.GO,
     }
 
     out: list[BackendConfig] = []
@@ -950,8 +951,13 @@ def _infer_backends(
         if not backend_dir.is_dir():
             continue
         recovered_port = _recovered_server_port(backend_dir)
+        src_path = _copier_src_path(backend_dir)
+        plugin_lang = _resolve_language_from_src_path(src_path)
         matched = False
-        for marker, lang in markers.items():
+        # A plugin backend may share a built-in's manifest name (a Go plugin
+        # also writes go.mod); its recorded template wins over the marker.
+        is_plugin = plugin_lang is not None and not isinstance(plugin_lang, BackendLanguage)
+        for marker, lang in [] if is_plugin else markers.items():
             if (backend_dir / marker).is_file():
                 bc = BackendConfig(
                     name=backend_dir.name,
@@ -965,11 +971,8 @@ def _infer_backends(
                 break
         if matched:
             continue
-        # Plugin-backend fallback: a plugin language (e.g. ``go``) has no
-        # built-in marker file, so match the service's ``.copier-answers.yml``
+        # Plugin-backend fallback: match the service's ``.copier-answers.yml``
         # ``_src_path`` against a registered backend's ``template_dir``.
-        src_path = _copier_src_path(backend_dir)
-        plugin_lang = _resolve_language_from_src_path(src_path)
         if plugin_lang is not None:
             bc = BackendConfig(
                 name=backend_dir.name,

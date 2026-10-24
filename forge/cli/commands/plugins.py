@@ -28,11 +28,12 @@ from typing import Any
 # the live registry — the scaffold only needs the lowercase short name
 # for directory layout + the upper-case constant for the rendered
 # ``BackendLanguage.<X>`` references.
-_DEFAULT_BACKENDS: tuple[str, ...] = ("python", "node", "rust")
+_DEFAULT_BACKENDS: tuple[str, ...] = ("python", "node", "rust", "go")
 _BACKEND_CONST: dict[str, str] = {
     "python": "PYTHON",
     "node": "NODE",
     "rust": "RUST",
+    "go": "GO",
 }
 
 
@@ -290,7 +291,7 @@ def _len_reg_summary(regs: dict[str, int]) -> int:
 
 
 def _parse_backends(raw: str | None) -> tuple[str, ...]:
-    """Parse ``--backends python,node,rust`` into a validated tuple.
+    """Parse ``--backends python,node,rust,go`` into a validated tuple.
 
     Empty / ``None`` yields the default (``_DEFAULT_BACKENDS``). Unknown
     backends raise a hard error before we touch the filesystem so the
@@ -424,7 +425,7 @@ def _render_skeleton(
     Files with the ``.jinja`` suffix are rendered through Jinja2 and the
     suffix is stripped on write. Files without the suffix are copied
     verbatim. Per-backend subdirectories (``python/``, ``node/``,
-    ``rust/``) are only emitted for backends listed in ``backends``.
+    ``rust/``, ``go/``) are only emitted for backends listed in ``backends``.
     """
     import jinja2  # noqa: PLC0415 — lazy: import only when scaffolding.
 
@@ -442,7 +443,7 @@ def _render_skeleton(
     rendered: list[Path] = []
     with resources.as_file(skeleton_root) as root_path:
         # The package-data layout we ship per_backend dirs as
-        # ``python/``, ``node/``, ``rust/``. Skip the ones the user
+        # ``python/``, ``node/``, ``rust/``, ``go/``. Skip the ones the user
         # opted out of via --backends.
         backend_set = set(backends)
         all_known = set(_DEFAULT_BACKENDS)

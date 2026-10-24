@@ -657,6 +657,9 @@ class TestQueueObjectStoreFailFast:
             (BackendLanguage.PYTHON, "bullmq", False),
             (BackendLanguage.RUST, "apalis", True),
             (BackendLanguage.NODE, "apalis", False),
+            (BackendLanguage.GO, "asynq", True),
+            (BackendLanguage.RUST, "asynq", False),
+            (BackendLanguage.GO, "apalis", False),
         ],
     )
     def test_queue_backend_requires_matching_language(self, lang, value, ok):
@@ -669,7 +672,12 @@ class TestQueueObjectStoreFailFast:
 
     @pytest.mark.parametrize(
         "lang,ok",
-        [(BackendLanguage.PYTHON, True), (BackendLanguage.NODE, False), (BackendLanguage.RUST, False)],
+        [
+            (BackendLanguage.PYTHON, True),
+            (BackendLanguage.NODE, False),
+            (BackendLanguage.RUST, False),
+            (BackendLanguage.GO, False),
+        ],
     )
     def test_object_store_is_python_only(self, lang, ok):
         cfg = self._cfg(lang, {"object_store.backend": "s3"})

@@ -180,7 +180,7 @@ class TestEmitDart:
 class TestEmitAll:
     def test_all_targets_emit_non_empty(self, item_status: EnumSpec) -> None:
         out = emit_all(item_status)
-        assert set(out) == {"python", "typescript", "zod", "rust", "dart"}
+        assert set(out) == {"python", "typescript", "zod", "rust", "go", "dart"}
         for target, body in out.items():
             assert body.strip(), f"{target} output is empty"
             assert "ItemStatus" in body, f"{target} output missing enum name"

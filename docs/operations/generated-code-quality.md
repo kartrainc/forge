@@ -35,7 +35,9 @@ For Python, put a Dishka `Provider` in `app/custom/` and compose it with
 `create_app(providers=[YourProvider()])`; the generated lifecycle keeps its
 defaults and manages the combined container. In Node, register application
 Fastify plugins on the returned app before listening. In Rust, compose the
-returned Axum router from the application entry point. Keep these registrations
+returned Axum router from the application entry point. In Go, wrap or mount the
+handler `app.New` returns from `cmd/server`, and implement repository or port
+interfaces in your own packages. Keep these registrations
 in scaffold/application files and implement the published port contracts.
 
 For Vue and Svelte, explicit `npm run codegen` writes service-specific OpenAPI
@@ -121,11 +123,13 @@ to execute successfully, even if another suite already covers those lines.
 
 Adapters use coverage.py for Python, Vitest/V8 for Node and frontend unit/
 integration tests, instrumented Playwright browser coverage for Vue/Svelte,
-cargo-llvm-cov for Rust, and Flutter LCOV. Python SDKs are installed editable
-so tests measure the actual vendored sources. This does not permit editing
-protected files. Rust and Node integration suites require a disposable
-PostgreSQL database through `DATABASE_URL`. Flutter E2E runs on Linux by
-default (`FORGE_FLUTTER_DEVICE` can select another device).
+cargo-llvm-cov for Rust, `go test -coverpkg` coverprofiles for Go (E2E also
+merges `go build -cover` binary data through `go tool covdata`), and Flutter
+LCOV. Python SDKs are installed editable so tests measure the actual vendored
+sources. This does not permit editing protected files. Rust, Go and Node
+integration suites require a disposable PostgreSQL database through
+`DATABASE_URL`. Flutter E2E runs on Linux by default (`FORGE_FLUTTER_DEVICE`
+can select another device).
 
 Frontend browser tests exercise the generated UI in a real Chromium process.
 They do not claim to validate a deployed backend/authentication stack. Add
@@ -140,7 +144,7 @@ count as success. Credentials belong in CI secrets/environment, not recipes.
 
 The repository's [generated-quality workflow](../../.github/workflows/generated-quality.yml)
 runs policy/acceptance checks on Windows and Linux and rendered native gates
-for Python, Node, Rust, Vue, and Svelte on Linux. These lanes exercise selected
+for Python, Node, Rust, Go, Vue, and Svelte on Linux. These lanes exercise selected
 configurations, not every possible option cross-product. Pull request runs
 resolve the rendered npm applications as of a recorded registry snapshot; a
 weekly run resolves them against the live registry to detect upstream changes

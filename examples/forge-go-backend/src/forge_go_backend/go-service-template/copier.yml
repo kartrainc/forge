@@ -42,4 +42,4 @@ entity_plural:
 go_version:
   type: str
   help: "Recommended Go toolchain (Docker builder image tag). Separate from the go.mod floor, which stays at 1.19."
-  default: "1.22"
+  default: "1.27"

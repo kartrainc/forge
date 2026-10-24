@@ -1076,7 +1076,7 @@ def _edit_one_literal_block(project_root: Path) -> Path | None:
     comment line at the START of the block body and returns the edited
     path. ``None`` when no eligible block is found.
     """
-    for ext in (".py", ".ts", ".js", ".rs"):
+    for ext in (".py", ".ts", ".js", ".rs", ".go"):
         for path in sorted(project_root.rglob(f"*{ext}")):
             try:
                 text = path.read_text(encoding="utf-8")

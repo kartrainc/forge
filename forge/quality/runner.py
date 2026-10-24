@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from forge.quality.coverage import SUITES, make_report
+from forge.quality.go_coverage import go_modules, go_profiles_to_lcov
 from forge.quality.model import read_recipe, subjects
 
 
@@ -176,6 +178,68 @@ def run_native(root: Path, item: dict, suite: str) -> str:
         tests_run = sum(int(m) for m in re.findall(r"test result: ok\. (\d+) passed", text))
         if tests_run <= 0:
             raise ValueError(f"{item['name']}/{suite}: no tests executed")
+        report = make_report(root, item["name"], suite, native, service, tests=tests_run)
+        result_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        return str(result_path.relative_to(root))
+    elif language == "go":
+        if not (service / "tests" / suite).is_dir():
+            raise ValueError(f"{item['name']}: required tests/{suite} directory is missing")
+        native = output / f"{suite}.lcov"
+        native.unlink(missing_ok=True)
+        modules = go_modules(service)
+        coverpkg = ",".join(f"{module}/..." for module in modules)
+        profiles = [output / f"{suite}.coverprofile"]
+        profiles[0].unlink(missing_ok=True)
+        if suite == "e2e":
+            # E2E drives the real binaries: build them instrumented and let
+            # the suite point GOCOVERDIR at a fresh directory.
+            binaries, covdata = output / "e2e-bin", output / "e2e-covdata"
+            for directory in (binaries, covdata):
+                shutil.rmtree(directory, ignore_errors=True)
+                directory.mkdir(parents=True)
+            for command in sorted(p for p in (service / "cmd").glob("*") if p.is_dir()):
+                target = binaries / command.name
+                _execute(
+                    ["go", "build", "-cover", "-covermode=atomic", f"-coverpkg={coverpkg}"]
+                    + ["-o", str(target), f"./cmd/{command.name}"],
+                    service,
+                    env,
+                )
+                env[f"FORGE_GO_{command.name.upper()}_BIN"] = str(target)
+            env["FORGE_GO_COVERDIR"] = str(covdata)
+        log = output / f"{suite}.jsonl"
+        with log.open("w", encoding="utf-8") as stream:
+            proc = subprocess.run(
+                ["go", "test", "-count=1", "-json", "-covermode=atomic"]
+                + [f"-coverpkg={coverpkg}", f"-coverprofile={profiles[0]}", f"./tests/{suite}/..."],
+                cwd=service,
+                env=env,
+                stdout=stream,
+                stderr=sys.stderr,
+            )
+        events = []
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if line.startswith("{"):
+                event = json.loads(line)
+                events.append(event)
+                if event.get("Action") == "output":
+                    sys.stderr.write(event.get("Output", ""))
+            else:
+                sys.stderr.write(line + "\n")
+        if proc.returncode:
+            raise ValueError(f"{item['name']}/{suite}: go tests failed")
+        tests_run = sum(e.get("Action") == "pass" and "/" not in e.get("Test", "/") for e in events)
+        if tests_run <= 0:
+            raise ValueError(f"{item['name']}/{suite}: no tests executed")
+        if suite == "e2e" and any(covdata.iterdir()):
+            merged = output / "e2e.binaries.coverprofile"
+            _execute(
+                ["go", "tool", "covdata", "textfmt", f"-i={covdata}", f"-o={merged}"],
+                service,
+                env,
+            )
+            profiles.append(merged)
+        go_profiles_to_lcov(profiles, modules, native)
         report = make_report(root, item["name"], suite, native, service, tests=tests_run)
         result_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         return str(result_path.relative_to(root))

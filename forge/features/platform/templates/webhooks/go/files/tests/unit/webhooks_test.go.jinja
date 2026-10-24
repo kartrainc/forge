@@ -1,0 +1,245 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/routes"
+	"{{ project_name }}/internal/services"
+	"{{ project_name }}/tests/testutil"
+)
+
+const webhooksPath = "/api/v1/webhooks"
+
+// webhookRouter mounts the real routes behind a fixed identity, or none.
+func webhookRouter(ident *identity.IdentityContext) http.Handler {
+	router := chi.NewRouter()
+	if ident != nil {
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				next.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), *ident)))
+			})
+		})
+	}
+	routes.Register(router, routes.Deps{})
+	return router
+}
+
+func TestWebhookRoutesLifecycle(t *testing.T) {
+	cfg := config.Defaults()
+	pool, err := db.NewPool(context.Background(), "postgresql://postgres:postgres@127.0.0.1:1/unused", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	handler := app.New(&cfg, pool)
+
+	status, created := testutil.Do(t, handler, http.MethodPost, webhooksPath,
+		map[string]any{"name": "orders", "url": "https://hooks.invalid/forge", "events": []string{"item.*"}})
+	if status != http.StatusCreated || len(created["secret"].(string)) != 64 || created["is_active"] != true {
+		t.Fatalf("create: %d %v", status, created)
+	}
+	if headers, ok := created["extra_headers"].(map[string]any); !ok || len(headers) != 0 {
+		t.Fatalf("extra_headers defaults to {}: %v", created["extra_headers"])
+	}
+	endpoint := webhooksPath + "/" + created["id"].(string)
+
+	_, listed := testutil.Do(t, handler, http.MethodGet, webhooksPath, nil)
+	found := false
+	for _, entry := range listed["webhooks"].([]any) {
+		found = found || entry.(map[string]any)["id"] == created["id"]
+	}
+	if !found {
+		t.Fatalf("list: %v", listed)
+	}
+
+	status, result := testutil.Do(t, handler, http.MethodPost, endpoint+"/test", nil)
+	if status != http.StatusOK || result["ok"] != false || result["status_code"] != nil || result["error"] == nil {
+		t.Fatalf("test fire to an unresolvable host: %d %v", status, result)
+	}
+
+	if status, _ := testutil.Do(t, handler, http.MethodDelete, endpoint, nil); status != http.StatusNoContent {
+		t.Fatalf("delete: %d", status)
+	}
+	for _, method := range []string{http.MethodDelete, http.MethodPost} {
+		path := endpoint
+		if method == http.MethodPost {
+			path += "/test"
+		}
+		if status, body := testutil.Do(t, handler, method, path, nil); status != http.StatusNotFound || testutil.ErrorCode(body) != "NOT_FOUND" {
+			t.Fatalf("%s deleted webhook: %d %v", method, status, body)
+		}
+	}
+}
+
+func TestWebhookRoutesValidateInput(t *testing.T) {
+	tenant := identity.New(uuid.New(), "validator")
+	handler := webhookRouter(&tenant)
+	for name, payload := range map[string]any{
+		"missing name":     map[string]any{"url": "https://hooks.invalid/x"},
+		"missing url":      map[string]any{"name": "x"},
+		"unsupported":      map[string]any{"name": "x", "url": "ftp://hooks.invalid/x"},
+		"no host":          map[string]any{"name": "x", "url": "https:///path"},
+		"unparsable":       map[string]any{"name": "x", "url": "http://[::1"},
+		"loopback literal": map[string]any{"name": "x", "url": "http://127.0.0.1:8080/x"},
+		"metadata":         map[string]any{"name": "x", "url": "http://169.254.169.254/latest"},
+		"private":          map[string]any{"name": "x", "url": "https://10.0.0.7/x"},
+		"mapped loopback":  map[string]any{"name": "x", "url": "http://[::ffff:127.0.0.1]/x"},
+		"localhost":        map[string]any{"name": "x", "url": "http://api.localhost/x"},
+		"invalid json":     "{",
+	} {
+		if status, body := testutil.Do(t, handler, http.MethodPost, webhooksPath, payload); status != http.StatusUnprocessableEntity || testutil.ErrorCode(body) != "VALIDATION_FAILED" {
+			t.Fatalf("%s: %d %v", name, status, body)
+		}
+	}
+	if status, body := testutil.Do(t, handler, http.MethodDelete, webhooksPath+"/not-a-uuid", nil); status != http.StatusUnprocessableEntity || testutil.ErrorCode(body) != "INVALID_INPUT" {
+		t.Fatalf("invalid id: %d %v", status, body)
+	}
+}
+
+func TestWebhookRoutesRequireIdentityAndIsolateTenants(t *testing.T) {
+	anonymous := webhookRouter(nil)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		if status, body := testutil.Do(t, anonymous, method, webhooksPath, map[string]any{}); status != http.StatusUnauthorized || testutil.ErrorCode(body) != "AUTH_REQUIRED" {
+			t.Fatalf("%s without identity: %d %v", method, status, body)
+		}
+	}
+	if status, _ := testutil.Do(t, anonymous, http.MethodDelete, webhooksPath+"/"+uuid.NewString(), nil); status != http.StatusUnauthorized {
+		t.Fatalf("delete without identity: %d", status)
+	}
+
+	owner, other := identity.New(uuid.New(), "owner"), identity.New(uuid.New(), "other")
+	ownerRouter, otherRouter := webhookRouter(&owner), webhookRouter(&other)
+	_, created := testutil.Do(t, ownerRouter, http.MethodPost, webhooksPath,
+		map[string]any{"name": "private", "url": "https://hooks.invalid/private"})
+	endpoint := webhooksPath + "/" + created["id"].(string)
+	if _, listed := testutil.Do(t, otherRouter, http.MethodGet, webhooksPath, nil); len(listed["webhooks"].([]any)) != 0 {
+		t.Fatalf("another tenant lists nothing: %v", listed)
+	}
+	if status, _ := testutil.Do(t, otherRouter, http.MethodDelete, endpoint, nil); status != http.StatusNotFound {
+		t.Fatalf("cross-tenant delete: %d", status)
+	}
+	if status, _ := testutil.Do(t, otherRouter, http.MethodPost, endpoint+"/test", nil); status != http.StatusNotFound {
+		t.Fatalf("cross-tenant test fire: %d", status)
+	}
+	if _, listed := testutil.Do(t, ownerRouter, http.MethodGet, webhooksPath, nil); len(listed["webhooks"].([]any)) != 1 {
+		t.Fatalf("the owner still sees its webhook: %v", listed)
+	}
+}
+
+type receivedWebhook struct {
+	header http.Header
+	body   []byte
+}
+
+func webhookReceiver(t *testing.T, status int) (*httptest.Server, <-chan receivedWebhook) {
+	t.Helper()
+	received := make(chan receivedWebhook, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- receivedWebhook{r.Header.Clone(), body}
+		if status == http.StatusFound {
+			http.Redirect(w, r, "http://169.254.169.254/latest", status)
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+	return server, received
+}
+
+func TestWebhookDeliverySignsPayload(t *testing.T) {
+	server, received := webhookReceiver(t, http.StatusAccepted)
+	webhooks := services.NewWebhookService(services.WebhookOptions{AllowPrivateTargets: true, Timeout: 5 * time.Second})
+	tenant := identity.New(uuid.New(), "signer")
+	webhook, err := webhooks.Create(tenant, services.WebhookCreate{
+		Name: "receiver", URL: server.URL + "/hook", ExtraHeaders: map[string]string{"X-Team": "orders"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := webhooks.FireEvent(context.Background(), tenant, "item.created", map[string]string{"id": "42"})
+	if len(results) != 1 || !results[0].OK || *results[0].StatusCode != http.StatusAccepted || results[0].Error != nil {
+		t.Fatalf("delivery: %+v", results)
+	}
+	delivery := <-received
+	header := delivery.header
+	signature := services.SignWebhook(webhook.Secret, header.Get("X-Webhook-Timestamp"), header.Get("X-Webhook-Nonce"), delivery.body)
+	if header.Get("X-Webhook-Signature") != signature || len(signature) != 64 {
+		t.Fatalf("signature %q, expected %q", header.Get("X-Webhook-Signature"), signature)
+	}
+	if len(header.Get("X-Webhook-Nonce")) != 32 || header.Get("X-Webhook-Event") != "item.created" ||
+		header.Get("X-Webhook-Id") != webhook.ID.String() || header.Get("X-Team") != "orders" ||
+		header.Get("Content-Type") != "application/json" {
+		t.Fatalf("headers %v", header)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(delivery.body, &body); err != nil || body["event"] != "item.created" || body["data"].(map[string]any)["id"] != "42" {
+		t.Fatalf("body %s", delivery.body)
+	}
+}
+
+func TestWebhookEventFiltering(t *testing.T) {
+	server, received := webhookReceiver(t, http.StatusOK)
+	webhooks := services.NewWebhookService(services.WebhookOptions{AllowPrivateTargets: true})
+	tenant := identity.New(uuid.New(), "filter")
+	for _, events := range [][]string{[]string{"item.*"}, []string{"order.created"}, nil} {
+		if _, err := webhooks.Create(tenant, services.WebhookCreate{Name: "f", URL: server.URL, Events: events}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if results := webhooks.FireEvent(context.Background(), tenant, "item.updated", nil); len(results) != 2 {
+		t.Fatalf("glob + subscribe-all match: %+v", results)
+	}
+	if results := webhooks.FireEvent(context.Background(), identity.New(uuid.New(), "nobody"), "item.updated", nil); len(results) != 0 {
+		t.Fatalf("other tenants are not notified: %+v", results)
+	}
+	for range 2 {
+		<-received
+	}
+}
+
+func TestWebhookDeliveryFailures(t *testing.T) {
+	permissive := services.NewWebhookService(services.WebhookOptions{AllowPrivateTargets: true})
+	ctx := context.Background()
+	failing, _ := webhookReceiver(t, http.StatusInternalServerError)
+	result := permissive.Deliver(ctx, services.Webhook{ID: uuid.New(), URL: failing.URL}, "e", nil)
+	if result.OK || *result.StatusCode != http.StatusInternalServerError || *result.Error != "http 500" {
+		t.Fatalf("non-2xx: %+v", result)
+	}
+	redirecting, _ := webhookReceiver(t, http.StatusFound)
+	result = permissive.Deliver(ctx, services.Webhook{ID: uuid.New(), URL: redirecting.URL}, "e", nil)
+	if result.OK || *result.StatusCode != http.StatusFound {
+		t.Fatalf("redirects are not followed: %+v", result)
+	}
+	result = permissive.Deliver(ctx, services.Webhook{ID: uuid.New(), URL: failing.URL}, "e", map[string]any{"bad": make(chan int)})
+	if result.OK || !strings.HasPrefix(*result.Error, "encode payload") {
+		t.Fatalf("unencodable payload: %+v", result)
+	}
+	result = permissive.Deliver(ctx, services.Webhook{ID: uuid.New(), URL: failing.URL,
+		ExtraHeaders: map[string]string{"Bad Header": "x"}}, "e", nil)
+	if result.OK || result.StatusCode != nil || result.Error == nil {
+		t.Fatalf("invalid header: %+v", result)
+	}
+
+	guarded := services.NewWebhookService(services.WebhookOptions{})
+	for _, target := range []string{failing.URL, "ftp://example.com/x"} {
+		result = guarded.Deliver(ctx, services.Webhook{ID: uuid.New(), URL: target}, "e", nil)
+		if result.OK || result.StatusCode != nil || !strings.HasPrefix(*result.Error, "refused: ") {
+			t.Fatalf("%s must be refused: %+v", target, result)
+		}
+	}
+}

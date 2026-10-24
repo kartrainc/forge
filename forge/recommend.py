@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Language = Literal["python", "node", "rust"]
+Language = Literal["python", "node", "rust", "go"]
 
 
 class ServiceRequirements(BaseModel):
@@ -43,7 +43,7 @@ def recommend(request: RecommendationRequest) -> dict:
     decisions, configs = [], []
     for index, service in enumerate(request.services):
         validate_slug(service.name)
-        scores = dict.fromkeys(("python", "node", "rust"), 0)
+        scores = dict.fromkeys(("python", "node", "rust", "go"), 0)
         reasons: dict[str, list[str]] = {key: [] for key in scores}
         preferred = {
             "processing": "rust",

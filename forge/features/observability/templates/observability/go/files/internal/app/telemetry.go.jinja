@@ -1,0 +1,31 @@
+package app
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/telemetry"
+)
+
+// StartTelemetry adds trace ids to the default logger, installs the OTLP trace
+// exporter (a no-op without OTEL_EXPORTER_OTLP_ENDPOINT) and returns the flush
+// to defer until exit.
+func StartTelemetry(ctx context.Context, cfg *config.Config) func() {
+	slog.SetDefault(slog.New(telemetry.LogHandler(Logger(cfg.Logging.Level, cfg.Logging.Pretty).Handler())))
+	shutdown, err := telemetry.Setup(ctx, cfg.App.Name, cfg.App.Version)
+	if err != nil {
+		slog.Warn("tracing disabled", "error", err)
+	}
+	return func() {
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(flush); err != nil {
+			slog.Warn("tracing flush failed", "error", err)
+		}
+	}
+}
+
+func telemetryTracing(next http.Handler) http.Handler { return telemetry.Middleware(next) }

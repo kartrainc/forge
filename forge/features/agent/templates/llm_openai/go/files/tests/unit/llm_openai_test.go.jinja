@@ -1,0 +1,351 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"iter"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/openai/openai-go/v3/option"
+
+	"{{ project_name }}/internal/adapters/llmopenai"
+	"{{ project_name }}/internal/ports/llm"
+)
+{% raw %}
+type openAIRecordedRequest struct {
+	Path string
+	Auth string
+	Body map[string]any
+}
+
+type openAIFake struct {
+	*httptest.Server
+	mu       sync.Mutex
+	requests []openAIRecordedRequest
+}
+
+func newOpenAIFake(t *testing.T, status int, contentType, body string) *openAIFake {
+	t.Helper()
+	fake := &openAIFake{}
+	fake.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		decoded := map[string]any{}
+		_ = json.Unmarshal(raw, &decoded)
+		fake.mu.Lock()
+		fake.requests = append(fake.requests, openAIRecordedRequest{Path: r.URL.Path, Auth: r.Header.Get("Authorization"), Body: decoded})
+		fake.mu.Unlock()
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(fake.Close)
+	return fake
+}
+
+func (f *openAIFake) recorded() []openAIRecordedRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]openAIRecordedRequest(nil), f.requests...)
+}
+
+func (f *openAIFake) adapter() *llmopenai.Adapter {
+	return llmopenai.New(llmopenai.Config{APIKey: "test-key", BaseURL: f.URL + "/v1"}, option.WithMaxRetries(0))
+}
+
+func openAISSE(events ...string) string {
+	var body strings.Builder
+	for _, event := range events {
+		body.WriteString("data: " + event + "\n\n")
+	}
+	body.WriteString("data: [DONE]\n\n")
+	return body.String()
+}
+
+func collectLLMChunks(seq iter.Seq2[llm.Chunk, error]) ([]llm.Chunk, error) {
+	var chunks []llm.Chunk
+	for chunk, err := range seq {
+		if err != nil {
+			return chunks, err
+		}
+		chunks = append(chunks, chunk)
+	}
+	return chunks, nil
+}
+
+func requireLLMError(t *testing.T, err error, kind llm.ErrorKind, status int) {
+	t.Helper()
+	var portErr *llm.Error
+	if !errors.As(err, &portErr) || portErr.Kind != kind || portErr.StatusCode != status {
+		t.Fatalf("want %s error with status %d, got %v", kind, status, err)
+	}
+}
+
+func openAIBodyPath(value any, path ...any) any {
+	for _, step := range path {
+		switch key := step.(type) {
+		case string:
+			object, _ := value.(map[string]any)
+			value = object[key]
+		case int:
+			list, _ := value.([]any)
+			if key >= len(list) {
+				return nil
+			}
+			value = list[key]
+		}
+	}
+	return value
+}
+
+const openAIChunkPrefix = `{"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":`
+
+func TestOpenAIStreamsTextAndParallelToolCalls(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "text/event-stream", openAISSE(
+		openAIChunkPrefix+`[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{"content":"lo"},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{"tool_calls":[`+
+			`{"index":0,"id":"a","type":"function","function":{"name":"search","arguments":"{\"q\":"}},`+
+			`{"index":1,"id":"b","type":"function","function":{"name":"fetch","arguments":"{\"id\":2}"}}]},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		openAIChunkPrefix+`[],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`,
+	))
+	temperature, maxTokens := 0.2, int64(64)
+	prompt := llm.Prompt{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: "be brief"},
+			{Role: llm.RoleUser, Content: "look it up"},
+			{Role: llm.RoleAssistant, ToolCalls: []map[string]any{
+				{"id": "a", "type": "function", "function": map[string]any{"name": "search", "arguments": `{"q":"x"}`}},
+			}},
+			{Role: llm.RoleAssistant, Content: "done", ToolCalls: []map[string]any{
+				{"id": "b", "name": "fetch", "arguments": map[string]any{"id": 2}},
+				{"id": "c", "name": "noop"},
+			}},
+			{Role: llm.RoleTool, Content: "result", ToolCallID: "a"},
+			{Role: llm.RoleAssistant, Content: "plain"},
+		},
+		Tools: []llm.Tool{{Name: "search", Description: "Search the web", InputSchema: map[string]any{"type": "object"}}},
+	}
+
+	chunks, err := collectLLMChunks(fake.adapter().Complete(context.Background(), prompt,
+		llm.Options{ModelID: "gpt-test", Temperature: &temperature, MaxTokens: &maxTokens}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []llm.Chunk{
+		{Delta: "Hel"},
+		{Delta: "lo"},
+		{ToolCall: &llm.ToolCallChunk{ID: "a", Name: "search", ArgumentsDelta: `{"q":`}},
+		{ToolCall: &llm.ToolCallChunk{ID: "b", Name: "fetch", ArgumentsDelta: `{"id":2}`}},
+		{ToolCall: &llm.ToolCallChunk{ID: "a", ArgumentsDelta: `"x"}`}},
+		{FinishReason: "tool_calls"},
+	}
+	if !reflect.DeepEqual(chunks, want) {
+		got, _ := json.Marshal(chunks)
+		t.Fatalf("chunks %s", got)
+	}
+
+	requests := fake.recorded()
+	if len(requests) != 1 || requests[0].Path != "/v1/chat/completions" || requests[0].Auth != "Bearer test-key" {
+		t.Fatalf("requests %+v", requests)
+	}
+	body := requests[0].Body
+	checks := map[string][2]any{
+		"model":              {openAIBodyPath(body, "model"), "gpt-test"},
+		"stream":             {openAIBodyPath(body, "stream"), true},
+		"temperature":        {openAIBodyPath(body, "temperature"), 0.2},
+		"max tokens":         {openAIBodyPath(body, "max_completion_tokens"), float64(64)},
+		"tool type":          {openAIBodyPath(body, "tools", 0, "type"), "function"},
+		"tool name":          {openAIBodyPath(body, "tools", 0, "function", "name"), "search"},
+		"tool schema":        {openAIBodyPath(body, "tools", 0, "function", "parameters", "type"), "object"},
+		"system":             {openAIBodyPath(body, "messages", 0, "content"), "be brief"},
+		"user role":          {openAIBodyPath(body, "messages", 1, "role"), "user"},
+		"wire call id":       {openAIBodyPath(body, "messages", 2, "tool_calls", 0, "id"), "a"},
+		"wire call args":     {openAIBodyPath(body, "messages", 2, "tool_calls", 0, "function", "arguments"), `{"q":"x"}`},
+		"tool-only content":  {openAIBodyPath(body, "messages", 2, "content"), nil},
+		"flat call name":     {openAIBodyPath(body, "messages", 3, "tool_calls", 0, "function", "name"), "fetch"},
+		"flat call args":     {openAIBodyPath(body, "messages", 3, "tool_calls", 0, "function", "arguments"), `{"id":2}`},
+		"empty args":         {openAIBodyPath(body, "messages", 3, "tool_calls", 1, "function", "arguments"), "{}"},
+		"assistant content":  {openAIBodyPath(body, "messages", 3, "content"), "done"},
+		"tool message id":    {openAIBodyPath(body, "messages", 4, "tool_call_id"), "a"},
+		"plain assistant":    {openAIBodyPath(body, "messages", 5, "content"), "plain"},
+		"plain without call": {openAIBodyPath(body, "messages", 5, "tool_calls"), nil},
+	}
+	for name, pair := range checks {
+		if !reflect.DeepEqual(pair[0], pair[1]) {
+			t.Errorf("%s: got %#v, want %#v", name, pair[0], pair[1])
+		}
+	}
+}
+
+func TestOpenAIStopsWhenTheConsumerBreaks(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "text/event-stream", openAISSE(
+		openAIChunkPrefix+`[{"index":0,"delta":{"content":"one"},"finish_reason":null}]}`,
+		openAIChunkPrefix+`[{"index":0,"delta":{"content":"two"},"finish_reason":"stop"}]}`,
+	))
+	var seen []string
+	for chunk, err := range fake.adapter().Complete(context.Background(),
+		llm.Prompt{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}}, llm.Options{ModelID: "gpt-test"}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen = append(seen, chunk.Delta)
+		break
+	}
+	if !reflect.DeepEqual(seen, []string{"one"}) {
+		t.Fatalf("seen %v", seen)
+	}
+}
+
+func TestOpenAIRejectsInvalidPromptsBeforeCallingTheProvider(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "text/event-stream", openAISSE())
+	for name, message := range map[string]llm.Message{
+		"unknown role":         {Role: "narrator", Content: "x"},
+		"tool call without id": {Role: llm.RoleAssistant, ToolCalls: []map[string]any{{"name": "search"}}},
+		"unencodable call":     {Role: llm.RoleAssistant, ToolCalls: []map[string]any{{"id": math.Inf(1)}}},
+		"mistyped call":        {Role: llm.RoleAssistant, ToolCalls: []map[string]any{{"id": 7, "name": "search"}}},
+	} {
+		chunks, err := collectLLMChunks(fake.adapter().Complete(context.Background(),
+			llm.Prompt{Messages: []llm.Message{message}}, llm.Options{ModelID: "gpt-test"}))
+		if len(chunks) != 0 {
+			t.Fatalf("%s: chunks %v", name, chunks)
+		}
+		requireLLMError(t, err, llm.KindSerialization, 0)
+	}
+	if requests := fake.recorded(); len(requests) != 0 {
+		t.Fatalf("provider called %d times", len(requests))
+	}
+}
+
+func TestOpenAIMapsProviderAndStreamErrors(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+		kind        llm.ErrorKind
+		code        int
+	}{
+		{"rejected key", http.StatusUnauthorized, "application/json",
+			`{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`,
+			llm.KindProvider, http.StatusUnauthorized},
+		{"error event", http.StatusOK, "text/event-stream",
+			openAISSE(`{"error":{"message":"overloaded","type":"server_error"}}`), llm.KindProvider, 0},
+		{"malformed event", http.StatusOK, "text/event-stream", openAISSE(`{not json}`), llm.KindSerialization, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newOpenAIFake(t, tc.status, tc.contentType, tc.body)
+			_, err := collectLLMChunks(fake.adapter().Complete(context.Background(),
+				llm.Prompt{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}}, llm.Options{ModelID: "gpt-test"}))
+			requireLLMError(t, err, tc.kind, tc.code)
+		})
+	}
+}
+
+func TestOpenAIMapsConnectionFailuresToTransport(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "text/event-stream", openAISSE())
+	adapter := fake.adapter()
+	fake.Close()
+	_, err := collectLLMChunks(adapter.Complete(context.Background(),
+		llm.Prompt{Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}}, llm.Options{ModelID: "gpt-test"}))
+	requireLLMError(t, err, llm.KindTransport, 0)
+	if _, err := adapter.Embed(context.Background(), []string{"a"}); err == nil {
+		t.Fatal("embed against a closed server must fail")
+	}
+}
+
+func TestOpenAIEmbedReturnsVectorsInInputOrder(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "application/json",
+		`{"object":"list","model":"text-embedding-3-small","data":[`+
+			`{"object":"embedding","index":1,"embedding":[0.5,1]},`+
+			`{"object":"embedding","index":0,"embedding":[0.25]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`)
+	vectors, err := fake.adapter().Embed(context.Background(), []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(vectors, [][]float32{{0.25}, {0.5, 1}}) {
+		t.Fatalf("vectors %v", vectors)
+	}
+	requests := fake.recorded()
+	if len(requests) != 1 || requests[0].Path != "/v1/embeddings" ||
+		openAIBodyPath(requests[0].Body, "model") != string(llmopenai.EmbeddingModel) ||
+		!reflect.DeepEqual(openAIBodyPath(requests[0].Body, "input"), []any{"a", "b"}) {
+		t.Fatalf("requests %+v", requests)
+	}
+
+	empty, err := fake.adapter().Embed(context.Background(), nil)
+	if err != nil || len(empty) != 0 || len(fake.recorded()) != 1 {
+		t.Fatalf("empty input: %v %v", empty, err)
+	}
+}
+
+func TestOpenAIEmbedRejectsInconsistentResponses(t *testing.T) {
+	for name, data := range map[string]string{
+		"missing vector":  `[{"object":"embedding","index":0,"embedding":[1]}]`,
+		"duplicate index": `[{"object":"embedding","index":0,"embedding":[1]},{"object":"embedding","index":0,"embedding":[2]}]`,
+		"index too large": `[{"object":"embedding","index":0,"embedding":[1]},{"object":"embedding","index":5,"embedding":[2]}]`,
+	} {
+		fake := newOpenAIFake(t, http.StatusOK, "application/json",
+			`{"object":"list","model":"m","data":`+data+`,"usage":{"prompt_tokens":1,"total_tokens":1}}`)
+		_, err := fake.adapter().Embed(context.Background(), []string{"a", "b"})
+		if err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+		requireLLMError(t, err, llm.KindSerialization, 0)
+	}
+	fake := newOpenAIFake(t, http.StatusInternalServerError, "application/json", `{"error":{"message":"boom"}}`)
+	_, err := fake.adapter().Embed(context.Background(), []string{"a"})
+	requireLLMError(t, err, llm.KindProvider, http.StatusInternalServerError)
+}
+
+type openAIRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f openAIRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestOpenAIConfigComesFromTheEnvironment(t *testing.T) {
+	fake := newOpenAIFake(t, http.StatusOK, "application/json",
+		`{"object":"list","model":"m","data":[{"object":"embedding","index":0,"embedding":[1]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`)
+	t.Setenv("OPENAI_API_KEY", "env-key")
+	t.Setenv("OPENAI_BASE_URL", fake.URL+"/v1")
+	if cfg := llmopenai.ConfigFromEnv(); cfg.APIKey != "env-key" || cfg.BaseURL != fake.URL+"/v1" {
+		t.Fatalf("config %+v", cfg)
+	}
+	if _, err := llmopenai.NewFromEnv(option.WithMaxRetries(0)).Embed(context.Background(), []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if requests := fake.recorded(); len(requests) != 1 || requests[0].Auth != "Bearer env-key" {
+		t.Fatalf("requests %+v", requests)
+	}
+
+	t.Setenv("OPENAI_BASE_URL", "")
+	var url string
+	client := &http.Client{Transport: openAIRoundTrip(func(r *http.Request) (*http.Response, error) {
+		url = r.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(
+				`{"object":"list","model":"m","data":[{"object":"embedding","index":0,"embedding":[1]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`)),
+			Request: r,
+		}, nil
+	})}
+	if _, err := llmopenai.NewFromEnv(option.WithHTTPClient(client)).Embed(context.Background(), []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if url != llmopenai.DefaultBaseURL+"embeddings" {
+		t.Fatalf("default base url request went to %q", url)
+	}
+}
+{% endraw -%}

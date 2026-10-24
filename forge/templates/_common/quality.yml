@@ -40,6 +40,11 @@ jobs:
       - name: Install Rust coverage runner
         if: hashFiles('**/Cargo.toml') != ''
         run: cargo install cargo-llvm-cov --locked --version 0.9.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: hashFiles('services/*/go.mod', 'packages/*/go.mod') != ''
+        with:
+          go-version: stable
+          cache: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         if: hashFiles('apps/*/pubspec.yaml') != ''
         with:

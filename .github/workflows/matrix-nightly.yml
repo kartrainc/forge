@@ -152,6 +152,10 @@ jobs:
           node-version: "22"
       - name: Install rustup stable
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache: false
       # Generated projects' post_generate.py runs `git init && git commit`
       # to seed an initial commit; without a configured identity the
       # commit fails with "empty ident name" and floods the log with
@@ -227,6 +231,10 @@ jobs:
           node-version: "22"
       - name: Install rustup stable
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache: false
       # See smoke job's note — round-trip also exercises generate(),
       # which runs the template's post_generate.py.
       - name: Configure git identity
@@ -285,6 +293,10 @@ jobs:
           node-version: "22"
       - name: Install rustup stable
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache: false
       # Lane E generate()s twice and runs ``forge --update`` three
       # times; the template's post_generate.py executes ``git init &&
       # git commit`` each time, which fails noisily without an identity.

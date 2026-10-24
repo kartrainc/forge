@@ -54,6 +54,7 @@ def register_all(api: ForgeAPI) -> None:
                     fragment_dir=_impl("webhooks", "rust"),
                     dependencies=("hmac@0.13.0", "sha2@0.11.0"),
                 ),
+                BackendLanguage.GO: FragmentImplSpec(fragment_dir=_impl("webhooks", "go")),
             },
         )
     )
@@ -70,7 +71,7 @@ def register_all(api: ForgeAPI) -> None:
     )
 
     # Project-scoped: AGENTS.md is the same file for every backend, so we
-    # share a single FragmentImplSpec across all three. Lives at
+    # share a single FragmentImplSpec across all of them. Lives at
     # ``templates/agents_md/all/`` (the "all" pseudo-language groups
     # project-wide content).
     _AGENTS_MD_IMPL = FragmentImplSpec(fragment_dir=_impl("agents_md", "all"), scope="project")
@@ -81,6 +82,7 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: _AGENTS_MD_IMPL,
                 BackendLanguage.NODE: _AGENTS_MD_IMPL,
                 BackendLanguage.RUST: _AGENTS_MD_IMPL,
+                BackendLanguage.GO: _AGENTS_MD_IMPL,
             },
         )
     )

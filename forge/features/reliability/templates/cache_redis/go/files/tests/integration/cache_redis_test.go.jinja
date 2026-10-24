@@ -1,0 +1,43 @@
+package integration_test
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/adapters/cacheredis"
+	"{{ project_name }}/internal/ports/cache"
+)
+
+func TestCacheRedisAgainstRealRedis(t *testing.T) {
+	if os.Getenv("CACHE_REDIS_URL") == "" {
+		t.Skip("set CACHE_REDIS_URL to run the Redis cache adapter against a real server")
+	}
+	ctx := context.Background()
+	adapter, err := cacheredis.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	key := "forge-test:" + uuid.NewString()
+	defer adapter.Invalidate(ctx, key)
+	type payload struct {
+		Name string `json:"name"`
+	}
+	if err := adapter.Set(ctx, key, payload{Name: "cached"}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := cache.Lookup[payload](ctx, adapter, key)
+	if err != nil || !found || got.Name != "cached" {
+		t.Fatalf("round trip: %+v %v %v", got, found, err)
+	}
+	if err := adapter.Set(ctx, key, payload{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := adapter.Get(ctx, key); err != nil || found {
+		t.Fatalf("zero ttl invalidates: %v %v", found, err)
+	}
+}

@@ -119,13 +119,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backend-language",
         choices=backend_language_choices,
         help="Backend language: python (FastAPI), node (Fastify), rust (Axum), "
-        "or any plugin-registered backend.",
+        "go (chi), or any plugin-registered backend.",
     )
     p.add_argument("--backend-name", metavar="NAME", help="Backend service name (default: backend)")
     p.add_argument("--backend-port", type=int, metavar="PORT")
     p.add_argument("--python-version", choices=["3.13", "3.12", "3.11"])
     p.add_argument("--node-version", choices=["22", "24"])
     p.add_argument("--rust-edition", choices=["2021", "2024"])
+    p.add_argument("--go-version", choices=["1.27", "1.26"])
 
     # Frontend. Choices are read at parser-build time (after plugin load, like
     # --backend-language), so a plugin that registered a frontend (e.g. solid)

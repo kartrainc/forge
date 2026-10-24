@@ -1,0 +1,101 @@
+// Package services holds the business rules. It depends on the repository
+// interface, so any implementation (including in-memory test doubles) fits.
+package services
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/data/repositories"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/models"
+)
+
+const (
+	// DefaultLimit applies when a list request omits limit.
+	DefaultLimit = 20
+	maxLimit     = 100
+)
+
+type ItemService struct {
+	repo repositories.ItemRepository
+}
+
+func NewItemService(repo repositories.ItemRepository) *ItemService {
+	return &ItemService{repo: repo}
+}
+
+// List rejects out-of-range pagination with a 422 instead of binding a
+// negative LIMIT/OFFSET into SQL.
+func (s *ItemService) List(ctx context.Context, ident identity.IdentityContext, params models.ListParams) (models.Page[models.Item], error) {
+	if params.Skip < 0 || params.Limit < 1 {
+		return models.Page[models.Item]{}, apperrors.NewValidation(
+			"pagination out of range: 'limit' must be >= 1 and 'skip' must be >= 0")
+	}
+	params.Limit = min(params.Limit, maxLimit)
+	return s.repo.List(ctx, ident, params)
+}
+
+func (s *ItemService) Create(ctx context.Context, ident identity.IdentityContext, data models.CreateItem) (*models.Item, error) {
+	if data.Name == "" {
+		return nil, apperrors.NewValidation("'name' is required")
+	}
+	existing, err := s.repo.FindByName(ctx, ident, data.Name)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, apperrors.NewAlreadyExists("Item", data.Name)
+	}
+	return s.repo.Create(ctx, ident, data)
+}
+
+func (s *ItemService) Get(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) (*models.Item, error) {
+	item, err := s.repo.GetByID(ctx, ident, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, apperrors.NewNotFound("Item", itemID.String())
+	}
+	return item, nil
+}
+
+func (s *ItemService) Update(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID, data models.UpdateItem) (*models.Item, error) {
+	current, err := s.Get(ctx, ident, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if data.Empty() {
+		return current, nil
+	}
+	if data.Name != nil {
+		if *data.Name == "" {
+			return nil, apperrors.NewValidation("'name' must not be empty")
+		}
+		clash, err := s.repo.FindByNameExcluding(ctx, ident, *data.Name, itemID)
+		if err != nil {
+			return nil, err
+		}
+		if clash != nil {
+			return nil, apperrors.NewAlreadyExists("Item", *data.Name)
+		}
+	}
+	updated, err := s.repo.Update(ctx, ident, itemID, data)
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, apperrors.NewNotFound("Item", itemID.String())
+	}
+	return updated, nil
+}
+
+func (s *ItemService) Delete(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) error {
+	if _, err := s.Get(ctx, ident, itemID); err != nil {
+		return err
+	}
+	return s.repo.Delete(ctx, ident, itemID)
+}

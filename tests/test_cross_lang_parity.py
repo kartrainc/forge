@@ -69,6 +69,7 @@ def _scaffold_tier1_fragment(
         BackendLanguage.PYTHON,
         BackendLanguage.NODE,
         BackendLanguage.RUST,
+        BackendLanguage.GO,
     ),
     sibling_marker: str = _MARKER,
 ) -> Fragment:
@@ -89,6 +90,7 @@ def _scaffold_tier1_fragment(
         BackendLanguage.PYTHON: "src/app/main.py",
         BackendLanguage.NODE: "src/app.ts",
         BackendLanguage.RUST: "src/app.rs",
+        BackendLanguage.GO: "internal/app/app.go",
     }
     for lang in parallel_markers:
         frag_dir = (
@@ -242,10 +244,11 @@ class TestTier1FragmentEmitsSuggestions:
             (c.kind, c.fragment, c.backend, c.rationale[:60]) for c in bundle.candidates
         ]
         assert block_candidates[0].fragment == fragment_name
-        # Two siblings: Node + Rust (Python is the source).
-        assert len(suggest_candidates) == 2
+        # Three siblings: Node + Rust + Go (Python is the source).
+        assert len(suggest_candidates) == 3
         suggest_backends = sorted(c.backend for c in suggest_candidates)
         assert suggest_backends == [
+            BackendLanguage.GO.value,
             BackendLanguage.NODE.value,
             BackendLanguage.RUST.value,
         ]
@@ -256,7 +259,7 @@ class TestTier1FragmentEmitsSuggestions:
             assert cand.feature_key == _FEATURE_KEY
             assert cand.risk == "needs-review"
             # The target_path references the SIBLING's rel-path, not the source.
-            assert cand.target_path in {"src/app.ts", "src/app.rs"}
+            assert cand.target_path in {"src/app.ts", "src/app.rs", "internal/app/app.go"}
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +352,7 @@ class TestSiblingMarkerNotFound:
         )
         try:
             # Rewrite Node + Rust inject.yamls to use a non-matching marker.
-            for lang in (BackendLanguage.NODE, BackendLanguage.RUST):
+            for lang in (BackendLanguage.NODE, BackendLanguage.RUST, BackendLanguage.GO):
                 impl = fragment.implementations[lang]
                 inject_yaml = Path(impl.fragment_dir) / "inject.yaml"
                 inject_yaml.write_text(
@@ -415,9 +418,9 @@ class TestBundleLayout:
         )
         manifest_kinds = sorted(c["kind"] for c in envelope["candidates"])
         assert "block" in manifest_kinds
-        assert manifest_kinds.count("cross-lang-suggest") == 2
+        assert manifest_kinds.count("cross-lang-suggest") == 3
 
-        # Per-fragment patch dir: 1 .patch (the real block) + 2 .txt
+        # Per-fragment patch dir: 1 .patch (the real block) + 3 .txt
         # (the suggestions).
         frag_dir = out_dir / "patches" / fragment_name
         assert frag_dir.is_dir()
@@ -426,11 +429,12 @@ class TestBundleLayout:
             f for f in frag_dir.glob("*.txt") if "cross-lang-suggest" in f.name
         )
         assert len(patch_files) == 1
-        assert len(suggest_files) == 2
+        assert len(suggest_files) == 3
         # Filenames carry the backend language.
         suggest_names = {f.name for f in suggest_files}
         assert any(name.endswith("-node.txt") for name in suggest_names)
         assert any(name.endswith("-rust.txt") for name in suggest_names)
+        assert any(name.endswith("-go.txt") for name in suggest_names)
         # Suggestion file body carries the hint + rationale.
         body = suggest_files[0].read_text(encoding="utf-8")
         assert "Mirror the change" in body

@@ -110,6 +110,7 @@ def render_compose(
             "platform_auth_sdk_python",
             "platform_auth_sdk_node",
             "platform_auth_sdk_rust",
+            "platform_auth_sdk_go",
         }
     )
 
