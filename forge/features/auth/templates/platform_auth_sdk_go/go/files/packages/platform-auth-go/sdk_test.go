@@ -384,6 +384,106 @@ func TestSDKJWKSUnknownKidCooldown(t *testing.T) {
 	}
 }
 
+func TestSDKJWKSOutageBoundsFetches(t *testing.T) {
+	ctx := context.Background()
+	keypair := authtest.NewKeypair()
+	var fetches atomic.Int32
+	var down atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		if down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{keypair.PublicJWK()}})
+	}))
+	defer server.Close()
+	cache, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{
+		Lifespan: time.Millisecond, StaleMax: time.Hour, HTTPClient: server.Client(), MinRefreshInterval: time.Hour,
+	})
+	_ = cache.RegisterIssuer("issuer", server.URL)
+	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+		t.Fatal(err)
+	}
+	down.Store(true)
+	time.Sleep(2 * time.Millisecond)
+	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+		t.Fatalf("the failed refresh serves the stale key: %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Go(func() {
+			if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+				t.Errorf("stale key during the cooldown: %v", err)
+			}
+			if _, err := cache.SigningKey(ctx, "issuer", fmt.Sprintf("random-%d", i)); err == nil || !strings.Contains(err.Error(), "JWKS unavailable") {
+				t.Errorf("unknown kid during the outage: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if n := fetches.Load(); n != 2 {
+		t.Fatalf("requests during the outage cooldown must not refetch: %d fetches", n)
+	}
+
+	cold, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: server.Client(), MinRefreshInterval: time.Hour})
+	_ = cold.RegisterIssuer("issuer", server.URL)
+	for range 5 {
+		if _, err := cold.SigningKey(ctx, "issuer", keypair.KID); sdkReason(err) != platformauth.ReasonInvalidToken {
+			t.Fatalf("no keys while the issuer is down: %v", err)
+		}
+	}
+	if n := fetches.Load(); n != 3 {
+		t.Fatalf("a failed first fetch is throttled too: %d fetches", n)
+	}
+}
+
+func TestSDKJWKSWaitersShareOneRefresh(t *testing.T) {
+	ctx := context.Background()
+	keypair := authtest.NewKeypair()
+	for _, healthy := range []bool{true, false} {
+		var fetches atomic.Int32
+		requested, release := make(chan struct{}, 4), make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if fetches.Add(1) > 1 {
+				requested <- struct{}{}
+				<-release
+				if !healthy {
+					http.Error(w, "down", http.StatusServiceUnavailable)
+					return
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{keypair.PublicJWK()}})
+		}))
+		cache, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{
+			Lifespan: 20 * time.Millisecond, StaleMax: time.Hour, HTTPClient: server.Client(), MinRefreshInterval: time.Hour,
+		})
+		_ = cache.RegisterIssuer("issuer", server.URL)
+		if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond)
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Go(func() {
+				if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+					t.Errorf("healthy=%v: %v", healthy, err)
+				}
+			})
+			if fetches.Load() < 2 {
+				<-requested
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		close(release)
+		wg.Wait()
+		server.Close()
+		if n := fetches.Load(); n != 2 {
+			t.Fatalf("healthy=%v: waiters share one refresh: %d fetches", healthy, n)
+		}
+	}
+}
+
 func TestSDKJWKSCache(t *testing.T) {
 	ctx := context.Background()
 	if _, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{Lifespan: time.Hour, StaleMax: time.Minute}); err == nil {

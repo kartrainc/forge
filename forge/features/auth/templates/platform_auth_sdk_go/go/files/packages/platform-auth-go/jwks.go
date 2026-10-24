@@ -40,14 +40,16 @@ type JWKSCacheOptions struct {
 	StaleMax    time.Duration
 	HTTPTimeout time.Duration
 	HTTPClient  *http.Client
-	// MinRefreshInterval is the shortest time between two refreshes caused by
-	// an unknown kid.
+	// MinRefreshInterval is the shortest time between a refresh attempt and
+	// the next one caused by an unknown kid or by a failed attempt.
 	MinRefreshInterval time.Duration
 }
 
 // JWKSCache holds the signing keys of every registered issuer. A refresh
-// happens on first use, after Lifespan, or for an unknown kid (rotation) at
-// most once per MinRefreshInterval; refreshes are serialized per issuer.
+// happens on first use, after Lifespan, or for an unknown kid (rotation);
+// refreshes are serialized per issuer. After an attempt, an unknown kid or a
+// failed attempt waits MinRefreshInterval before the next fetch, and stale
+// keys are served meanwhile.
 type JWKSCache struct {
 	lifespan   time.Duration
 	staleMax   time.Duration
@@ -58,11 +60,13 @@ type JWKSCache struct {
 }
 
 type issuerKeys struct {
-	uri     string
-	refresh sync.Mutex
-	mu      sync.RWMutex
-	keys    map[string]crypto.PublicKey
-	fetched time.Time
+	uri       string
+	refresh   sync.Mutex
+	mu        sync.RWMutex
+	keys      map[string]crypto.PublicKey
+	fetched   time.Time
+	attempted time.Time
+	failure   error
 }
 
 // NewJWKSCache builds an empty cache.
@@ -127,15 +131,37 @@ func (c *JWKSCache) SigningKey(ctx context.Context, issuer, kid string) (crypto.
 	if key, ok := entry.lookup(kid, c.lifespan); ok {
 		return key, nil
 	}
+	if throttled, _ := entry.throttled(kid, c.minRefresh); throttled {
+		if key, ok := entry.lookup(kid, c.staleMax); ok {
+			return key, nil
+		}
+	}
 	entry.refresh.Lock()
 	defer entry.refresh.Unlock()
 	if key, ok := entry.lookup(kid, c.lifespan); ok {
 		return key, nil
 	}
-	if entry.recentlyMissing(kid, c.minRefresh) {
+	if throttled, failure := entry.throttled(kid, c.minRefresh); throttled {
+		if key, ok := entry.lookup(kid, c.staleMax); ok {
+			return key, nil
+		}
+		if failure != nil {
+			return nil, newError(ReasonInvalidToken, "JWKS unavailable for issuer %q, retrying after %s: %v", issuer, c.minRefresh, failure)
+		}
 		return nil, newError(ReasonInvalidToken, "unknown signing key kid %q for issuer %q", kid, issuer)
 	}
-	keys, err := c.fetch(ctx, entry.uri)
+	entry.mu.Lock()
+	entry.attempted = time.Now()
+	entry.mu.Unlock()
+	// One caller going away must not fail the refresh every caller waits on;
+	// the HTTP client timeout bounds it.
+	keys, err := c.fetch(context.WithoutCancel(ctx), entry.uri)
+	entry.mu.Lock()
+	entry.failure = err
+	if err == nil {
+		entry.keys, entry.fetched = keys, time.Now()
+	}
+	entry.mu.Unlock()
 	if err != nil {
 		if key, ok := entry.lookup(kid, c.staleMax); ok {
 			slog.Warn("jwks_fetch_failed_serving_stale", "issuer", issuer, "kid", kid, "error", err)
@@ -143,22 +169,23 @@ func (c *JWKSCache) SigningKey(ctx context.Context, issuer, kid string) (crypto.
 		}
 		return nil, newError(ReasonInvalidToken, "JWKS unavailable for issuer %q and stale window expired: %v", issuer, err)
 	}
-	entry.mu.Lock()
-	entry.keys, entry.fetched = keys, time.Now()
-	entry.mu.Unlock()
 	if key, ok := keys[kid]; ok {
 		return key, nil
 	}
 	return nil, newError(ReasonInvalidToken, "unknown signing key kid %q for issuer %q (JWKS refreshed)", kid, issuer)
 }
 
-// recentlyMissing reports an unknown kid while the last fetch is younger than
-// minRefresh; a known kid whose document aged out still refreshes.
-func (e *issuerKeys) recentlyMissing(kid string, minRefresh time.Duration) bool {
+// throttled reports whether kid must wait for the next refresh: an attempt
+// started within minRefresh and either failed or did not carry kid. A known
+// kid whose document aged out after a successful attempt still refreshes.
+func (e *issuerKeys) throttled(kid string, minRefresh time.Duration) (bool, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	if e.attempted.IsZero() || time.Since(e.attempted) >= minRefresh {
+		return false, nil
+	}
 	_, known := e.keys[kid]
-	return !known && !e.fetched.IsZero() && time.Since(e.fetched) < minRefresh
+	return e.failure != nil || !known, e.failure
 }
 
 func (e *issuerKeys) lookup(kid string, maxAge time.Duration) (crypto.PublicKey, bool) {
