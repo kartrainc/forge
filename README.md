@@ -9,7 +9,7 @@
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos-lightgrey?style=flat-square)](https://github.com/cchifor/forge)
 [![ci](https://img.shields.io/github/actions/workflow/status/cchifor/forge/ci.yml?branch=main&label=ci&style=flat-square)](https://github.com/cchifor/forge/actions/workflows/ci.yml)
-[![backends](https://img.shields.io/badge/backends-3-informational?style=flat-square)](docs/FEATURES.md)
+[![backends](https://img.shields.io/badge/backends-4-informational?style=flat-square)](docs/FEATURES.md)
 [![frontends](https://img.shields.io/badge/frontends-3-informational?style=flat-square)](docs/FEATURES.md)
 [![options](https://img.shields.io/badge/options-64-informational?style=flat-square)](docs/FEATURES.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
@@ -17,7 +17,7 @@
 </div>
 
 Forge composes application source from configuration, templates, feature fragments,
-and schemas. It generates Python, Node/TypeScript, or Rust services with an optional
+and schemas. It generates Python, Node/TypeScript, Rust, or Go services with an optional
 Vue, Svelte, or Flutter frontend, then records how that source can be validated and
 updated. Generated applications run independently of the Forge CLI.
 
@@ -35,7 +35,7 @@ migration details.
 
 | Area | Capabilities |
 | --- | --- |
-| Services | Python/FastAPI, Node/Fastify, Rust/Axum; application scaffolds, CRUD entities, native tests, and Dockerfiles |
+| Services | Python/FastAPI, Node/Fastify, Rust/Axum, Go/net/http with chi; application scaffolds, CRUD entities, native tests, and Dockerfiles |
 | Frontends | Vue, Svelte, Flutter, or no frontend; selectable layouts, API clients, and optional chat/canvas features |
 | Platform topologies | Monolithic, microservices, headless API, and multitenant SaaS presets |
 | Data and identity | PostgreSQL, schema-generated types, migrations where supported, Gatekeeper/Keycloak auth, service delegation, and tenant isolation |
@@ -225,6 +225,8 @@ as `requirements.yaml`, then run:
 forge --recommend requirements.yaml --json > recommendation.json
 ```
 
+Go is a candidate in every decision but no workload prefers it by default; it
+wins through `existing_stack`, `team_languages`, or an explicit `language`.
 Results include reasons, alternatives, rejected candidates, and configurations
 for planning. Existing runtimes, team skills, required libraries, and supported
 adapters affect the choice; a remote LLM call does not require Python. These
@@ -369,7 +371,7 @@ migration requirements live in [CHANGELOG.md](CHANGELOG.md) and [UPGRADING.md](U
 | --- | --- |
 | Auth-stack rebuild | Gatekeeper authority, BFF sessions, internal ES256 tokens, service delegation; [auth contract](docs/auth-architecture.md) |
 | Cross-SDK parity contract | Python/Node/Rust authentication behavior checked by [contract tests](tests/contract/auth_sdk_parity/) |
-| Generated-code gates | Windows/Linux policy checks and selected Python, Node, Rust, Vue, and Svelte native configurations in [CI](.github/workflows/generated-quality.yml) |
+| Generated-code gates | Windows/Linux policy checks and selected Python, Node, Rust, Go, Vue, and Svelte native configurations in [CI](.github/workflows/generated-quality.yml) |
 | Generator and rendered projects | OS tests, generation/toolchain matrices, Compose smoke, and round-trip lanes; [validation matrix](docs/operations/validation-matrix.md) |
 
 **`auth.mode`** selects the auth architecture supported by the chosen configuration;

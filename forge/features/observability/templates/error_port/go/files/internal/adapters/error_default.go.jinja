@@ -1,0 +1,33 @@
+// Package adapters holds the default implementations of internal/ports.
+package adapters
+
+import (
+	"errors"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/ports"
+)
+
+// DefaultErrorPort emits the canonical RFC-007 envelope. Application errors
+// keep their code, public message and context; anything else becomes a
+// redacted INTERNAL_ERROR (the original error is logged by apperrors.Write).
+type DefaultErrorPort struct{}
+
+var _ ports.ErrorPort = DefaultErrorPort{}
+
+func (DefaultErrorPort) Serialize(err error) ports.ErrorEnvelope {
+	var appErr *apperrors.Error
+	if !errors.As(err, &appErr) {
+		appErr = apperrors.NewInternal(err)
+	}
+	context := appErr.Context
+	if context == nil {
+		context = map[string]any{}
+	}
+	return ports.ErrorEnvelope{Error: apperrors.Body{
+		Code:    appErr.Code,
+		Message: appErr.PublicMessage(),
+		Type:    appErr.Code.TypeName(),
+		Context: context,
+	}}
+}

@@ -55,6 +55,7 @@ from forge.codegen.ui_protocol import (
 from forge.config import BackendLanguage, FrontendFramework
 from forge.domain.emitters import (
     emit_alembic_migration,
+    emit_go_struct,
     emit_openapi,
     emit_rust_struct,
     emit_sqlalchemy_model,
@@ -524,6 +525,17 @@ def _emit_shared_enums(
                     / f"{enum_file.stem}.rs"
                 )
                 _write(path, targets["rust"], collector)
+            elif bc.language is BackendLanguage.GO:
+                path = (
+                    project_root
+                    / "services"
+                    / bc.name
+                    / "internal"
+                    / "domain"
+                    / "enums"
+                    / f"{enum_file.stem}.go"
+                )
+                _write(path, targets["go"], collector)
 
         # Frontend — one enum emission per registered layout.
         if layout is None:
@@ -639,6 +651,14 @@ def _emit_user_entities(
                 )
             elif bc.language is BackendLanguage.RUST:
                 _emit_rust_entity(
+                    spec,
+                    bc.name,
+                    project_root,
+                    collector,
+                    known_enums=known_enums,
+                )
+            elif bc.language is BackendLanguage.GO:
+                _emit_go_entity(
                     spec,
                     bc.name,
                     project_root,
@@ -803,6 +823,30 @@ def _emit_rust_entity(
     _write(target, body, collector, template_name=_DOMAIN_TEMPLATE_NAME)
 
 
+def _emit_go_entity(
+    spec: EntitySpec,
+    backend_name: str,
+    project_root: Path,
+    collector: ProvenanceCollector | None,
+    *,
+    known_enums: set[str],
+) -> None:
+    """Emit the Go struct at ``services/<backend>/internal/domain/<entity_snake>.go``.
+
+    A separate ``domain`` package keeps generated entities from colliding with
+    the template's hand-written ``models`` package; the module path is the
+    backend name.
+    """
+    snake = _snake_case(spec.name)
+    target = project_root / "services" / backend_name / "internal" / "domain" / f"{snake}.go"
+    body = _wrap_sentinels(
+        "go",
+        f"domain_{snake}_struct",
+        emit_go_struct(spec, module=backend_name, known_enums=known_enums),
+    )
+    _write(target, body, collector, template_name=_DOMAIN_TEMPLATE_NAME)
+
+
 def _emit_openapi_entity(
     spec: EntitySpec,
     config: ProjectConfig,
@@ -839,6 +883,7 @@ def _wrap_sentinels(language: str, tag: str, body: str) -> str:
       * ``"python"`` — ``# FORGE:BEGIN <tag>`` / ``# FORGE:END <tag>``
       * ``"ts"``     — ``// FORGE:BEGIN <tag>`` / ``// FORGE:END <tag>``
       * ``"rust"``   — ``// FORGE:BEGIN <tag>`` / ``// FORGE:END <tag>``
+      * ``"go"``     — ``// FORGE:BEGIN <tag>`` / ``// FORGE:END <tag>``
 
     Mirrors the sentinel shape produced by ``forge.injectors.ts_ast``
     so the existing audit/merge tooling under :mod:`forge.sync` sees

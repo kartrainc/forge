@@ -33,9 +33,9 @@ def _cleanup_plugin_languages():
 
 class TestPluginLanguage:
     def test_register_creates_sentinel(self) -> None:
-        go_lang = register_backend_language("go")
-        assert go_lang.value == "go"
-        assert go_lang.name == "GO"
+        zig_lang = register_backend_language("zig")
+        assert zig_lang.value == "zig"
+        assert zig_lang.name == "ZIG"
 
     def test_register_is_idempotent(self) -> None:
         a = register_backend_language("java")
@@ -64,18 +64,18 @@ class TestPluginLanguage:
 
 class TestAddBackendPluginPath:
     def test_register_new_plugin_backend(self) -> None:
-        reg = PluginRegistration(name="go_plugin", module="m")
+        reg = PluginRegistration(name="zig_plugin", module="m")
         api = ForgeAPI(reg)
         spec = BackendSpec(
-            template_dir="services/go-service-template",
-            display_label="Go (Echo)",
-            version_field="go_version",
-            version_choices=("1.23", "1.22"),
+            template_dir="services/zig-service-template",
+            display_label="Zig (std.http)",
+            version_field="zig_version",
+            version_choices=("0.15",),
         )
-        api.add_backend("go", spec)
+        api.add_backend("zig", spec)
         assert reg.backends_added == 1
-        go = resolve_backend_language("go")
-        assert BACKEND_REGISTRY[go] is spec
+        zig = resolve_backend_language("zig")
+        assert BACKEND_REGISTRY[zig] is spec
 
     def test_cannot_register_plugin_over_existing(self) -> None:
         reg = PluginRegistration(name="p", module="m")

@@ -39,7 +39,7 @@ EXTERNAL by default (managed Postgres/Redis/Keycloak via values); set
 are derived on demand via ``helm template`` (see the generated Makefile),
 so ``deploy/k8s/`` can never drift from the chart.
 
-BACKENDS: python, node, rust (tier 1 — the chart is language-agnostic).""",
+BACKENDS: python, node, rust, go (tier 1 — the chart is language-agnostic).""",
             category=FeatureCategory.PLATFORM,
             stability="beta",
             enables={

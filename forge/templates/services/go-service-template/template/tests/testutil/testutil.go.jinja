@@ -1,0 +1,92 @@
+// Package testutil holds the shared test vocabulary used by the Python, Node,
+// Rust and Go templates.
+package testutil
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/identity"
+)
+
+// ServiceRoot is the module root (the directory holding go.mod).
+func ServiceRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+// TenantTestContext describes a test caller.
+type TenantTestContext struct {
+	UserID     uuid.UUID
+	CustomerID uuid.UUID
+	Email      string
+	Roles      []string
+}
+
+// TenantFactory returns the default local tenant.
+func TenantFactory() TenantTestContext {
+	id := uuid.MustParse(identity.DevSubject)
+	return TenantTestContext{UserID: id, CustomerID: id, Email: "test@localhost", Roles: []string{"user"}}
+}
+
+// Envelope is the RFC-007 error body.
+type Envelope struct {
+	Error struct {
+		Code          string         `json:"code"`
+		Message       string         `json:"message"`
+		Type          string         `json:"type"`
+		Context       map[string]any `json:"context"`
+		CorrelationID string         `json:"correlation_id"`
+	} `json:"error"`
+}
+
+// Do sends a JSON request to handler and decodes the JSON response.
+func Do(t *testing.T, handler http.Handler, method, url string, payload any) (int, map[string]any) {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		if raw, ok := payload.(string); ok {
+			body.WriteString(raw)
+		} else if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(method, url, &body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	decoded := map[string]any{}
+	if text := strings.TrimSpace(recorder.Body.String()); text != "" {
+		if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+			t.Fatalf("%s %s: non-JSON response %q", method, url, text)
+		}
+	}
+	return recorder.Code, decoded
+}
+
+// ErrorCode extracts error.code from a decoded envelope.
+func ErrorCode(body map[string]any) string {
+	envelope, _ := body["error"].(map[string]any)
+	code, _ := envelope["code"].(string)
+	return code
+}
+
+// DatabaseURL returns DATABASE_URL. Integration and e2e suites require a real
+// database, so a missing value fails the test instead of skipping it.
+func DatabaseURL(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("DATABASE_URL")
+	if url == "" {
+		t.Fatal("integration tests require DATABASE_URL")
+	}
+	return url
+}

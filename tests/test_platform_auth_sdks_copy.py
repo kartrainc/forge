@@ -53,7 +53,7 @@ def _auth_project(name: str, language: BackendLanguage, tmp_path: Path) -> Proje
 
 @pytest.mark.parametrize(
     "language",
-    [BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST],
+    [BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST, BackendLanguage.GO],
 )
 def test_auth_backend_dockerfile_copies_sdks(language, tmp_path):
     """When a backend ships platform-auth, its Dockerfile must COPY the
@@ -78,11 +78,7 @@ def test_middleware_map_covers_every_builtin_language():
     fragment, or its auth backends silently lose the sdks COPY."""
     from forge.fragments import FRAGMENT_REGISTRY
 
-    for language in (
-        BackendLanguage.PYTHON,
-        BackendLanguage.NODE,
-        BackendLanguage.RUST,
-    ):
+    for language in BackendLanguage:
         frag = _PLATFORM_AUTH_MIDDLEWARE.get(language)
         assert frag is not None, f"no auth-middleware fragment mapped for {language}"
         assert frag in FRAGMENT_REGISTRY, f"{frag} not in the fragment registry"

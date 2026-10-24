@@ -1,0 +1,64 @@
+package app
+
+import (
+	"cmp"
+	"errors"
+	"log/slog"
+	"os"
+	"strings"
+	"sync/atomic"
+
+	platformauth "forge.local/platform-auth-go"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/middleware"
+)
+
+var platformAuthGuard atomic.Pointer[platformauth.AuthGuard]
+
+// InitPlatformAuth builds the process-wide guard. The issuer and audience
+// come from GATEKEEPER_ISSUER / SERVICE_AUDIENCE, falling back to
+// security.auth.server_url / audience; the JWKS URI is security.auth.jwks_uri
+// or <issuer>/auth/jwks; TENANT_ID_CLAIM overrides the tenant claim. With
+// security.auth.enabled the issuer and audience are required; otherwise a
+// missing issuer leaves only the dev identity for unauthenticated requests.
+func InitPlatformAuth(cfg *config.Config) error {
+	auth := cfg.Security.Auth
+	issuer := strings.TrimRight(cmp.Or(os.Getenv("GATEKEEPER_ISSUER"), auth.ServerURL), "/")
+	audience := cmp.Or(os.Getenv("SERVICE_AUDIENCE"), auth.Audience)
+	if issuer == "" || audience == "" {
+		platformAuthGuard.Store(nil)
+		if auth.Enabled {
+			return errors.New("GATEKEEPER_ISSUER and SERVICE_AUDIENCE are required when security.auth.enabled is true")
+		}
+		slog.Warn("platform auth issuer not configured; requests without a token use the dev identity")
+		return nil
+	}
+	jwks, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{})
+	if err == nil {
+		err = jwks.RegisterIssuer(issuer, cmp.Or(auth.JWKSURI, issuer+"/auth/jwks"))
+	}
+	if err != nil {
+		return err
+	}
+	// Same defaults as the Node and Rust services: an empty trust map (every
+	// tenant of the registered issuer) and a deny-all may-act policy.
+	guardConfig := platformauth.NewAuthGuardConfig(audience, jwks)
+	guardConfig.TenantIDClaim = cmp.Or(os.Getenv("TENANT_ID_CLAIM"), platformauth.DefaultTenantIDClaim)
+	guardConfig.TrustMap = platformauth.NewInMemoryIssuerTrustMap(nil)
+	guardConfig.MayAct = platformauth.NewStaticMayActPolicy(nil)
+	guard, err := platformauth.NewAuthGuard(guardConfig)
+	if err != nil {
+		return err
+	}
+	platformAuthGuard.Store(guard)
+	slog.Info("platform auth initialized", "issuer", issuer, "audience", audience, "dev_mode", !auth.Enabled)
+	return nil
+}
+
+func platformAuth(cfg *config.Config) middleware.Middleware {
+	return middleware.PlatformAuth(middleware.PlatformAuthOptions{
+		Guard:   platformAuthGuard.Load(),
+		DevMode: !cfg.Security.Auth.Enabled,
+	})
+}

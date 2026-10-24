@@ -1,0 +1,62 @@
+package middleware
+
+import (
+	"net/http"
+	"slices"
+
+	platformauth "forge.local/platform-auth-go"
+
+	"{{ project_name }}/internal/identity"
+)
+
+// PlatformAuthOptions configures PlatformAuth.
+type PlatformAuthOptions struct {
+	// Guard verifies bearer tokens; nil means the issuer is not configured.
+	Guard *platformauth.AuthGuard
+	// DevMode (security.auth.enabled=false) binds identity.Dev() to requests
+	// that carry no Authorization header. Presented tokens are still verified.
+	DevMode bool
+}
+
+// PlatformAuth verifies the Gatekeeper-issued bearer token of every request
+// outside platformauth.DefaultExcludedPaths and binds the converted
+// identity.IdentityContext, plus the SDK identity for platformauth.RequireScope.
+// Failures are RFC 7807 problem responses, like the Node and Rust services.
+func PlatformAuth(options PlatformAuthOptions) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if slices.Contains(platformauth.DefaultExcludedPaths, r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if options.DevMode && r.Header.Get("Authorization") == "" {
+				next.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), identity.Dev())))
+				return
+			}
+			if options.Guard == nil {
+				platformauth.WriteProblem(w, http.StatusServiceUnavailable, "service_misconfigured",
+					"auth guard not initialized; set GATEKEEPER_ISSUER and SERVICE_AUDIENCE")
+				return
+			}
+			verified, err := options.Guard.VerifyRequest(r)
+			if err != nil {
+				platformauth.WriteError(w, err)
+				return
+			}
+			ctx := platformauth.WithIdentity(r.Context(), verified)
+			next.ServeHTTP(w, r.WithContext(identity.WithContext(ctx, ToIdentity(verified))))
+		})
+	}
+}
+
+// ToIdentity converts the SDK identity into the service's identity type.
+func ToIdentity(verified platformauth.IdentityContext) identity.IdentityContext {
+	return identity.IdentityContext{
+		TenantID:   verified.TenantID,
+		TenantSlug: verified.TenantSlug,
+		Subject:    verified.Subject,
+		Scopes:     slices.Clone(verified.Scopes),
+		Roles:      slices.Clone(verified.Roles),
+		Actor:      verified.Actor,
+	}
+}

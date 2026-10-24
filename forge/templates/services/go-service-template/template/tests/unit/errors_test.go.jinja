@@ -1,0 +1,105 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"{{ project_name }}/internal/apperrors"
+)
+
+func TestErrorEnvelopesPreserveStatusAndHideInternalDetails(t *testing.T) {
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{apperrors.NewNotFound("Item", "one"), 404, "NOT_FOUND"},
+		{apperrors.NewAlreadyExists("Item", "one"), 409, "ALREADY_EXISTS"},
+		{apperrors.NewDuplicateEntry("Item", "name", "one"), 409, "DUPLICATE_ENTRY"},
+		{apperrors.NewReadOnly("Item"), 403, "READ_ONLY"},
+		{apperrors.NewValidation("invalid"), 422, "VALIDATION_FAILED"},
+		{apperrors.New(apperrors.AuthRequired, "Authentication required"), 401, "AUTH_REQUIRED"},
+		{apperrors.New(apperrors.PermissionDenied, "denied"), 403, "PERMISSION_DENIED"},
+		{apperrors.New(apperrors.ForeignKeyViolation, "reference"), 409, "FOREIGN_KEY_VIOLATION"},
+		{apperrors.New(apperrors.ConstraintViolation, "constraint"), 409, "CONSTRAINT_VIOLATION"},
+		{apperrors.New(apperrors.RateLimited, "retry"), 429, "RATE_LIMITED"},
+		{apperrors.NewDependencyUnavailable("upstream"), 503, "DEPENDENCY_UNAVAILABLE"},
+		{apperrors.New(apperrors.DatabaseUnavailable, "connection"), 503, "DATABASE_UNAVAILABLE"},
+		{apperrors.New(apperrors.DatabaseTimeout, "deadline"), 503, "DATABASE_TIMEOUT"},
+		{apperrors.NewInternal(errors.New("private connection secret")), 500, "INTERNAL_ERROR"},
+		{errors.New("private connection secret"), 500, "INTERNAL_ERROR"},
+	}
+	for _, tc := range cases {
+		recorder := httptest.NewRecorder()
+		recorder.Header().Set("X-Request-Id", "req-1")
+		apperrors.Write(recorder, httptest.NewRequest(http.MethodGet, "/", nil), tc.err)
+		if recorder.Code != tc.status {
+			t.Fatalf("%v: status %d, want %d", tc.err, recorder.Code, tc.status)
+		}
+		if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+			t.Fatalf("content type %q", got)
+		}
+		text := recorder.Body.String()
+		if strings.Contains(text, "private connection secret") {
+			t.Fatalf("internal detail leaked: %s", text)
+		}
+		var body map[string]map[string]any
+		if err := json.Unmarshal([]byte(text), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["error"]["code"] != tc.code || body["error"]["correlation_id"] != "req-1" {
+			t.Fatalf("envelope %v", body)
+		}
+		if _, ok := body["error"]["context"].(map[string]any); !ok {
+			t.Fatalf("context must be an object: %v", body)
+		}
+	}
+	if apperrors.InvalidInput.Status() != 422 {
+		t.Fatal("INVALID_INPUT must map to 422")
+	}
+}
+
+func TestEnvelopeContextDefaultsToObject(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	apperrors.Write(recorder, httptest.NewRequest(http.MethodGet, "/", nil), &apperrors.Error{Code: apperrors.NotFound, Message: "gone"})
+	if !strings.Contains(recorder.Body.String(), `"context":{}`) {
+		t.Fatalf("context must serialize as an object: %s", recorder.Body.String())
+	}
+}
+
+func TestDatabaseFailuresMapToPublicContract(t *testing.T) {
+	cases := []struct {
+		err  error
+		code apperrors.Code
+	}{
+		{pgx.ErrNoRows, apperrors.NotFound},
+		{fmt.Errorf("query: %w", context.DeadlineExceeded), apperrors.DatabaseTimeout},
+		{&pgconn.ConnectError{}, apperrors.DatabaseUnavailable},
+		{&pgconn.PgError{Code: "23505"}, apperrors.DuplicateEntry},
+		{&pgconn.PgError{Code: "23503"}, apperrors.ForeignKeyViolation},
+		{&pgconn.PgError{Code: "23514"}, apperrors.ConstraintViolation},
+		{&pgconn.PgError{Code: "42P01"}, apperrors.InternalError},
+		{errors.New("private"), apperrors.InternalError},
+	}
+	for _, tc := range cases {
+		if got := apperrors.FromDatabase(tc.err).Code; got != tc.code {
+			t.Fatalf("%T: %s, want %s", tc.err, got, tc.code)
+		}
+	}
+	internal := apperrors.NewInternal(errors.New("cause"))
+	if !errors.Is(internal, internal.Unwrap()) || internal.Error() != "internal error" {
+		t.Fatal("internal errors keep their cause")
+	}
+	if apperrors.As(internal) != internal {
+		t.Fatal("As returns application errors unchanged")
+	}
+}

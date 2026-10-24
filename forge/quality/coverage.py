@@ -134,7 +134,9 @@ def changed_lines(root: Path, base_ref: str) -> dict[str, set[int]]:
 def source_inventory(root: Path, subject_path: str) -> set[str]:
     base = project_path(root, subject_path)
     result: set[str] = set()
-    for source in (base / "src", base / "lib"):
+    # Go packages live anywhere under the module root (cmd/, internal/, ...).
+    sources = (base,) if (base / "go.mod").is_file() else (base / "src", base / "lib")
+    for source in sources:
         if not source.is_dir():
             continue
         for path in source.rglob("*"):
@@ -145,14 +147,25 @@ def source_inventory(root: Path, subject_path: str) -> set[str]:
                 and not set(rel.parts) & IGNORED
                 and not set(rel.parts) & {"tests", "test", "__tests__"}
                 and not any(x in path.name for x in (".test.", ".spec.", ".d.ts"))
+                and not path.name.endswith("_test.go")
                 and has_executable_source(path)
             ):
                 result.add(path.relative_to(root).as_posix())
     return result
 
 
+# Go coverage counts statements inside function bodies only. gofmt puts every
+# top-level func at column zero; an empty body ({}) holds no statement.
+_GO_FUNCTION_BODY = re.compile(
+    r"^(?:func\b|.*=\s*func\s*\().*\{(?!\s*\}\s*(?://.*)?$)", re.MULTILINE
+)
+
+
 def has_executable_source(path: Path) -> bool:
-    """LLVM omits declaration-only Rust files: those have no coverage denominator."""
+    """LLVM omits declaration-only Rust files and Go omits files without
+    functions: those have no coverage denominator."""
+    if path.suffix == ".go":
+        return bool(_GO_FUNCTION_BODY.search(path.read_text(encoding="utf-8")))
     if path.suffix != ".rs":
         return True
     import tree_sitter_rust

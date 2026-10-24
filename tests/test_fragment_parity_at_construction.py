@@ -30,6 +30,7 @@ class TestTier1Validation:
                 BackendLanguage.PYTHON: _impl(),
                 BackendLanguage.NODE: _impl(),
                 BackendLanguage.RUST: _impl(),
+                BackendLanguage.GO: _impl(),
             },
         )
 
@@ -104,6 +105,7 @@ class TestAutoDerivationUnaffected:
                 BackendLanguage.PYTHON: _impl(),
                 BackendLanguage.NODE: _impl(),
                 BackendLanguage.RUST: _impl(),
+                BackendLanguage.GO: _impl(),
             },
         )
         assert frag.parity_tier == 1
@@ -114,3 +116,37 @@ class TestAutoDerivationUnaffected:
             implementations={BackendLanguage.PYTHON: _impl()},
         )
         assert frag.parity_tier == 3
+
+
+class TestLegacyTierOne:
+    """Fragments written before Go became a built-in keep loading (until 1.3)."""
+
+    _LEGACY = (BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST)
+
+    def test_explicit_tier_1_without_go_warns_instead_of_raising(self) -> None:
+        with pytest.warns(DeprecationWarning, match="without a Go implementation"):
+            frag = Fragment(
+                name="demo_legacy_t1",
+                parity_tier=1,
+                implementations={lang: _impl() for lang in self._LEGACY},
+            )
+        assert frag.parity_tier == 1
+
+    def test_auto_tier_without_go_stays_tier_1_with_a_warning(self) -> None:
+        with pytest.warns(DeprecationWarning, match="declare parity_tier=2"):
+            frag = Fragment(
+                name="demo_legacy_auto", implementations={lang: _impl() for lang in self._LEGACY}
+            )
+        assert frag.parity_tier == 1
+
+    def test_tier_1_missing_another_backend_still_raises(self) -> None:
+        with pytest.raises(FragmentError, match="missing implementations"):
+            Fragment(
+                name="demo_t1_no_rust",
+                parity_tier=1,
+                implementations={
+                    BackendLanguage.PYTHON: _impl(),
+                    BackendLanguage.NODE: _impl(),
+                    BackendLanguage.GO: _impl(),
+                },
+            )

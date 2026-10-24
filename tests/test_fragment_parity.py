@@ -2,7 +2,7 @@
 
 Each registered fragment must satisfy the tier/implementation contract:
 
-- tier 1 ⇒ every built-in backend (Python, Node, Rust) has an impl.
+- tier 1 ⇒ every built-in backend (Python, Node, Rust, Go) has an impl.
 - tier 3 ⇒ only Python has an impl.
 - tier 2 ⇒ the residual (some subset, but not tier 1 or tier 3).
 
@@ -24,7 +24,7 @@ import pytest
 from forge.config import BackendLanguage
 from forge.fragments import FRAGMENT_REGISTRY, Fragment
 
-BUILT_INS = {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST}
+BUILT_INS = set(BackendLanguage)
 
 
 def _built_in_impl_langs(fragment: Fragment) -> set[BackendLanguage]:

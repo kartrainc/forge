@@ -315,8 +315,9 @@ def _validate_reads_options(fragment_names: set[str]) -> None:
 # languages. A user-selected value with no compatible project backend
 # hard-errors at config time instead of silently emitting the abstract port
 # with no adapter (a service that starts, then fails at the first call).
-# ``openai`` is intentionally absent: its TS (``@ai-sdk/openai``) and Rust
-# (``async-openai``) SDKs are real, so it stays valid on every backend.
+# ``openai`` is intentionally absent: its TS (``@ai-sdk/openai``), Rust
+# (``async-openai``) and Go (``openai-go``) adapters are real, so it stays
+# valid on every backend.
 _VALUE_REQUIRES_BACKEND: dict[tuple[str, object], frozenset[BackendLanguage]] = {
     ("llm.provider", "anthropic"): frozenset({BackendLanguage.PYTHON}),
     ("llm.provider", "ollama"): frozenset({BackendLanguage.PYTHON}),
@@ -329,6 +330,7 @@ _VALUE_REQUIRES_BACKEND: dict[tuple[str, object], frozenset[BackendLanguage]] = 
     ("queue.backend", "sqs"): frozenset({BackendLanguage.PYTHON}),
     ("queue.backend", "bullmq"): frozenset({BackendLanguage.NODE}),
     ("queue.backend", "apalis"): frozenset({BackendLanguage.RUST}),
+    ("queue.backend", "asynq"): frozenset({BackendLanguage.GO}),
 }
 
 # Options where EVERY "active" (non-none / non-false) value is Python-only in
@@ -341,8 +343,8 @@ _PYTHON_ONLY_WHEN_ACTIVE: dict[str, frozenset[BackendLanguage]] = {
     "platform.mcp": frozenset({BackendLanguage.PYTHON}),
     # agent.mode (llm_only/tool_calling/multi_agent) fans out almost entirely to
     # Python-only fragments (agent, agent_streaming, agent_tools,
-    # conversation_persistence, mcp_server, mcp_ui) plus the tri-language
-    # llm_port. On a Node/Rust-only project it would silently resolve to just
+    # conversation_persistence, mcp_server, mcp_ui) plus the multi-language
+    # llm_port. On a Node/Rust/Go-only project it would silently resolve to just
     # llm_port — the requested agent capability missing, and a frontend chat
     # base-url pointing at an endpoint never generated. 'none' is inactive via
     # _INACTIVE_VALUES. (audit #16)

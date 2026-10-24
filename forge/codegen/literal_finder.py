@@ -51,7 +51,9 @@ into an :class:`forge.options.Option` declaration. ``list`` / ``dict`` /
 shape we can't safely promote without more user intent.
 """
 
-SupportedLanguage = Literal["python", "typescript", "rust"]
+# Go has no literal-level walker: its snippets fall back to the
+# needs-review rule.
+SupportedLanguage = Literal["python", "typescript", "rust", "go"]
 
 
 @dataclass(frozen=True)

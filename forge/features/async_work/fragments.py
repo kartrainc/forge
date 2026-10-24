@@ -1,7 +1,7 @@
 """Async/background-work fragments — off-thread job processing.
 
 ``background_tasks`` ships a per-backend job queue: TaskIQ on Python,
-BullMQ on Node, Apalis on Rust — all backed by Redis so the
+BullMQ on Node, Apalis on Rust, asynq on Go — all backed by Redis so the
 ``capabilities=("redis",)`` registration triggers a Redis sidecar in
 docker-compose.
 
@@ -19,6 +19,10 @@ from forge.config import BackendLanguage
 from forge.fragments._spec import Fragment, FragmentImplSpec
 
 _TEMPLATES = Path(__file__).resolve().parent / "templates"
+
+_GO_ASYNQ = "github.com/hibiken/asynq@v0.26.0"
+# Test-only: the Go suites fall back to miniredis when REDIS_URL is unset.
+_GO_MINIREDIS = "github.com/alicebob/miniredis/v2@v2.40.0"
 
 
 def _impl(name: str, lang: str) -> str:
@@ -47,6 +51,11 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.RUST: FragmentImplSpec(
                     fragment_dir=_impl("background_tasks", "rust"),
                     dependencies=("apalis@0.7.4", "apalis-redis@0.7.4"),
+                    env_vars=(("TASKIQ_BROKER_URL", "redis://redis:6379/2"),),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("background_tasks", "go"),
+                    dependencies=(_GO_ASYNQ, _GO_MINIREDIS),
                     env_vars=(("TASKIQ_BROKER_URL", "redis://redis:6379/2"),),
                 ),
             },
@@ -81,6 +90,9 @@ def register_all(api: ForgeAPI) -> None:
                         'serde_json = "1.0.151"',
                         'thiserror = "2.0.21"',
                     ),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("queue_port", "go"),
                 ),
             },
         )
@@ -148,6 +160,23 @@ def register_all(api: ForgeAPI) -> None:
                         'tokio = { version = "1.53.2", features = ["sync", "time"] }',
                         'uuid = { version = "1.27.0", features = ["v4"] }',
                     ),
+                    env_vars=(("TASKIQ_BROKER_URL", "redis://redis:6379/2"),),
+                ),
+            },
+        )
+    )
+
+    api.add_fragment(
+        Fragment(
+            name="queue_asynq",
+            # Asynq adapter for Go, the counterpart of queue_bullmq (Node) and
+            # queue_apalis (Rust): language-specific by design (RFC-012).
+            depends_on=("queue_port",),
+            capabilities=("redis",),
+            implementations={
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("queue_asynq", "go"),
+                    dependencies=(_GO_ASYNQ, _GO_MINIREDIS),
                     env_vars=(("TASKIQ_BROKER_URL", "redis://redis:6379/2"),),
                 ),
             },

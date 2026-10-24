@@ -37,9 +37,10 @@ def test_auth_mode_option_registered() -> None:
     opt = OPTION_REGISTRY["auth.mode"]
     assert opt.default == "generate"
     assert opt.options == ("generate", "none")
-    # Provider-discriminator split: auth.mode=generate now enables the 10
+    # Provider-discriminator split: auth.mode=generate now enables the 11
     # issuer-agnostic auth fragments (3 SDKs + 3 frontend session-timeout +
-    # 3 backend middleware + 1 tenant-context). The 2 gatekeeper fragments
+    # 4 backend middleware + 1 tenant-context; the Go middleware pulls in
+    # platform_auth_sdk_go through depends_on). The 2 gatekeeper fragments
     # moved to auth.provider=gatekeeper (the default), so the resolved set is
     # unchanged for a default auth.mode=generate project (golden-verified).
     enabled = opt.enables["generate"]
@@ -52,12 +53,13 @@ def test_auth_mode_option_registered() -> None:
     assert "platform_auth_python_middleware" in enabled
     assert "platform_auth_node_middleware" in enabled
     assert "platform_auth_rust_middleware" in enabled
+    assert "platform_auth_go_middleware" in enabled
     assert "platform_auth_tenant_context" in enabled
     # Gatekeeper is the issuer — now selected by auth.provider, NOT auth.mode.
     assert "platform_auth_gatekeeper" not in enabled
     assert "platform_auth_gatekeeper_keygen" not in enabled
-    assert len(enabled) == 10, (
-        f"auth.mode=generate should enable the 10 issuer-agnostic auth "
+    assert len(enabled) == 11, (
+        f"auth.mode=generate should enable the 11 issuer-agnostic auth "
         f"fragments after the provider split; got {len(enabled)}: {enabled}"
     )
     provider = OPTION_REGISTRY["auth.provider"]

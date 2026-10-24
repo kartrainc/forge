@@ -1,0 +1,85 @@
+package routes
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/services"
+)
+
+// registerWebhooks mounts /api/v1/webhooks: list, create, delete and a signed
+// test delivery. Every operation is scoped to the caller's tenant.
+func registerWebhooks(router chi.Router) {
+	webhooks := services.DefaultWebhookService()
+	router.Get("/", handle(func(w http.ResponseWriter, r *http.Request) error {
+		ident, err := webhookIdentity(r)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusOK, map[string]any{"webhooks": webhooks.List(ident)})
+	}))
+	router.Post("/", handle(func(w http.ResponseWriter, r *http.Request) error {
+		ident, err := webhookIdentity(r)
+		if err != nil {
+			return err
+		}
+		var body services.WebhookCreate
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+		webhook, err := webhooks.Create(ident, body)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusCreated, webhook)
+	}))
+	router.Delete("/{id}", handle(func(w http.ResponseWriter, r *http.Request) error {
+		ident, id, err := webhookTarget(r)
+		if err != nil {
+			return err
+		}
+		if err := webhooks.Delete(ident, id); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}))
+	router.Post("/{id}/test", handle(func(w http.ResponseWriter, r *http.Request) error {
+		ident, id, err := webhookTarget(r)
+		if err != nil {
+			return err
+		}
+		webhook, err := webhooks.Get(ident, id)
+		if err != nil {
+			return err
+		}
+		result := webhooks.Deliver(r.Context(), webhook, "webhook.test", map[string]string{"message": "forge webhook test"})
+		return writeJSON(w, http.StatusOK, result)
+	}))
+}
+
+// webhookIdentity fails closed: webhook URLs and secrets are tenant-owned
+// credentials, so a request without a bound identity is rejected.
+func webhookIdentity(r *http.Request) (identity.IdentityContext, error) {
+	ident, ok := identity.FromContext(r.Context())
+	if !ok {
+		return ident, apperrors.New(apperrors.AuthRequired, "authentication required")
+	}
+	return ident, nil
+}
+
+func webhookTarget(r *http.Request) (identity.IdentityContext, uuid.UUID, error) {
+	ident, err := webhookIdentity(r)
+	if err != nil {
+		return ident, uuid.Nil, err
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		return ident, uuid.Nil, apperrors.New(apperrors.InvalidInput, "'id' must be a UUID")
+	}
+	return ident, id, nil
+}

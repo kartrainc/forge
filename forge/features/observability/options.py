@@ -21,12 +21,13 @@ def register_all(api: ForgeAPI) -> None:
 Distributed tracing + structured logs wired out of the box. Python uses
 Logfire (which exports OTLP under the hood); Node uses @opentelemetry
 auto-instrumentations for HTTP / DB / Fastify spans; Rust uses
-tracing-opentelemetry + OTLP gRPC. All three honour the same OTel
+tracing-opentelemetry + OTLP gRPC; Go uses otelhttp + OTLP/HTTP and adds
+trace_id/span_id to slog records. All four honour the same OTel
 semantic-convention service name so your tracing backend (Jaeger,
 Tempo, Honeycomb, Datadog APM, Logfire) sees one service-map across
 languages.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 REQUIRES: OTEL_EXPORTER_OTLP_ENDPOINT (or LOGFIRE_TOKEN on Python).""",
             category=FeatureCategory.OBSERVABILITY,
             enables={True: ("observability",)},
@@ -46,7 +47,7 @@ reachability. Each dependency reports individually so an orchestrator
 (Kubernetes readiness gate, load balancer) sees which specific
 downstream is down rather than an opaque 503.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: /health (replaces the shallow default)
 REQUIRES: REDIS_URL, KEYCLOAK_HEALTH_URL.""",
             category=FeatureCategory.OBSERVABILITY,
@@ -77,7 +78,7 @@ existing strip mechanism (follow-up — until the strip lands, ``False``
 is equivalent to ``True`` minus the port adapter on Python; a node /
 rust strip pass is pending).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 PORT: ``ErrorPort.serialize(exc) -> {error: {code, message, type, context, correlation_id}}``""",
             category=FeatureCategory.OBSERVABILITY,
             enables={True: ("error_port",)},
@@ -98,11 +99,12 @@ and the service runs without a collector). Python emits ``app/core/otel.py``
 OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK +
 ``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust emits
 ``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
-HTTP/protobuf). Spans of interest for agentic workloads: ``agent.run`` (per
-agent invocation), ``tool.call`` (per tool invocation).
+HTTP/protobuf); Go emits ``internal/otel`` (otelhttp server spans named by
+chi route, OTLP/HTTP exporter). Spans of interest for agentic workloads:
+``agent.run`` (per agent invocation), ``tool.call`` (per tool invocation).
 
-BACKENDS: python, node, rust
-DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry
+BACKENDS: python, node, rust, go
+DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / otlptracehttp / otelhttp
 ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES).""",
             category=FeatureCategory.OBSERVABILITY,
             enables={True: ("observability_otel", "observability_metrics_middleware")},

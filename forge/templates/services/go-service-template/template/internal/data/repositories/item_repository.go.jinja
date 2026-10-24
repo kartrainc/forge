@@ -1,0 +1,166 @@
+// Package repositories holds the persistence contracts and their pgx
+// implementations.
+//
+// Every method is tenant-scoped: implementations add a
+// customer_id = identity.TenantID predicate to every query. Services depend on
+// the interface, so unit tests substitute an in-memory implementation.
+package repositories
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/models"
+)
+
+// ItemRepository is the persistence contract for the items table.
+type ItemRepository interface {
+	List(ctx context.Context, ident identity.IdentityContext, params models.ListParams) (models.Page[models.Item], error)
+	GetByID(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) (*models.Item, error)
+	FindByName(ctx context.Context, ident identity.IdentityContext, name string) (*models.Item, error)
+	FindByNameExcluding(ctx context.Context, ident identity.IdentityContext, name string, exclude uuid.UUID) (*models.Item, error)
+	Create(ctx context.Context, ident identity.IdentityContext, data models.CreateItem) (*models.Item, error)
+	Update(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID, data models.UpdateItem) (*models.Item, error)
+	Delete(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) error
+}
+
+const itemColumns = "id, name, description, tags, status, customer_id, user_id, created_at, updated_at"
+
+// PgItemRepository is the PostgreSQL implementation.
+type PgItemRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewPgItemRepository(pool *pgxpool.Pool) *PgItemRepository {
+	return &PgItemRepository{pool: pool}
+}
+
+func (r *PgItemRepository) List(ctx context.Context, ident identity.IdentityContext, params models.ListParams) (models.Page[models.Item], error) {
+	where, args := filter(ident, params)
+	var total int64
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM items"+where, args...).Scan(&total); err != nil {
+		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
+	}
+	args = append(args, params.Limit, params.Skip)
+	query := fmt.Sprintf("SELECT %s FROM items%s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
+		itemColumns, where, len(args)-1, len(args))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
+	}
+	items, err := pgx.CollectRows(rows, scanItem)
+	if err != nil {
+		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
+	}
+	return models.Page[models.Item]{
+		Items:   items,
+		Total:   total,
+		Skip:    params.Skip,
+		Limit:   params.Limit,
+		HasMore: params.Skip+params.Limit < total,
+	}, nil
+}
+
+func (r *PgItemRepository) GetByID(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) (*models.Item, error) {
+	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID)
+}
+
+func (r *PgItemRepository) FindByName(ctx context.Context, ident identity.IdentityContext, name string) (*models.Item, error) {
+	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2", name, ident.TenantID)
+}
+
+func (r *PgItemRepository) FindByNameExcluding(ctx context.Context, ident identity.IdentityContext, name string, exclude uuid.UUID) (*models.Item, error) {
+	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2 AND id <> $3", name, ident.TenantID, exclude)
+}
+
+func (r *PgItemRepository) Create(ctx context.Context, ident identity.IdentityContext, data models.CreateItem) (*models.Item, error) {
+	tags := data.Tags
+	if tags == nil {
+		tags = json.RawMessage("[]")
+	}
+	status := "DRAFT"
+	if data.Status != nil {
+		status = *data.Status
+	}
+	userID, _ := uuid.Parse(ident.Subject)
+	return r.one(ctx, "INSERT INTO items (name, description, tags, status, customer_id, user_id) "+
+		"VALUES ($1, $2, $3, $4, $5, $6) RETURNING "+itemColumns,
+		data.Name, data.Description, tags, status, ident.TenantID, userID)
+}
+
+func (r *PgItemRepository) Update(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID, data models.UpdateItem) (*models.Item, error) {
+	sets, args := []string{}, []any{}
+	add := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	if data.Name != nil {
+		add("name", *data.Name)
+	}
+	if data.Description != nil {
+		add("description", *data.Description)
+	}
+	if data.Tags != nil {
+		add("tags", data.Tags)
+	}
+	if data.Status != nil {
+		add("status", *data.Status)
+	}
+	args = append(args, itemID, ident.TenantID)
+	query := fmt.Sprintf("UPDATE items SET %s WHERE id = $%d AND customer_id = $%d RETURNING %s",
+		strings.Join(append(sets, "updated_at = NOW()"), ", "), len(args)-1, len(args), itemColumns)
+	return r.one(ctx, query, args...)
+}
+
+func (r *PgItemRepository) Delete(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) error {
+	if _, err := r.pool.Exec(ctx, "DELETE FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID); err != nil {
+		return apperrors.FromDatabase(err)
+	}
+	return nil
+}
+
+func (r *PgItemRepository) one(ctx context.Context, query string, args ...any) (*models.Item, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, apperrors.FromDatabase(err)
+	}
+	item, err := pgx.CollectExactlyOneRow(rows, scanItem)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, apperrors.FromDatabase(err)
+	}
+	return &item, nil
+}
+
+func scanItem(row pgx.CollectableRow) (models.Item, error) {
+	var item models.Item
+	err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Tags, &item.Status,
+		&item.CustomerID, &item.UserID, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+// filter builds the tenant and list predicates shared by the count and row
+// queries. Only fixed SQL fragments are concatenated; values stay parameters.
+func filter(ident identity.IdentityContext, params models.ListParams) (string, []any) {
+	clauses, args := []string{"customer_id = $1"}, []any{ident.TenantID}
+	if params.Status != "" {
+		args = append(args, params.Status)
+		clauses = append(clauses, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if params.Search != "" {
+		args = append(args, "%"+params.Search+"%")
+		clauses = append(clauses, fmt.Sprintf("(name ILIKE $%d OR description ILIKE $%d)", len(args), len(args)))
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
+}

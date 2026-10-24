@@ -1,0 +1,96 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+
+	"{{ project_name }}/internal/worker"
+)
+
+func TestWorkerBrokerURL(t *testing.T) {
+	t.Setenv("TASKIQ_BROKER_URL", "")
+	if worker.BrokerURL() != worker.DefaultBrokerURL {
+		t.Fatal("default broker url")
+	}
+	t.Setenv("TASKIQ_BROKER_URL", "redis://example:6379/5")
+	if worker.BrokerURL() != "redis://example:6379/5" {
+		t.Fatal("TASKIQ_BROKER_URL wins")
+	}
+	if _, err := worker.NewClient("http://not-redis"); err == nil {
+		t.Fatal("non-redis urls are rejected")
+	}
+}
+
+func TestHelloTaskRoundTrip(t *testing.T) {
+	task, err := worker.NewHelloTask(worker.HelloJob{Name: "forge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job worker.HelloJob
+	if task.Type() != worker.TypeHello || json.Unmarshal(task.Payload(), &job) != nil || job.Name != "forge" {
+		t.Fatalf("task %s %s", task.Type(), task.Payload())
+	}
+	mux := worker.Mux()
+	if err := mux.ProcessTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	broken := asynq.NewTask(worker.TypeHello, []byte("not json"))
+	if err := worker.HandleHello(context.Background(), broken); !errors.Is(err, asynq.SkipRetry) {
+		t.Fatalf("a malformed payload is not retried: %v", err)
+	}
+	if err := mux.ProcessTask(context.Background(), asynq.NewTask("unknown", nil)); err == nil {
+		t.Fatal("unknown task types fail")
+	}
+}
+
+func TestWorkerRunRejectsBadBroker(t *testing.T) {
+	if err := worker.Run(context.Background(), "http://not-redis"); err == nil {
+		t.Fatal("an invalid broker url fails")
+	}
+	if err := worker.Run(context.Background(), "redis://127.0.0.1:1/0"); err == nil {
+		t.Fatal("an unreachable broker fails at startup")
+	}
+}
+
+func TestWorkerRunProcessesJobs(t *testing.T) {
+	url := "redis://" + miniredis.RunT(t).Addr() + "/0"
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx, url) }()
+
+	client, err := worker.NewClient(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	task, _ := worker.NewHelloTask(worker.HelloJob{Name: "unit"})
+	id := uuid.NewString()
+	if _, err := client.Enqueue(task, asynq.TaskID(id)); err != nil {
+		t.Fatal(err)
+	}
+	redis, _ := asynq.ParseRedisURI(url)
+	inspector := asynq.NewInspector(redis)
+	defer inspector.Close()
+	processed := false
+	for range 200 {
+		if _, err := inspector.GetTaskInfo(worker.Queue, id); errors.Is(err, asynq.ErrTaskNotFound) {
+			processed = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !processed {
+		t.Fatal("the hello job was not processed")
+	}
+}

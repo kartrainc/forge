@@ -481,3 +481,52 @@ scenarios:
         queue.backend: apalis
         reliability.cache: memory
         platform.webhooks: true
+
+  - name: go_svelte_min
+    description: Go + Svelte, no auth, no options
+    lanes: [generate, verify, smoke, roundtrip]
+    port_base: 8200
+    expected_files:
+      - services/api/go.mod
+      - apps/frontend/package.json
+      - docker-compose.yml
+    config:
+      project_name: "Go Svelte Min"
+      include_keycloak: false
+      backends:
+        - name: api
+          language: go
+          features: ["items"]
+          server_port: 8200
+          go_version: "1.27"
+      frontend:
+        framework: svelte
+        include_auth: false
+        server_port: 5185
+
+  - name: go_ports
+    description: >-
+      Go-only headless service with every Go port adapter on one backend:
+      llm.provider=openai, queue=asynq, memory cache, webhooks, rate limit
+      and OTel.
+    lanes: [generate, verify, roundtrip, update]
+    port_base: 8210
+    expected_files:
+      - services/api/go.mod
+      - docker-compose.yml
+    config:
+      project_name: "Go Ports"
+      include_keycloak: false
+      backends:
+        - name: api
+          language: go
+          features: ["items"]
+          server_port: 8210
+          go_version: "1.27"
+      options:
+        middleware.rate_limit: true
+        observability.otel: true
+        llm.provider: openai
+        queue.backend: asynq
+        reliability.cache: memory
+        platform.webhooks: true

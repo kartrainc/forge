@@ -23,9 +23,11 @@ Each service can specify `language`, `latency_ms`, `features`, `options`, and
 rejected with a capability explanation; they are never silently replaced.
 
 The deterministic policy prefers Rust for CPU-intensive processing, Python
-for AI/ML/RAG, and Node/TypeScript for communication-heavy I/O. Existing
-runtime investments and team expertise affect the score. Library and Forge
-capability requirements are hard constraints, evaluated for each service.
+for AI/ML/RAG, and Node/TypeScript for communication-heavy I/O. Go is a
+candidate for every workload but only wins through the existing stack, team
+languages or an explicit choice. Existing runtime investments and team
+expertise affect the score. Library and Forge capability requirements are
+hard constraints, evaluated for each service.
 
 Calling a remote LLM does not itself require Python. CPU-bound JavaScript can
 use worker pools; Python can delegate numeric work to native/GPU libraries.

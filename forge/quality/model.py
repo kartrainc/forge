@@ -17,12 +17,25 @@ from forge.config._frontend import resolve_frontend_framework
 
 RECIPE = ".forge/quality.json"
 Ownership = Literal["generated", "scaffold", "user"]
-SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".dart", ".vue", ".svelte"}
+SOURCE_SUFFIXES = {
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".rs",
+    ".go",
+    ".dart",
+    ".vue",
+    ".svelte",
+}
 IGNORED = {
     ".git",
     ".venv",
     "node_modules",
     "target",
+    "vendor",
+    "testdata",
     "dist",
     "build",
     "__pycache__",
@@ -68,9 +81,13 @@ def ownership(
     p = PurePosixPath(path)
     if origin == "user":
         return "user"
-    if any(
-        part in {"tests", "test", "docs", "migrations", "alembic", "custom"} for part in p.parts
-    ) or any(marker in p.name for marker in (".test.", ".spec.")):
+    if (
+        any(
+            part in {"tests", "test", "docs", "migrations", "alembic", "custom"} for part in p.parts
+        )
+        or any(marker in p.name for marker in (".test.", ".spec."))
+        or p.name.endswith("_test.go")
+    ):
         return "scaffold"
     if p.suffix not in SOURCE_SUFFIXES:
         return "scaffold"
@@ -231,6 +248,8 @@ def subjects(config: ProjectConfig, root: Path | None = None) -> list[dict]:
             if b.language.value == "python"
             else b.node_version
             if b.language.value == "node"
+            else b.go_version
+            if b.language.value == "go"
             else "stable",
         }
         for b in config.backends
@@ -262,6 +281,7 @@ def subjects(config: ProjectConfig, root: Path | None = None) -> list[dict]:
                     ("pyproject.toml", "python"),
                     ("package.json", "node"),
                     ("Cargo.toml", "rust"),
+                    ("go.mod", "go"),
                     ("pubspec.yaml", "flutter"),
                 ):
                     if (package / manifest).is_file():

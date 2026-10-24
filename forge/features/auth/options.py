@@ -34,13 +34,13 @@ Layer discriminator for the authentication subsystem. ``generate`` ships
 the platform-auth model end-to-end:
 
 - Per-language verifier SDKs at ``<project>/packages/platform-auth*/``
-  (Python / Node / Rust). Each ships ``AuthGuard``, ``IdentityContext``,
+  (Python / Node / Rust / Go). Each ships ``AuthGuard``, ``IdentityContext``,
   multi-issuer ``JWKSCache`` with stale-serve, ``MayActPolicy`` (RFC 8693),
   ``IssuerTrustMap``, ``RevocationStore``, scope-matching with wildcards,
   test-token minter. Cross-language correctness gated by the shared
   17-scenario parity spec at ``forge/tests/contract/auth_sdk_parity/``.
 - Per-language service-template middleware that wires the SDK into
-  FastAPI / Fastify / Axum: single-pass verification, request-state
+  FastAPI / Fastify / Axum / net/http: single-pass verification, request-state
   binding, RFC 7807 problem-response error mapping, identical
   ``/health`` / ``/metrics`` / ``/docs`` skip-list across all three
   backends.
@@ -60,7 +60,7 @@ existing 1.1.x projects across the cutover.
 ``none`` skips the auth stack entirely — useful for stateless
 internal-only services running behind a trusted boundary.
 
-BACKENDS: python + node + rust (SDKs + middleware are tier-1).
+BACKENDS: python + node + rust + go (SDKs + middleware are tier-1).
 ENDPOINTS: none directly — the SDKs are libraries; service templates
 wire them into request middleware.
 REQUIRES: Keycloak realm (existing) for the human-login flow;
@@ -112,6 +112,8 @@ Gatekeeper container (Phase 2 cutover) to mint internal JWTs.""",
                     # ``app.rs`` adds the ``axum::middleware::from_fn``
                     # auth_middleware layer.
                     "platform_auth_rust_middleware",
+                    # Go service middleware; pulls in platform_auth_sdk_go.
+                    "platform_auth_go_middleware",
                     # The token issuer (Gatekeeper / OIDC / in-memory) is no
                     # longer part of this bundle — it is selected by the
                     # ``auth.provider`` sub-discriminator below so the SDK +

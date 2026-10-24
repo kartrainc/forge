@@ -1,0 +1,103 @@
+package unit_test
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"{{ project_name }}/internal/middleware"
+)
+
+func TestRecoverWritesEnvelopeOnPanic(t *testing.T) {
+	handler := middleware.Correlation(middleware.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(middleware.RequestIDHeader, "req-9")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusInternalServerError ||
+		!strings.Contains(recorder.Body.String(), `"code":"INTERNAL_ERROR"`) ||
+		!strings.Contains(recorder.Body.String(), `"correlation_id":"req-9"`) {
+		t.Fatalf("panic response: %d %s", recorder.Code, recorder.Body.String())
+	}
+	aborting := middleware.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}))
+	defer func() {
+		if recover() != http.ErrAbortHandler {
+			t.Fatal("ErrAbortHandler must propagate")
+		}
+	}()
+	aborting.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
+func TestBodyLimitRejectsOversizedBodies(t *testing.T) {
+	handler := middleware.BodyLimit(4)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		}
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("too large")))
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d", recorder.Code)
+	}
+}
+
+func TestCorrelationKeepsOrMintsRequestIDs(t *testing.T) {
+	var seen string
+	handler := middleware.Correlation(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = middleware.RequestID(r.Context())
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(middleware.RequestIDHeader, "given")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if seen != "given" || recorder.Header().Get(middleware.RequestIDHeader) != "given" {
+		t.Fatalf("kept id %q / %q", seen, recorder.Header().Get(middleware.RequestIDHeader))
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if len(seen) != 36 || recorder.Header().Get(middleware.RequestIDHeader) != seen {
+		t.Fatalf("minted id %q", seen)
+	}
+}
+
+func TestCORS(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	send := func(options middleware.CORSOptions, method, origin string, preflight bool) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, "/", nil)
+		if origin != "" {
+			request.Header.Set("Origin", origin)
+		}
+		if preflight {
+			request.Header.Set("Access-Control-Request-Method", "POST")
+		}
+		recorder := httptest.NewRecorder()
+		middleware.CORS(options)(ok).ServeHTTP(recorder, request)
+		return recorder
+	}
+	wildcard := middleware.CORSOptions{Enabled: true, AllowOrigins: []string{"*"}, MaxAge: 600}
+	if got := send(wildcard, http.MethodGet, "https://a.example", false).Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("wildcard origin %q", got)
+	}
+	preflight := send(wildcard, http.MethodOptions, "https://a.example", true)
+	if preflight.Code != http.StatusNoContent || preflight.Header().Get("Access-Control-Max-Age") != "600" {
+		t.Fatalf("preflight %d %v", preflight.Code, preflight.Header())
+	}
+	credentials := middleware.CORSOptions{Enabled: true, AllowOrigins: []string{"https://a.example"}, AllowCredentials: true}
+	response := send(credentials, http.MethodGet, "https://a.example", false)
+	if response.Header().Get("Access-Control-Allow-Origin") != "https://a.example" ||
+		response.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("credentialed origin %v", response.Header())
+	}
+	if send(credentials, http.MethodGet, "https://evil.example", false).Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("unlisted origins get no CORS headers")
+	}
+	if send(middleware.CORSOptions{}, http.MethodOptions, "https://a.example", true).Code != http.StatusOK {
+		t.Fatal("disabled CORS passes through")
+	}
+}

@@ -1,0 +1,9 @@
+# rate_limit for Go: in-memory token bucket keyed by tenant or client IP.
+# Inserted after the registration marker so it is the innermost cross-cutting
+# middleware: security headers, tracing and auth (identity) wrap it, and
+# rate-limited responses still carry the correlation id.
+
+- target: internal/app/app.go
+  marker: FORGE:MIDDLEWARE_REGISTRATION
+  position: after
+  snippet: "middleware.RateLimit(middleware.RateLimitOptions{RequestsPerMinute: 120}),"

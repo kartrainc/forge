@@ -1,0 +1,28 @@
+package integration_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/tests/testutil"
+)
+
+func TestTunedPoolExecutesQueries(t *testing.T) {
+	t.Setenv("PGX_MAX_CONNECTIONS", "3")
+	t.Setenv("PGX_MIN_CONNECTIONS", "1")
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, testutil.DatabaseURL(t), 10, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if pool.Config().MaxConns != 3 || pool.Config().MinConns != 1 {
+		t.Fatalf("tuned pool: max=%d min=%d", pool.Config().MaxConns, pool.Config().MinConns)
+	}
+	var value int
+	if err := pool.QueryRow(ctx, "SELECT 42").Scan(&value); err != nil || value != 42 {
+		t.Fatalf("query: %d %v", value, err)
+	}
+}

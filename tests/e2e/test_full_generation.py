@@ -105,6 +105,16 @@ def _make_rust_backend(name: str = "backend-rust", port: int = 5002) -> BackendC
     )
 
 
+def _make_go_backend(name: str = "backend-go", port: int = 5003) -> BackendConfig:
+    return BackendConfig(
+        name=name,
+        project_name="E2E Project",
+        language=BackendLanguage.GO,
+        features=["items"],
+        server_port=port,
+    )
+
+
 def _make_frontend(
     framework: FrontendFramework,
     with_auth: bool = False,
@@ -219,6 +229,28 @@ def test_rust_no_frontend_compiles(tmp_path: Path, require_cargo: None, require_
     assert result.returncode == 0, (
         f"rust backend failed to compile:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
+
+
+def test_go_no_frontend_builds_and_tests(
+    tmp_path: Path, require_go: None, require_git: None
+) -> None:
+    config = ProjectConfig(
+        project_name="E2E Project",
+        output_dir=str(tmp_path),
+        backends=[_make_go_backend()],
+        frontend=None,
+        include_keycloak=False,
+    )
+    config.validate()
+
+    project_root = generate(config, quiet=True)
+    backend_dir = project_root / "services" / "backend-go"
+    assert (backend_dir / "go.mod").exists(), "go backend go.mod missing"
+    for command in (["go", "vet", "./..."], ["go", "test", "-count=1", "./tests/unit/..."]):
+        result = _run(command, cwd=backend_dir)
+        assert result.returncode == 0, (
+            f"go backend failed {command}:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
 
 
 # -----------------------------------------------------------------------------

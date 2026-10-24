@@ -1,0 +1,85 @@
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"forge.local/platform-auth-go/authtest"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+)
+
+func platformAuthRequest(t *testing.T, handler http.Handler, method, path, token string, payload any) (int, map[string]any) {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		_ = json.NewEncoder(&body).Encode(payload)
+	}
+	request := httptest.NewRequest(method, path, &body)
+	request.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	decoded := map[string]any{}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+	return recorder.Code, decoded
+}
+
+func TestPlatformAuthScopesItemsToTheTokenTenant(t *testing.T) {
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+	})
+	issuer := authtest.NewIssuer()
+	defer issuer.Close()
+	t.Setenv("GATEKEEPER_ISSUER", issuer.URL())
+	t.Setenv("SERVICE_AUDIENCE", "svc-{{ project_name }}")
+	t.Setenv("TENANT_ID_CLAIM", "")
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = true
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.NewPool(context.Background(), isolatedSchema(t), 4, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	handler := app.New(&cfg, pool)
+	owner := issuer.Token(issuer.Options("svc-{{ project_name }}", uuid.NewString(), uuid.NewString()))
+	stranger := issuer.Token(issuer.Options("svc-{{ project_name }}", uuid.NewString(), uuid.NewString()))
+
+	if status, body := platformAuthRequest(t, handler, http.MethodPost, itemsPath, "", map[string]any{"name": "anonymous"}); status != http.StatusUnauthorized || body["title"] != "invalid_token" {
+		t.Fatalf("anonymous create: %d %v", status, body)
+	}
+	status, item := platformAuthRequest(t, handler, http.MethodPost, itemsPath, owner, map[string]any{"name": "owned"})
+	if status != http.StatusCreated {
+		t.Fatalf("create: %d %v", status, item)
+	}
+	endpoint := itemsPath + "/" + item["id"].(string)
+	if status, body := platformAuthRequest(t, handler, http.MethodGet, endpoint, owner, nil); status != http.StatusOK || body["name"] != "owned" {
+		t.Fatalf("owner read: %d %v", status, body)
+	}
+	if status, _ := platformAuthRequest(t, handler, http.MethodGet, endpoint, stranger, nil); status != http.StatusNotFound {
+		t.Fatalf("another tenant must not see the item: %d", status)
+	}
+	if status, page := platformAuthRequest(t, handler, http.MethodGet, itemsPath, stranger, nil); status != http.StatusOK || page["total"] != float64(0) {
+		t.Fatalf("another tenant lists nothing: %d %v", status, page)
+	}
+	expired := issuer.Options("svc-{{ project_name }}", uuid.NewString(), uuid.NewString())
+	expired.IssuedAt, expired.ExpiresAt = time.Now().Add(-time.Hour), time.Now().Add(-10*time.Minute)
+	if status, body := platformAuthRequest(t, handler, http.MethodGet, itemsPath, issuer.Token(expired), nil); status != http.StatusUnauthorized || body["title"] != "token_expired" {
+		t.Fatalf("expired token: %d %v", status, body)
+	}
+}
