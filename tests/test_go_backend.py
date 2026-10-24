@@ -208,3 +208,26 @@ def test_cli_config_threads_go_version() -> None:
         {"project_name": "shop", "frontend": {"framework": "none"}},
     )
     assert single.backends[0].go_version == "1.26"
+
+
+_GO_TEMPLATE = (
+    Path(__file__).resolve().parents[1] / "forge/templates/services/go-service-template/template"
+)
+
+
+@pytest.mark.parametrize(("platform_auth", "enabled"), [(True, True), (False, False)])
+def test_go_production_profile_enables_auth_only_with_platform_auth(
+    platform_auth: bool, enabled: bool
+) -> None:
+    import jinja2
+    import yaml
+
+    source = (_GO_TEMPLATE / "config/production.yaml.jinja").read_text(encoding="utf-8")
+    rendered = jinja2.Template(source).render(include_platform_auth=platform_auth)
+    assert yaml.safe_load(rendered)["security"]["auth"]["enabled"] is enabled
+
+
+def test_go_image_ships_every_command() -> None:
+    dockerfile = (_GO_TEMPLATE / "Dockerfile.jinja").read_text(encoding="utf-8")
+    assert "for command in ./cmd/*/" in dockerfile
+    assert "COPY --from=builder /out/ /app/" in dockerfile

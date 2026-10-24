@@ -25,6 +25,10 @@ const (
 	DefaultJWKSLifespan    = 10 * time.Minute
 	DefaultJWKSStaleMax    = 30 * time.Minute
 	DefaultJWKSHTTPTimeout = 5 * time.Second
+	// DefaultJWKSMinRefresh bounds how often an unknown kid may refetch an
+	// issuer's JWKS, so tokens carrying random kids cannot turn every request
+	// into an outbound call.
+	DefaultJWKSMinRefresh = 10 * time.Second
 )
 
 // JWKSCacheOptions tunes a JWKSCache; zero values take the defaults.
@@ -36,17 +40,21 @@ type JWKSCacheOptions struct {
 	StaleMax    time.Duration
 	HTTPTimeout time.Duration
 	HTTPClient  *http.Client
+	// MinRefreshInterval is the shortest time between two refreshes caused by
+	// an unknown kid.
+	MinRefreshInterval time.Duration
 }
 
 // JWKSCache holds the signing keys of every registered issuer. A refresh
-// happens on first use, after Lifespan, or for an unknown kid (rotation);
-// refreshes are serialized per issuer.
+// happens on first use, after Lifespan, or for an unknown kid (rotation) at
+// most once per MinRefreshInterval; refreshes are serialized per issuer.
 type JWKSCache struct {
-	lifespan time.Duration
-	staleMax time.Duration
-	client   *http.Client
-	mu       sync.RWMutex
-	issuers  map[string]*issuerKeys
+	lifespan   time.Duration
+	staleMax   time.Duration
+	minRefresh time.Duration
+	client     *http.Client
+	mu         sync.RWMutex
+	issuers    map[string]*issuerKeys
 }
 
 type issuerKeys struct {
@@ -68,7 +76,13 @@ func NewJWKSCache(options JWKSCacheOptions) (*JWKSCache, error) {
 	if client == nil {
 		client = &http.Client{Timeout: cmpOr(options.HTTPTimeout, DefaultJWKSHTTPTimeout)}
 	}
-	return &JWKSCache{lifespan: lifespan, staleMax: staleMax, client: client, issuers: map[string]*issuerKeys{}}, nil
+	return &JWKSCache{
+		lifespan:   lifespan,
+		staleMax:   staleMax,
+		minRefresh: cmpOr(options.MinRefreshInterval, DefaultJWKSMinRefresh),
+		client:     client,
+		issuers:    map[string]*issuerKeys{},
+	}, nil
 }
 
 // RegisterIssuer maps issuer (the iss claim) to its JWKS URI. Registering the
@@ -118,6 +132,9 @@ func (c *JWKSCache) SigningKey(ctx context.Context, issuer, kid string) (crypto.
 	if key, ok := entry.lookup(kid, c.lifespan); ok {
 		return key, nil
 	}
+	if entry.recentlyMissing(kid, c.minRefresh) {
+		return nil, newError(ReasonInvalidToken, "unknown signing key kid %q for issuer %q", kid, issuer)
+	}
 	keys, err := c.fetch(ctx, entry.uri)
 	if err != nil {
 		if key, ok := entry.lookup(kid, c.staleMax); ok {
@@ -133,6 +150,15 @@ func (c *JWKSCache) SigningKey(ctx context.Context, issuer, kid string) (crypto.
 		return key, nil
 	}
 	return nil, newError(ReasonInvalidToken, "unknown signing key kid %q for issuer %q (JWKS refreshed)", kid, issuer)
+}
+
+// recentlyMissing reports an unknown kid while the last fetch is younger than
+// minRefresh; a known kid whose document aged out still refreshes.
+func (e *issuerKeys) recentlyMissing(kid string, minRefresh time.Duration) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	_, known := e.keys[kid]
+	return !known && !e.fetched.IsZero() && time.Since(e.fetched) < minRefresh
 }
 
 func (e *issuerKeys) lookup(kid string, maxAge time.Duration) (crypto.PublicKey, bool) {

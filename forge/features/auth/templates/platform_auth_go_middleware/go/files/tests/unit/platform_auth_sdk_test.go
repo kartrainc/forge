@@ -349,6 +349,41 @@ func newSDKJWKSServer(document any) *sdkJWKSServer {
 	return s
 }
 
+func TestSDKJWKSUnknownKidCooldown(t *testing.T) {
+	ctx := context.Background()
+	keypair := authtest.NewKeypair()
+	var fetches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{keypair.PublicJWK()}})
+	}))
+	defer server.Close()
+	cache, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: server.Client(), MinRefreshInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cache.RegisterIssuer("issuer", server.URL)
+	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		if _, err := cache.SigningKey(ctx, "issuer", fmt.Sprintf("random-%d", i)); err == nil || !strings.Contains(err.Error(), "unknown signing key") {
+			t.Fatalf("unknown kid: %v", err)
+		}
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("unknown kids within the interval must not refetch: %d fetches", n)
+	}
+	rotating, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: server.Client(), MinRefreshInterval: time.Nanosecond})
+	_ = rotating.RegisterIssuer("issuer", server.URL)
+	_, _ = rotating.SigningKey(ctx, "issuer", keypair.KID)
+	time.Sleep(time.Millisecond)
+	_, _ = rotating.SigningKey(ctx, "issuer", "rotated")
+	if n := fetches.Load(); n != 3 {
+		t.Fatalf("after the interval an unknown kid refetches (rotation): %d fetches", n)
+	}
+}
+
 func TestSDKJWKSCache(t *testing.T) {
 	ctx := context.Background()
 	if _, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{Lifespan: time.Hour, StaleMax: time.Minute}); err == nil {
@@ -371,6 +406,7 @@ func TestSDKJWKSCache(t *testing.T) {
 
 	cache, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{
 		Lifespan: time.Nanosecond, StaleMax: time.Hour, HTTPClient: upstream.server.Client(),
+		MinRefreshInterval: time.Nanosecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -587,19 +623,25 @@ func TestSDKS2SClientGrantsAndCache(t *testing.T) {
 		t.Fatalf("token exchange: %q %v", exchanged, form)
 	}
 	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{OnBehalfOf: user}); token != "token-3" {
-		t.Fatal("exchanged tokens are cached by jti")
+		t.Fatal("exchanged tokens are cached by subject token")
+	}
+	forgedOptions := issuer.Options("svc-me", "another-subject", sdkTenant)
+	forgedOptions.JTI = "user-jti"
+	forged := issuer.Token(forgedOptions)
+	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{OnBehalfOf: forged}); token != "token-4" || (<-endpoint.forms).Get("subject_token") != forged {
+		t.Fatal("a different subject token with the same jti must reach the token endpoint")
 	}
 	opaque, _ := client.Token(ctx, platformauth.S2SRequestOptions{OnBehalfOf: "opaque-token"})
 	<-endpoint.forms
-	if repeat, _ := client.Token(ctx, platformauth.S2SRequestOptions{OnBehalfOf: "opaque-token"}); opaque != "token-4" || repeat != opaque {
-		t.Fatal("opaque subject tokens are cached by hash")
+	if repeat, _ := client.Token(ctx, platformauth.S2SRequestOptions{OnBehalfOf: "opaque-token"}); opaque != "token-5" || repeat != opaque {
+		t.Fatal("opaque subject tokens are cached by digest")
 	}
 	client.Invalidate(platformauth.S2SRequestOptions{})
-	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{}); token != "token-5" {
+	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{}); token != "token-6" {
 		t.Fatal("invalidate drops one token")
 	}
 	client.ClearCache()
-	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{TenantID: "t1"}); token != "token-6" {
+	if token, _ := client.Token(ctx, platformauth.S2SRequestOptions{TenantID: "t1"}); token != "token-7" {
 		t.Fatal("clear drops every token")
 	}
 

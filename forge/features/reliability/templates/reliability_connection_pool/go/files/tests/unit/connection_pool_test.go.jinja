@@ -25,10 +25,11 @@ func parsedPoolConfig(t *testing.T, url string) *pgxpool.Config {
 
 func TestPoolTuningAppliesDefaults(t *testing.T) {
 	cfg := parsedPoolConfig(t, "postgresql://postgres@127.0.0.1:1/app")
+	cfg.MaxConns = 9
 	if err := db.TunePool(cfg, poolTuningEnv(nil)); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MaxConns != db.DefaultPoolMaxConns || cfg.MinConns != db.DefaultPoolMinConns ||
+	if cfg.MaxConns != 9 || cfg.MinConns != db.DefaultPoolMinConns ||
 		cfg.MaxConnIdleTime != db.DefaultPoolIdleTimeout || cfg.ConnConfig.ConnectTimeout != db.DefaultPoolConnectTimeout {
 		t.Fatalf("defaults: max=%d min=%d idle=%v connect=%v",
 			cfg.MaxConns, cfg.MinConns, cfg.MaxConnIdleTime, cfg.ConnConfig.ConnectTimeout)
@@ -39,6 +40,11 @@ func TestPoolTuningAppliesDefaults(t *testing.T) {
 	}
 	if explicit.ConnConfig.ConnectTimeout != 3*time.Second {
 		t.Fatalf("connection-string connect_timeout is kept: %v", explicit.ConnConfig.ConnectTimeout)
+	}
+	single := parsedPoolConfig(t, "postgresql://postgres@127.0.0.1:1/app")
+	single.MaxConns = 1
+	if err := db.TunePool(single, poolTuningEnv(nil)); err != nil || single.MinConns != 1 {
+		t.Fatalf("the default minimum is capped at the configured maximum: min=%d %v", single.MinConns, err)
 	}
 }
 
@@ -77,6 +83,14 @@ func TestPoolTuningRejectsInvalidSettings(t *testing.T) {
 }
 
 func TestPoolTuningIsAppliedByNewPool(t *testing.T) {
+	configured, err := db.NewPool(context.Background(), "postgresql://postgres@127.0.0.1:1/app?connect_timeout=1", 3, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.Config().MaxConns != 3 {
+		t.Fatalf("without PGX_MAX_CONNECTIONS the configured db.pool_max applies: %d", configured.Config().MaxConns)
+	}
+	configured.Close()
 	t.Setenv("PGX_MAX_CONNECTIONS", "6")
 	pool, err := db.NewPool(context.Background(), "postgresql://postgres@127.0.0.1:1/app?connect_timeout=1", 2, time.Second)
 	if err != nil {

@@ -24,7 +24,8 @@ projects run on SQLAlchemy's default pool_size=5, which saturates under
 moderate burst traffic and produces mysterious 99p tail latency.
 
 Go applies ``internal/db/pool_tuning.go`` to every ``db.NewPool`` pool
-(max=20, min=2, connect timeout 10s, idle timeout 10m).
+(max=db.pool_max unless PGX_MAX_CONNECTIONS is set, min=2, connect timeout
+10s, idle timeout 10m).
 
 BACKENDS: python, node, rust, go
 TUNABLE VIA ENV: SQLALCHEMY_POOL_SIZE, SQLALCHEMY_MAX_OVERFLOW,

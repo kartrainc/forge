@@ -22,6 +22,7 @@ each backend's directory (use for cross-cutting files like AGENTS.md).
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -117,6 +118,24 @@ a tier bump, not a silent success.
 
 # Every built-in backend; tier 1 means an implementation for each of them.
 PARITY_BACKENDS: frozenset[BackendLanguage] = frozenset(BackendLanguage)
+
+# Tier 1 before Go became a built-in backend (forge 1.2). A fragment that
+# covers these but not Go stays tier 1 with a DeprecationWarning until 1.3, so
+# published plugins keep loading; forge's own fragments must cover every
+# built-in (tests/test_fragment_parity.py).
+LEGACY_PARITY_BACKENDS: frozenset[BackendLanguage] = frozenset(
+    {BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST}
+)
+
+
+def _warn_legacy_tier_one(name: str) -> None:
+    warnings.warn(
+        f"Fragment {name!r} is tier 1 without a Go implementation. Since forge 1.2 "
+        "tier 1 covers Python, Node, Rust and Go; add a Go implementation or "
+        "declare parity_tier=2 before forge 1.3.",
+        DeprecationWarning,
+        stacklevel=4,
+    )
 
 
 @dataclass(frozen=True)
@@ -312,7 +331,9 @@ class Fragment:
                 context={"fragment": self.name, "ui_kits": list(self.ui_kits)},
             )
         if self.parity_tier is None:
-            object.__setattr__(self, "parity_tier", _auto_parity_tier(self.implementations))
+            object.__setattr__(
+                self, "parity_tier", _auto_parity_tier(self.implementations, self.name)
+            )
         else:
             # Explicit tier — validate it agrees with the impls at
             # construction time. Tier-1 must cover all built-ins;
@@ -335,6 +356,9 @@ def _validate_explicit_parity_tier(
     built_ins = PARITY_BACKENDS
     covered = {lang for lang in implementations if lang in built_ins}
 
+    if tier == 1 and covered == LEGACY_PARITY_BACKENDS:
+        _warn_legacy_tier_one(name)
+        return
     if tier == 1 and covered != built_ins:
         missing = sorted(lang.value for lang in (built_ins - covered))
         raise FragmentError(
@@ -360,6 +384,7 @@ def _validate_explicit_parity_tier(
 
 def _auto_parity_tier(
     implementations: dict[BackendLanguage, FragmentImplSpec],
+    name: str = "",
 ) -> ParityTier:
     """Derive a :data:`ParityTier` from the implementations dict.
 
@@ -367,6 +392,8 @@ def _auto_parity_tier(
       parity target met).
     - Only Python present ⇒ **tier 3** (Python-only — honest scope for
       AI/RAG/LLM features whose ecosystem has no Node/Rust/Go equivalent).
+    - Python, Node and Rust without Go ⇒ **tier 1** with a
+      DeprecationWarning (:data:`LEGACY_PARITY_BACKENDS`, until 1.3).
     - Any other mixture (Python + Node, Python + Rust, Node + Rust,
       etc.) ⇒ **tier 2** (best-effort — some backends are pending).
 
@@ -379,6 +406,9 @@ def _auto_parity_tier(
     built_ins = PARITY_BACKENDS
     present = {k for k in implementations if k in built_ins}
     if present == built_ins:
+        return 1
+    if present == LEGACY_PARITY_BACKENDS:
+        _warn_legacy_tier_one(name)
         return 1
     if present == {BackendLanguage.PYTHON}:
         return 3

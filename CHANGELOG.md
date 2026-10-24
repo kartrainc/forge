@@ -86,6 +86,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Reject Go service names that equal a standard-library package; the name is
   the module path.
 - The reference `forge-go-backend` plugin now registers `go-stdlib`.
+- Parity tier 1 now covers Go. Fragments that cover only Python, Node and Rust
+  keep tier 1 with a `DeprecationWarning` until 1.3 (UPGRADING).
+- Go services resolve the rate-limit client from the trusted end of
+  `X-Forwarded-For`, key token-exchange caches by a SHA-256 digest of the subject
+  token, refetch a JWKS for an unknown `kid` at most once per 10 s, keep
+  `db.pool_max` unless `PGX_MAX_CONNECTIONS` is set, ship every `cmd/*` binary in
+  the image, and enable production authentication only with platform auth.
 
 ### Vue UI kits
 

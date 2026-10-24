@@ -113,6 +113,36 @@ func TestRateLimitTrustsForwardedForOnlyFromPrivatePeers(t *testing.T) {
 	}
 }
 
+func TestRateLimitReadsForwardedForFromTheTrustedEnd(t *testing.T) {
+	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	proxy := "10.0.0.2:80"
+	// The client prepends whatever it likes; the proxy appends the address it saw.
+	sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": "1.1.1.1, 198.51.100.77"})
+	if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": "2.2.2.2, 198.51.100.77"}).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("a rotated client-supplied entry must not select a fresh bucket: %d", code)
+	}
+	// Several headers form one list.
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = proxy
+	request.Header.Add("X-Forwarded-For", "3.3.3.3")
+	request.Header.Add("X-Forwarded-For", "198.51.100.77")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("repeated headers are one list: %d", recorder.Code)
+	}
+	// A chain of trusted hops resolves to its leftmost hop; a malformed entry stops the walk.
+	if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": "10.1.1.1, 10.0.0.9"}).Code; code != http.StatusNoContent {
+		t.Fatalf("internal client: %d", code)
+	}
+	if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": "198.51.100.88, garbage, 10.0.0.9"}).Code; code != http.StatusNoContent {
+		t.Fatalf("malformed entry: %d", code)
+	}
+	if code := sendFrom(handler, proxy, "/", map[string]string{"X-Forwarded-For": "198.51.100.89, garbage, 10.0.0.9"}).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("left of a malformed entry is not trusted: %d", code)
+	}
+}
+
 func TestRateLimitUnusualRemoteAddresses(t *testing.T) {
 	handler := limitedHandler(middleware.RateLimitOptions{RequestsPerMinute: 1})
 	for _, remote := range []string{"", "not-an-ip", "198.51.100.20"} {

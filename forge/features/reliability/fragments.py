@@ -56,7 +56,6 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.GO: FragmentImplSpec(
                     fragment_dir=_impl("reliability_connection_pool", "go"),
                     env_vars=(
-                        ("PGX_MAX_CONNECTIONS", "20"),
                         ("PGX_MIN_CONNECTIONS", "2"),
                         ("PGX_CONNECT_TIMEOUT_SECS", "10"),
                         ("PGX_IDLE_TIMEOUT_SECS", "600"),

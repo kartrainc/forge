@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"hash/fnv"
 	"io"
 	"net/http"
 	"net/url"
@@ -319,8 +319,8 @@ func (c *S2SClient) fetchToken(ctx context.Context, options S2SRequestOptions) (
 	return payload.AccessToken, time.Now().Add(lifetime - min(c.config.SafetyMargin, lifetime)), nil
 }
 
-// cacheKey keys on-behalf-of tokens by the subject token's jti (or a hash),
-// never by the raw token.
+// cacheKey keys on-behalf-of tokens by a SHA-256 digest of the whole subject
+// token, never by the raw token or an unverified claim such as its jti.
 func cacheKey(onBehalfOf, tenantID string) string {
 	suffix := ""
 	if tenantID != "" {
@@ -329,15 +329,8 @@ func cacheKey(onBehalfOf, tenantID string) string {
 	if onBehalfOf == "" {
 		return clientCredentialsKey + suffix
 	}
-	var claims struct {
-		JTI string `json:"jti"`
-	}
-	if parts := strings.Split(onBehalfOf, "."); len(parts) == 3 && decodeSegment(parts[1], &claims) == nil && claims.JTI != "" {
-		return "obo:jti:" + claims.JTI + suffix
-	}
-	hash := fnv.New64a()
-	hash.Write([]byte(onBehalfOf))
-	return fmt.Sprintf("obo:hash:%016x%s", hash.Sum64(), suffix)
+	digest := sha256.Sum256([]byte(onBehalfOf))
+	return "obo:sha256:" + hex.EncodeToString(digest[:]) + suffix
 }
 
 func truncate(value string, limit int) string {

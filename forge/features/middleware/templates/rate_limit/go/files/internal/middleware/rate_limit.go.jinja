@@ -112,30 +112,49 @@ func (l *rateLimiter) take(key string, now time.Time) (bool, time.Duration) {
 	return true, 0
 }
 
-// rateLimitKey prefers the tenant, then the client address. X-Forwarded-For is
-// honoured only when the transport peer is a trusted in-cluster proxy
-// (loopback, private or link-local), so internet clients cannot spoof it.
+// rateLimitKey prefers the tenant, then the client address.
 func rateLimitKey(r *http.Request) string {
 	if id, ok := identity.FromContext(r.Context()); ok && id.TenantID != uuid.Nil {
 		return "tenant:" + id.TenantID.String()
 	}
+	if client := clientAddress(r); client != "" {
+		return "ip:" + client
+	}
+	return "anonymous"
+}
+
+// clientAddress resolves the requester. X-Forwarded-For is read only when the
+// transport peer is a trusted proxy (loopback, private or link-local), and
+// from the right: each proxy appends the address it saw, so the rightmost
+// entry that is not itself a trusted proxy is the client and everything left
+// of it is client-supplied. A malformed entry stops the walk.
+func clientAddress(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	peer, err := netip.ParseAddr(host)
 	if err != nil {
-		if host == "" {
-			return "anonymous"
-		}
-		return "ip:" + host
+		return host
 	}
-	peer = peer.Unmap()
-	if peer.IsLoopback() || peer.IsPrivate() || peer.IsLinkLocalUnicast() {
-		forwarded, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
-		if client := strings.TrimSpace(forwarded); client != "" {
-			return "ip:" + client
+	client := peer.Unmap()
+	if !trustedProxy(client) {
+		return client.String()
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			break
+		}
+		client = hop.Unmap()
+		if !trustedProxy(client) {
+			break
 		}
 	}
-	return "ip:" + peer.String()
+	return client.String()
+}
+
+func trustedProxy(addr netip.Addr) bool {
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
 }

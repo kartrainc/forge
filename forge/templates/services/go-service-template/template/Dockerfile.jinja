@@ -26,9 +26,11 @@ COPY go.mod go.sum* ./
 RUN if [ -f go.sum ]; then go mod download && go mod verify; fi
 
 COPY . .
+# Every command ships: server, migrate, and the worker when async work adds it.
 RUN if [ ! -f go.sum ]; then go mod tidy; fi \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+    && for command in ./cmd/*/; do \
+         CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "/out/$(basename "$command")" "$command" || exit 1; \
+       done
 
 # --- Runtime Stage ---
 FROM alpine:3.22
@@ -38,8 +40,7 @@ RUN apk add --no-cache ca-certificates curl \
     && adduser -D -u 10001 -G appuser -s /sbin/nologin appuser
 
 WORKDIR /app
-COPY --from=builder /out/server /app/server
-COPY --from=builder /out/migrate /app/migrate
+COPY --from=builder /out/ /app/
 # Layered config profiles (RFC-008) resolve config/<ENV>.yaml relative to the
 # working directory, so the runtime image ships them.
 COPY config /app/config

@@ -222,6 +222,26 @@ before changing anything.
   `vueuse-color-scheme`; `system` becomes `auto`. Users see their system mode
   once until they choose again.
 
+### Go backend (unreleased)
+
+Go is now a built-in backend (`language: go`). Three changes can affect an
+existing installation:
+
+- **Parity tier 1 covers Go.** A fragment that declares or derives tier 1 from
+  Python, Node and Rust implementations alone still loads as tier 1, with a
+  `DeprecationWarning`. Before 1.3, add a `BackendLanguage.GO` implementation or
+  declare `parity_tier=2`; forge's own tier-1 fragments already cover Go.
+- **The `forge-go-backend` example plugin registers `go-stdlib`.** A project
+  generated with that plugin before this release recorded `language = "go"`, which
+  now resolves to the built-in Go template. Before running `forge --update`, change
+  that backend's language to `go-stdlib` in `forge.toml` and in the recipe
+  (`.forge/quality.json`), with the plugin installed, so the update keeps rendering
+  the stdlib service.
+- **Go services enable authentication in production only with platform auth.**
+  The production profile sets `security.auth.enabled` from the generated auth
+  mode, so an `auth.mode=none` service starts without `GATEKEEPER_ISSUER` and
+  `SERVICE_AUDIENCE`. Python, Node and Rust profiles are unchanged.
+
 ### Executable Postgres init script (unreleased)
 
 `deploy/compose/init-db.sh`, which creates each backend's database and

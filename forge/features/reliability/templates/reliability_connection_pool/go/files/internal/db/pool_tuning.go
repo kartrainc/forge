@@ -8,23 +8,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Pool sizing defaults; each is overridable through its PGX_* variable.
+// Pool sizing defaults; each is overridable through its PGX_* variable. The
+// maximum is db.pool_max unless PGX_MAX_CONNECTIONS is set.
 const (
-	DefaultPoolMaxConns       = 20               // PGX_MAX_CONNECTIONS
-	DefaultPoolMinConns       = 2                // PGX_MIN_CONNECTIONS
+	DefaultPoolMinConns       = 2                // PGX_MIN_CONNECTIONS, capped at the maximum
 	DefaultPoolConnectTimeout = 10 * time.Second // PGX_CONNECT_TIMEOUT_SECS
 	DefaultPoolIdleTimeout    = 10 * time.Minute // PGX_IDLE_TIMEOUT_SECS
 )
 
-// TunePool applies production pool sizing to cfg. The PGX_* variables take
-// precedence over db.pool_max; a connect_timeout in the connection string is
-// kept unless PGX_CONNECT_TIMEOUT_SECS is set. Invalid values are errors.
+// TunePool applies production pool sizing to cfg. PGX_MAX_CONNECTIONS, when
+// set, replaces the configured maximum (db.pool_max); a connect_timeout in the
+// connection string is kept unless PGX_CONNECT_TIMEOUT_SECS is set. Invalid
+// values are errors.
 func TunePool(cfg *pgxpool.Config, getenv func(string) string) error {
-	maxConns, err := envCount(getenv, "PGX_MAX_CONNECTIONS", DefaultPoolMaxConns, 1)
+	maxConns, err := envCount(getenv, "PGX_MAX_CONNECTIONS", cfg.MaxConns, 1)
 	if err != nil {
 		return err
 	}
-	minConns, err := envCount(getenv, "PGX_MIN_CONNECTIONS", DefaultPoolMinConns, 0)
+	minConns, err := envCount(getenv, "PGX_MIN_CONNECTIONS", min(DefaultPoolMinConns, maxConns), 0)
 	if err != nil {
 		return err
 	}
