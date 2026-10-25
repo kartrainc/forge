@@ -27,6 +27,15 @@ To extend an existing platform, inspect provenance ownership:
   modules and register it from the composition root through public contracts.
 - `user`: never replaced by the generator.
 
+In a Vue frontend on the `nuxt-ui` kit, this project's setup takes precedence
+over the `nuxt-ui` skill's installation, setup and theming steps. Installation
+and setup are done: the Vite plugin, `@nuxt/ui/vue-plugin`, `UApp` and the
+`lucide` icons are wired. Theme in the brand module, the frontend's
+`src/custom/theme/`: palettes, icons and component overrides in
+`nuxt-ui.config.ts`, which `vite.config.ts` passes to the plugin; Tailwind
+theme and `--ui-*` variables in `tokens.css`. Colour mode is Nuxt UI's own,
+backed by VueUse (`UColorModeSelect`, or `useColorMode` from `@vueuse/core`).
+
 Validate with `forge --quality architecture --project-path . --json`.
 List test targets with `forge --quality inventory --project-path .` and run
 `forge --quality test --project-path .`. Run the coverage gate with

@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 2953,
-      "sha256": "c35f5f6995d8332e"
+      "size": 3547,
+      "sha256": "231e07d78aa97857"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -13,8 +13,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 2953,
-      "sha256": "c35f5f6995d8332e"
+      "size": 3547,
+      "sha256": "231e07d78aa97857"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,

@@ -198,6 +198,16 @@ or fragment whose kits exclude the project's. Plugin layouts render with
 fragment may ship a `files-<kit>/` tree beside `files/`; for a project on that
 kit its files replace the same paths of `files/`.
 
+#### Projects already on Nuxt UI
+
+A project generated on `nuxt-ui` before the agent tooling existed gains
+`.agents/skills/nuxt-ui/`, `.claude/skills/nuxt-ui/`, `.mcp.json` and
+`.codex/config.toml` on its next `forge --update`. If any of them already
+exists without a forge record, for example your own `.mcp.json`, the update
+stops on the collision before changing anything: move it aside, update, then
+merge your entries back into forge's file. Forge ships these files whole and
+never merges into a file it did not write.
+
 #### Switching a project to Nuxt UI
 
 Set `ui_kit` to `nuxt-ui` under `config.frontend` in `.forge/quality.json`

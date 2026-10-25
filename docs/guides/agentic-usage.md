@@ -27,7 +27,10 @@ Nuxt UI skill and its MCP server:
 ```
 
 The skill teaches when to use which Nuxt UI component and how to theme with
-it; the MCP server answers what a component accepts. Claude Code asks you to
+it; the MCP server answers what a component accepts. Its setup and theming
+steps are generic: the forge-platform skill tells agents that the project's
+own setup takes precedence: the plugin, `UApp` and icons are wired, and the
+theme lives in the brand module `src/custom/theme/`. Claude Code asks you to
 approve the project's `.mcp.json` servers on first use. Codex reads
 `.codex/config.toml` only once you trust the project; your
 `~/.codex/config.toml` still applies underneath. These files are scaffold:
