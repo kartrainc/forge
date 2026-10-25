@@ -349,6 +349,15 @@ func newSDKJWKSServer(document any) *sdkJWKSServer {
 	return s
 }
 
+// sdkWaitForClockTick returns once time.Now has moved past the current
+// reading. Windows advances its clock in ticks of up to 15.6ms, so a
+// nanosecond refresh interval has not elapsed between back-to-back calls.
+func sdkWaitForClockTick() {
+	for start := time.Now(); !time.Now().After(start); {
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestSDKJWKSUnknownKidCooldown(t *testing.T) {
 	ctx := context.Background()
 	keypair := authtest.NewKeypair()
@@ -544,6 +553,7 @@ func TestSDKJWKSCache(t *testing.T) {
 	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
 		t.Fatalf("stale keys are served while the issuer is down: %v", err)
 	}
+	sdkWaitForClockTick()
 	if _, err := cache.SigningKey(ctx, "issuer", "missing"); err == nil || !strings.Contains(err.Error(), "stale window expired") {
 		t.Fatalf("unknown kids fail while the issuer is down: %v", err)
 	}
