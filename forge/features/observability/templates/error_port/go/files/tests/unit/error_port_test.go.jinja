@@ -1,0 +1,72 @@
+package unit_test
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"{{ project_name }}/internal/adapters"
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/ports"
+	"{{ project_name }}/tests/testutil"
+)
+
+func TestDefaultErrorPortKeepsPublicErrorsAndRedactsOthers(t *testing.T) {
+	var port ports.ErrorPort = adapters.DefaultErrorPort{}
+	for _, err := range []*apperrors.Error{
+		apperrors.NewNotFound("Item", "one"),
+		apperrors.NewAlreadyExists("Item", "one"),
+		apperrors.NewDuplicateEntry("Item", "name", "one"),
+		apperrors.NewReadOnly("Item"),
+		apperrors.NewDependencyUnavailable("upstream"),
+		apperrors.New(apperrors.AuthRequired, "Authentication required"),
+		{Code: apperrors.NotFound, Message: "no context"},
+	} {
+		envelope := port.Serialize(err)
+		if envelope.Error.Code != err.Code || envelope.Error.Message != err.Message ||
+			envelope.Error.Type != err.Code.TypeName() || envelope.Error.Context == nil ||
+			envelope.Error.CorrelationID != "" {
+			t.Fatalf("%v: envelope %+v", err, envelope)
+		}
+		portJSON, _ := json.Marshal(envelope)
+		inlineJSON, _ := json.Marshal(apperrors.Serialize(err))
+		if string(portJSON) != string(inlineJSON) {
+			t.Fatalf("port and inline serializer disagree: %s vs %s", portJSON, inlineJSON)
+		}
+	}
+	for _, err := range []error{apperrors.NewInternal(errors.New("secret")), errors.New("secret")} {
+		envelope := port.Serialize(err)
+		if envelope.Error.Code != apperrors.InternalError || envelope.Error.Type != "InternalError" ||
+			strings.Contains(envelope.Error.Message, "secret") {
+			t.Fatalf("internal errors are redacted: %+v", envelope)
+		}
+	}
+}
+
+func TestWriteRoutesEnvelopesThroughTheConfiguredPort(t *testing.T) {
+	t.Cleanup(func() { apperrors.UseSerializer(adapters.DefaultErrorPort{}.Serialize) })
+	apperrors.UseSerializer(func(error) apperrors.Envelope {
+		return apperrors.Envelope{Error: apperrors.Body{Code: "TEAPOT", Message: "custom", Type: "TeapotError", Context: map[string]any{}}}
+	})
+	recorder := httptest.NewRecorder()
+	recorder.Header().Set("X-Request-Id", "req-7")
+	apperrors.Write(recorder, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("boom"))
+	var envelope testutil.Envelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusInternalServerError || envelope.Error.Code != "TEAPOT" || envelope.Error.CorrelationID != "req-7" {
+		t.Fatalf("custom port: %d %+v", recorder.Code, envelope)
+	}
+	apperrors.UseSerializer(nil)
+	recorder = httptest.NewRecorder()
+	apperrors.Write(recorder, httptest.NewRequest(http.MethodGet, "/", nil), apperrors.NewNotFound("Item", "x"))
+	restored := map[string]any{}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &restored)
+	if recorder.Code != http.StatusNotFound || testutil.ErrorCode(restored) != "NOT_FOUND" {
+		t.Fatalf("nil restores the inline serializer: %d %s", recorder.Code, recorder.Body.String())
+	}
+}

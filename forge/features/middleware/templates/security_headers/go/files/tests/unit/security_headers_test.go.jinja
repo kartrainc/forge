@@ -1,0 +1,55 @@
+package unit_test
+
+import (
+	"crypto/tls"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"{{ project_name }}/internal/middleware"
+)
+
+func TestSecurityHeadersDecorateEveryResponse(t *testing.T) {
+	handler := middleware.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	want := map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "SAMEORIGIN",
+		"Referrer-Policy":         "strict-origin-when-cross-origin",
+		"Permissions-Policy":      "accelerometer=(), camera=(), geolocation=(), microphone=()",
+		"Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
+	}
+	for name, value := range want {
+		if got := recorder.Header().Get(name); got != value {
+			t.Fatalf("%s = %q, want %q", name, got, value)
+		}
+	}
+	if recorder.Code != http.StatusTeapot || recorder.Header().Get("Strict-Transport-Security") != "" {
+		t.Fatalf("plain HTTP gets no HSTS: %d %v", recorder.Code, recorder.Header())
+	}
+}
+
+func TestSecurityHeadersSendHSTSOverTLS(t *testing.T) {
+	handler := middleware.SecurityHeaders(http.NotFoundHandler())
+	forwarded := httptest.NewRequest(http.MethodGet, "/", nil)
+	forwarded.Header.Set("X-Forwarded-Proto", "https")
+	direct := httptest.NewRequest(http.MethodGet, "/", nil)
+	direct.TLS = &tls.ConnectionState{}
+	for _, request := range []*http.Request{forwarded, direct} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if got := recorder.Header().Get("Strict-Transport-Security"); got != middleware.HSTSHeaderValue {
+			t.Fatalf("HSTS %q", got)
+		}
+	}
+	custom := httptest.NewRecorder()
+	custom.Header().Set("Strict-Transport-Security", "max-age=60")
+	handler.ServeHTTP(custom, forwarded)
+	if got := custom.Header().Get("Strict-Transport-Security"); got != "max-age=60" {
+		t.Fatalf("an explicit HSTS value is kept: %q", got)
+	}
+}

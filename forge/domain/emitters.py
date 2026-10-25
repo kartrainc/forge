@@ -696,6 +696,116 @@ def _rust_inner(type_name: str) -> str:
     return mapping.get(type_name, "serde_json::Value")
 
 
+# -- Go -----------------------------------------------------------------------
+
+_GO_INITIALISMS = {
+    "id": "ID",
+    "url": "URL",
+    "uuid": "UUID",
+    "api": "API",
+    "http": "HTTP",
+    "json": "JSON",
+    "sql": "SQL",
+    "ip": "IP",
+    "uri": "URI",
+}
+
+
+def _go_field_name(name: str) -> str:
+    return "".join(_GO_INITIALISMS.get(part, part.capitalize()) for part in name.split("_") if part)
+
+
+def emit_go_struct(
+    spec: EntitySpec, *, module: str, known_enums: Iterable[str] | None = None
+) -> str:
+    """Emit a Go struct with JSON tags, formatted the way gofmt aligns fields.
+
+    Optional scalars are pointers; arrays and JSON stay nil-able values.
+    Declaration-only, so the file carries no coverage denominator.
+    """
+    validate_enum_references(spec, known_enums=known_enums)
+    fields = [(_go_field_name(f.name), _go_type(f), f'`json:"{f.name}"`') for f in spec.fields]
+    std = sorted(
+        {
+            pkg
+            for f in spec.fields
+            for pkg in (["encoding/json"] if _go_needs(f, FieldType.JSON) else [])
+            + (["time"] if _go_needs(f, FieldType.DATETIME, FieldType.DATE) else [])
+        }
+    )
+    external = sorted(
+        {
+            *(
+                ["github.com/google/uuid"]
+                if any(_go_needs(f, FieldType.UUID, FieldType.RELATION) for f in spec.fields)
+                else []
+            ),
+            *([f"{module}/internal/domain/enums"] if any(f.enum for f in spec.fields) else []),
+        }
+    )
+    lines: list[str] = [
+        f"// Generated Go struct for {spec.name}. Do not edit by hand.",
+        "",
+        "package domain",
+        "",
+    ]
+    if std or external:
+        lines.append("import (")
+        lines.extend(f'\t"{pkg}"' for pkg in std)
+        if std and external:
+            lines.append("")
+        lines.extend(f'\t"{pkg}"' for pkg in external)
+        lines.extend([")", ""])
+    name_width = max((len(n) for n, _, _ in fields), default=0)
+    type_width = max((len(t) for _, t, _ in fields), default=0)
+    lines.append(f"type {spec.name} struct {{")
+    for name, go_type, tag in fields:
+        lines.append(f"\t{name.ljust(name_width)} {go_type.ljust(type_width)} {tag}")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def _go_needs(f: EntityField, *types: FieldType) -> bool:
+    if f.type in types:
+        return True
+    inner = {"uuid": FieldType.UUID, "datetime": FieldType.DATETIME}.get(f.of or "")
+    return f.type is FieldType.ARRAY and inner in types
+
+
+def _go_type(f: EntityField) -> str:
+    if f.type is FieldType.ARRAY:
+        return f"[]{_go_inner(f.of or 'string')}"
+    if f.type is FieldType.JSON:
+        return "json.RawMessage"
+    base = {
+        FieldType.STRING: "string",
+        FieldType.INTEGER: "int64",
+        FieldType.NUMBER: "float64",
+        FieldType.BOOLEAN: "bool",
+        FieldType.UUID: "uuid.UUID",
+        FieldType.DATETIME: "time.Time",
+        FieldType.DATE: "time.Time",
+        FieldType.RELATION: "uuid.UUID",
+    }.get(f.type)
+    if f.type is FieldType.ENUM:
+        base = f"enums.{f.enum}" if f.enum else "string"
+    if base is None:
+        raise GeneratorError(f"Unknown field type: {f.type}")
+    return f"*{base}" if f.optional else base
+
+
+def _go_inner(type_name: str) -> str:
+    mapping = {
+        "string": "string",
+        "integer": "int64",
+        "number": "float64",
+        "boolean": "bool",
+        "uuid": "uuid.UUID",
+        "datetime": "time.Time",
+    }
+    return mapping.get(type_name, "any")
+
+
 # -- OpenAPI ------------------------------------------------------------------
 
 

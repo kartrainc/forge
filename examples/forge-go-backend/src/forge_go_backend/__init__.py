@@ -1,17 +1,16 @@
-"""Reference forge plugin — adds a **Go (net/http)** backend language.
+"""Reference forge plugin — adds a **Go stdlib** backend language.
 
 This is the companion to ``forge-plugin-example`` (which demonstrates the
 option → fragment surface). Here we exercise the *backend* surface of the
 plugin SDK: :meth:`forge.api.ForgeAPI.add_backend` registers a brand-new
-backend **language** (``go``) so ``forge --backend-language go`` generates a
-real, compiling service without forking forge.
+backend **language** (``go-stdlib``) so ``forge --backend-language go-stdlib``
+generates a real, compiling service without forking forge.
 
-Why Go for the reference? Its toolchain is ubiquitous and fast, the standard
-library alone makes a useful HTTP service (no dependency resolution to mock),
-and `go build` gives a crisp end-to-end "does it compile" signal for the
-plugin-backend e2e. It is also the most different of the obvious candidates
-from forge's three built-ins (Python/Node/Rust), so it stresses the language-
-agnostic generator paths the most.
+Go is also a built-in backend (``go``). This plugin registers a separate,
+dependency-free variant under its own language value: the standard library
+alone makes a useful HTTP service (no dependency resolution to mock), and
+`go build` gives a crisp end-to-end "does it compile" signal for the
+plugin-backend e2e, which exercises the language-agnostic generator paths.
 
 The Go service template ships **inside this package** (``go-service-template/``)
 and is handed to forge as an absolute path — built-in forge templates live
@@ -40,12 +39,12 @@ _TEMPLATE_DIR = _PACKAGE_ROOT / "go-service-template"
 
 def register(api: ForgeAPI) -> None:
     api.add_backend(
-        "go",
+        "go-stdlib",
         BackendSpec(
             template_dir=str(_TEMPLATE_DIR),
-            display_label="Go (net/http)",
+            display_label="Go stdlib (reference plugin)",
             version_field="go_version",
-            version_choices=("1.22", "1.21", "1.20", "1.19"),
+            version_choices=("1.27", "1.26", "1.25"),
             toolchain=GO_TOOLCHAIN,
             version="1.0.0",
         ),

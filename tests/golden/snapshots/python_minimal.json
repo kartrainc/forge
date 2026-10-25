@@ -5,8 +5,8 @@
       "sha256": "c35f5f6995d8332e"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
-      "size": 2280,
-      "sha256": "05122ff35ff454c8"
+      "size": 2397,
+      "sha256": "29d746e3b1958d39"
     },
     ".claude/settings.json": {
       "size": 69,
@@ -17,24 +17,24 @@
       "sha256": "c35f5f6995d8332e"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
-      "size": 2280,
-      "sha256": "05122ff35ff454c8"
+      "size": 2397,
+      "sha256": "29d746e3b1958d39"
     },
     ".editorconfig": {
       "size": 580,
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 721,
-      "sha256": "750efea627473756"
+      "size": 743,
+      "sha256": "f4d7deebed6396b0"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
       "sha256": "3a519b182478cbdf"
     },
     ".github/workflows/quality.yml": {
-      "size": 3203,
-      "sha256": "c56239ed83b1127b"
+      "size": 3420,
+      "sha256": "59c4ec23d78fa45a"
     },
     ".gitignore": {
       "size": 523,
@@ -57,11 +57,11 @@
       "sha256": "0d5d5e297f0ee7a4"
     },
     "forge.toml": {
-      "size": 53162,
+      "size": 53215,
       "sha256": "<version-dependent>"
     },
     "services/api/.copier-answers.yml": {
-      "size": 549,
+      "size": 551,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {

@@ -36,7 +36,7 @@ workloads:
       ["python", "-m", "app", "db", "upgrade"]
 {%- elif be.language == "node" %}
       ["npx", "prisma", "migrate", "deploy"]
-{%- elif be.language == "rust" %}
+{%- elif be.language in ("rust", "go") %}
       ["/app/migrate"]
 {%- else %}
       []
@@ -66,6 +66,10 @@ workloads:
 {%- elif be.language == "rust" %}
       PORT: "{{ be.port }}"
       RUST_LOG: "info"
+{%- elif be.language == "go" %}
+      ENV: "production"
+      PORT: "{{ be.port }}"
+      APP__LOGGING__LEVEL: "info"
 {%- else %}
       ENV: "production"
 {%- endif %}
@@ -109,7 +113,7 @@ workloads:
 {%- elif be.language == "node" %}
       APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
       DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
-{%- elif be.language == "rust" %}
+{%- elif be.language in ("rust", "go") %}
       DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- endif %}
 {%- endfor %}

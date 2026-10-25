@@ -109,6 +109,8 @@ def _expected_files(name: str, backends: tuple[str, ...]) -> set[str]:
             files.add(f"{backend}/files/__init__.ts")
         elif backend == "rust":
             files.add(f"{backend}/files/lib.rs")
+        elif backend == "go":
+            files.add(f"{backend}/files/doc.go")
         files.add(f"{backend}/inject.yaml")
     return files
 
@@ -153,6 +155,7 @@ class TestScaffoldFragment:
             target / "python" / "inject.yaml",
             target / "node" / "inject.yaml",
             target / "rust" / "inject.yaml",
+            target / "go" / "inject.yaml",
         ]:
             parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
             # The stubs are empty lists, which is the same shape the

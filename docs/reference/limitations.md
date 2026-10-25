@@ -9,7 +9,7 @@ future releases are not a capability guarantee.
 
 | Surface | Available | Boundaries |
 | --- | --- | --- |
-| Backends | Python/FastAPI, Node/Fastify, Rust/Axum | Feature and specialized application-template coverage differs by backend. |
+| Backends | Python/FastAPI, Node/Fastify, Rust/Axum, Go/net/http with chi | Feature and specialized application-template coverage differs by backend. |
 | Frontends | Vue, Svelte, Flutter, or none | Frontend framework support does not imply parity of every component/feature. |
 | Layouts | sidebar, topnav, tabbar, threepane, bento, docs | Available combinations are validated by the layout registry. |
 | Layered components | Vue basic components and application templates; composition graph | Vue is the current framework target; no standalone Layer-2 seed is shipped. |

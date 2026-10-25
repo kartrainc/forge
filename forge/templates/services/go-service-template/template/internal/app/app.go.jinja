@@ -1,0 +1,68 @@
+// Package app is the composition root: it wires the repositories, services,
+// routes and middleware into one http.Handler.
+package app
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/data/repositories"
+{%- if not (include_platform_auth | default(false)) %}
+	"{{ project_name }}/internal/identity"
+{%- endif %}
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/internal/routes"
+	"{{ project_name }}/internal/services"
+	// FORGE:MIDDLEWARE_IMPORTS
+)
+
+// Description is served on GET /api/v1/info.
+const Description = "{{ project_description }}"
+
+// New builds the HTTP handler. Middlewares run in list order: the first entry
+// is the outermost.
+func New(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
+{%- if include_error_envelope | default(false) %}
+	useErrorPort()
+{%- endif %}
+	router := chi.NewRouter()
+	middlewares := []middleware.Middleware{
+		middleware.BodyLimit(1 << 20),
+		middleware.Correlation,
+		middleware.Recover,
+		middleware.CORS(middleware.CORSOptions{
+			Enabled:          cfg.Server.CORS.Enabled,
+			AllowOrigins:     cfg.Server.CORS.AllowOrigins,
+			AllowCredentials: cfg.Server.CORS.AllowCredentials,
+			MaxAge:           cfg.Server.CORS.MaxAge,
+		}),
+		// FORGE:MIDDLEWARE_REGISTRATION
+{%- if not (include_platform_auth | default(false)) %}
+		// Dev-mode identity (auth.mode=none): bind the fixed local identity
+		// so tenant-scoped handlers have an identity to scope on. Never added
+		// when the platform-auth middleware owns identity.
+		devIdentity,
+{%- endif %}
+	}
+	for _, m := range middlewares {
+		router.Use(m)
+	}
+	routes.Register(router, routes.Deps{
+		Pool:  pool,
+		DB:    pool,
+		Items: services.NewItemService(repositories.NewPgItemRepository(pool)),
+		Info:  routes.Info{Title: cfg.App.Name, Version: cfg.App.Version, Description: Description},
+	})
+	return router
+}
+{%- if not (include_platform_auth | default(false)) %}
+
+func devIdentity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), identity.Dev())))
+	})
+}
+{%- endif %}

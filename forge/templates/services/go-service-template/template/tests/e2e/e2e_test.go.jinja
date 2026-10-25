@@ -1,0 +1,175 @@
+package e2e_test
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/tests/testutil"
+)
+
+// binary returns the instrumented binary the quality runner built
+// (FORGE_GO_<NAME>_BIN), or builds one for a plain `go test` run.
+func binary(t *testing.T, name string) string {
+	t.Helper()
+	if path := os.Getenv("FORGE_GO_" + strings.ToUpper(name) + "_BIN"); path != "" {
+		return path
+	}
+	output := filepath.Join(t.TempDir(), name)
+	build := exec.Command("go", "build", "-o", output, "./cmd/"+name)
+	build.Dir = testutil.ServiceRoot()
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build %s: %v\n%s", name, err, out)
+	}
+	return output
+}
+
+// command runs a binary from the service root with coverage collection wired
+// to FORGE_GO_COVERDIR when the quality runner provides it.
+func command(t *testing.T, name string, env ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(binary(t, name))
+	cmd.Dir = testutil.ServiceRoot()
+	cmd.Env = append(os.Environ(), env...)
+	if dir := os.Getenv("FORGE_GO_COVERDIR"); dir != "" {
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
+	}
+	return cmd
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func TestRealNetworkLifecycle(t *testing.T) {
+	cfg := config.Defaults()
+	pool, err := db.NewPool(context.Background(), "postgresql://localhost:1/unused", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- app.Serve(ctx, listener, app.New(&cfg, pool)) }()
+	response, err := http.Get("http://" + listener.Addr().String() + "/api/v1/health/live")
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil || body["status"] != "UP" {
+		t.Fatalf("live: %v %v", body, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActualServiceBinaryStartsAndStopsGracefully(t *testing.T) {
+	port := freePort(t)
+	server := command(t, "server", "ENV=testing", "PORT="+strconv.Itoa(port))
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	base := "http://127.0.0.1:" + strconv.Itoa(port) + "/api/v1"
+	ready := false
+	for range 200 {
+		if response, err := http.Get(base + "/health/live"); err == nil {
+			response.Body.Close()
+			ready = response.StatusCode == http.StatusOK
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	infoOK := false
+	if response, err := http.Get(base + "/info"); err == nil {
+		response.Body.Close()
+		infoOK = response.StatusCode == http.StatusOK
+	}
+	_ = server.Process.Signal(syscall.SIGTERM)
+	err := server.Wait()
+	if !ready || !infoOK {
+		t.Fatalf("service did not serve: live=%v info=%v", ready, infoOK)
+	}
+	if err != nil {
+		t.Fatalf("graceful shutdown must exit 0: %v", err)
+	}
+}
+
+func TestServiceBinaryRejectsInvalidConfiguration(t *testing.T) {
+	server := command(t, "server", "ENV=testing", "PORT=not-a-port")
+	if err := server.Run(); err == nil {
+		t.Fatal("an invalid PORT must exit non-zero")
+	}
+	broken := command(t, "server", "ENV=testing", "DATABASE_URL=::not a url::")
+	if err := broken.Run(); err == nil {
+		t.Fatal("an invalid database url must exit non-zero")
+	}
+	guarded := command(t, "server", "ENV=production", "APP__SECURITY__AUTH__ENABLED=true",
+		"GATEKEEPER_ISSUER=", "SERVICE_AUDIENCE=")
+	if err := guarded.Run(); err == nil {
+		t.Fatal("the production auth guard must stop boot")
+	}
+	migrate := command(t, "migrate", "ENV=production", "APP__SECURITY__AUTH__ENABLED=true",
+		"GATEKEEPER_ISSUER=", "SERVICE_AUDIENCE=")
+	if err := migrate.Run(); err == nil {
+		t.Fatal("migrate shares the configuration guard")
+	}
+}
+
+func TestMigrationBinaryAppliesDatabaseSchema(t *testing.T) {
+	base := testutil.DatabaseURL(t)
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	schema := "forge_e2e_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	parsed, _ := url.Parse(base)
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	if out, err := command(t, "migrate", "ENV=testing", "DATABASE_URL="+parsed.String()).CombinedOutput(); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out)
+	}
+	var tables int
+	if err := admin.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'items'", schema).Scan(&tables); err != nil || tables != 1 {
+		t.Fatalf("items table: %d %v", tables, err)
+	}
+	failing := command(t, "migrate", "ENV=testing", "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:1/none?connect_timeout=1")
+	if err := failing.Run(); err == nil {
+		t.Fatal("an unreachable database fails the migration")
+	}
+}

@@ -152,6 +152,7 @@ def _ci_source_for(bc: BackendConfig) -> Path | None:
         BackendLanguage.PYTHON: COMMON_DIR / "ci_python.yml",
         BackendLanguage.NODE: COMMON_DIR / "ci_node.yml",
         BackendLanguage.RUST: COMMON_DIR / "ci_rust.yml",
+        BackendLanguage.GO: COMMON_DIR / "ci_go.yml",
     }
     return mapping.get(bc.language)
 

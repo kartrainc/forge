@@ -1,0 +1,25 @@
+// Command migrate applies the embedded SQL migrations.
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/migrations"
+)
+
+func main() {
+	cfg, err := config.Load(config.LoadOptions{})
+	if err != nil {
+		slog.Error("configuration error", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.Up(context.Background(), db.URL(cfg.DB.URL)); err != nil {
+		slog.Error("migration failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("migrations applied successfully")
+}

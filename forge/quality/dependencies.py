@@ -43,6 +43,12 @@ def dependencies(root: Path, *, lock: bool = False) -> dict:
             )
         elif language == "rust":
             rust_roots.add(root if (root / "Cargo.toml").is_file() else service)
+        elif language == "go":
+            commands.extend(
+                [(service, ["go", "mod", "tidy"])]
+                if lock
+                else [(service, ["go", "mod", "download"]), (service, ["go", "mod", "verify"])]
+            )
         elif language == "flutter":
             commands.append(
                 (service, ["flutter", "pub", "get", *([] if lock else ["--enforce-lockfile"])])

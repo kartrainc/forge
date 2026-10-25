@@ -1,0 +1,109 @@
+package routes
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/models"
+	"{{ project_name }}/internal/services"
+)
+
+func registerItems(router chi.Router, items *services.ItemService) {
+	router.Get("/", handle(func(w http.ResponseWriter, r *http.Request) error {
+		params, err := listParams(r)
+		if err != nil {
+			return err
+		}
+		page, err := items.List(r.Context(), requestIdentity(r), params)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusOK, page)
+	}))
+	router.Post("/", handle(func(w http.ResponseWriter, r *http.Request) error {
+		var body models.CreateItem
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+		item, err := items.Create(r.Context(), requestIdentity(r), body)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusCreated, item)
+	}))
+	router.Get("/{id}", handle(func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r)
+		if err != nil {
+			return err
+		}
+		item, err := items.Get(r.Context(), requestIdentity(r), id)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusOK, item)
+	}))
+	router.Patch("/{id}", handle(func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r)
+		if err != nil {
+			return err
+		}
+		var body models.UpdateItem
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+		item, err := items.Update(r.Context(), requestIdentity(r), id, body)
+		if err != nil {
+			return err
+		}
+		return writeJSON(w, http.StatusOK, item)
+	}))
+	router.Delete("/{id}", handle(func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r)
+		if err != nil {
+			return err
+		}
+		if err := items.Delete(r.Context(), requestIdentity(r), id); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}))
+}
+
+// requestIdentity returns the identity the auth (or dev) middleware bound.
+func requestIdentity(r *http.Request) identity.IdentityContext {
+	id, _ := identity.FromContext(r.Context())
+	return id
+}
+
+func pathID(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		return uuid.Nil, apperrors.New(apperrors.InvalidInput, "'id' must be a UUID")
+	}
+	return id, nil
+}
+
+func listParams(r *http.Request) (models.ListParams, error) {
+	query := r.URL.Query()
+	params := models.ListParams{
+		Limit:  services.DefaultLimit,
+		Status: query.Get("status"),
+		Search: query.Get("search"),
+	}
+	for name, target := range map[string]*int64{"skip": &params.Skip, "limit": &params.Limit} {
+		if raw := query.Get(name); raw != "" {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				return params, apperrors.NewValidation("'" + name + "' must be an integer")
+			}
+			*target = value
+		}
+	}
+	return params, nil
+}

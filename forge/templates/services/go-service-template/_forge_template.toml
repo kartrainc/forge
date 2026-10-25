@@ -1,0 +1,6 @@
+# Forge template metadata — read by the generator at render time and by
+# `forge --update` to detect template-level version bumps. Not consumed
+# by Copier itself (the file is not a `_templates_suffix` target).
+
+[template]
+version = "1.0.0"

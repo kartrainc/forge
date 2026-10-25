@@ -1,0 +1,7 @@
+# enhanced_health for Go: GET /api/v1/health/deep next to the base
+# /api/v1/health/live and /api/v1/health/ready probes.
+
+- target: internal/routes/routes.go
+  marker: FORGE:ROUTES_REGISTRATION
+  position: before
+  snippet: "registerDeepHealth(api)"

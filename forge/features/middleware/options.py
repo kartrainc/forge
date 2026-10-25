@@ -49,11 +49,11 @@ ENDPOINTS: none — ambient context via service.observability.correlation""",
             description="""\
 Token-bucket rate limiter, keyed by tenant when authenticated or by
 client IP otherwise. Protects downstream services from hot callers and
-smooths burst traffic. Ships three first-class implementations with
+smooths burst traffic. Ships four first-class implementations with
 matching knobs — Python (in-memory), Node (@fastify/rate-limit), Rust
-(Axum tower layer).
+(Axum tower layer), Go (net/http middleware, in-memory).
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: returns 429 on limit breach; /health and /metrics skipped.
 REQUIRES: nothing by default; set REDIS_URL to share state across replicas.""",
             category=FeatureCategory.RELIABILITY,
@@ -73,7 +73,7 @@ X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and HSTS
 on HTTPS responses) to every request. Turning this off is a deliberate
 choice for intentionally-insecure demos.
 
-BACKENDS: python, node, rust
+BACKENDS: python, node, rust, go
 ENDPOINTS: none — middleware decorates every response.""",
             category=FeatureCategory.RELIABILITY,
             enables={True: ("security_headers",)},

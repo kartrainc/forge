@@ -1,0 +1,8 @@
+# security_headers for Go: decorates every response inside the correlation
+# and recover layers. Registered before the marker so it also wraps the
+# rate limiter, and 429 responses carry the headers.
+
+- target: internal/app/app.go
+  marker: FORGE:MIDDLEWARE_REGISTRATION
+  position: before
+  snippet: "middleware.SecurityHeaders,"

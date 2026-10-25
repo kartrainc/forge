@@ -1,0 +1,34 @@
+name: CI (go service)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: __FORGE_SERVICE_MATRIX__
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.path }}/go.mod
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+      - name: Format, vet, build and test
+        run: |
+          test -z "$(gofmt -l .)"
+          go mod verify
+          go vet ./...
+          go build ./...
+          go test -count=1 ./tests/unit/...
+      - name: Audit dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

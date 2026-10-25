@@ -1,0 +1,167 @@
+package unit_test
+
+import (
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/circuitbreaker"
+)
+
+var errDownstream = errors.New("downstream failed")
+
+func TestCircuitBreakerOpensAfterThresholdAndProbes(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	breaker := circuitbreaker.New(2, 30*time.Second, circuitbreaker.WithClock(func() time.Time { return now }))
+	fail := func() error { return errDownstream }
+	calls := 0
+	succeed := func() error { calls++; return nil }
+
+	if err := breaker.Call(fail); !errors.Is(err, errDownstream) || breaker.State() != circuitbreaker.Closed {
+		t.Fatalf("first failure: %v %v", err, breaker.State())
+	}
+	if err := breaker.Call(fail); !errors.Is(err, errDownstream) || breaker.State() != circuitbreaker.Open {
+		t.Fatalf("threshold reached: %v %v", err, breaker.State())
+	}
+	if err := breaker.Call(succeed); !errors.Is(err, circuitbreaker.ErrOpen) || calls != 0 {
+		t.Fatalf("open breakers short-circuit: %v calls=%d", err, calls)
+	}
+	now = now.Add(30 * time.Second)
+	if err := breaker.Call(fail); !errors.Is(err, errDownstream) || breaker.State() != circuitbreaker.Open {
+		t.Fatalf("a failed probe reopens: %v %v", err, breaker.State())
+	}
+	if err := breaker.Call(succeed); !errors.Is(err, circuitbreaker.ErrOpen) {
+		t.Fatalf("reopened breakers wait a full reset: %v", err)
+	}
+	now = now.Add(30 * time.Second)
+	if err := breaker.Call(succeed); err != nil || calls != 1 || breaker.State() != circuitbreaker.Closed {
+		t.Fatalf("a successful probe closes: %v %v", err, breaker.State())
+	}
+	if err := breaker.Call(fail); err == nil || breaker.State() != circuitbreaker.Closed {
+		t.Fatalf("closing resets the failure count: %v", breaker.State())
+	}
+	_ = breaker.Call(succeed)
+	_ = breaker.Call(fail)
+	if breaker.State() != circuitbreaker.Closed {
+		t.Fatal("successes reset consecutive failures")
+	}
+}
+
+func TestCircuitBreakerAdmitsOneProbeAtATime(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	breaker := circuitbreaker.New(0, time.Second, circuitbreaker.WithClock(clock))
+	if err := breaker.Call(func() error { return errDownstream }); err == nil || breaker.State() != circuitbreaker.Open {
+		t.Fatalf("threshold below one trips on the first failure: %v", breaker.State())
+	}
+	mu.Lock()
+	now = now.Add(time.Second)
+	mu.Unlock()
+	entered, finish := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- breaker.Call(func() error { close(entered); <-finish; return nil })
+	}()
+	<-entered
+	if breaker.State() != circuitbreaker.HalfOpen {
+		t.Fatalf("probe in flight: %v", breaker.State())
+	}
+	if err := breaker.Call(func() error { return nil }); !errors.Is(err, circuitbreaker.ErrOpen) {
+		t.Fatalf("concurrent calls during a probe are rejected: %v", err)
+	}
+	close(finish)
+	if err := <-done; err != nil || breaker.State() != circuitbreaker.Closed {
+		t.Fatalf("probe result: %v %v", err, breaker.State())
+	}
+}
+
+func TestCircuitBreakerIgnoresStaleResultsWhileOpen(t *testing.T) {
+	breaker := circuitbreaker.New(1, time.Hour)
+	entered, finish := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- breaker.Call(func() error { close(entered); <-finish; return nil })
+	}()
+	<-entered
+	_ = breaker.Call(func() error { return errDownstream })
+	close(finish)
+	if err := <-done; err != nil || breaker.State() != circuitbreaker.Open {
+		t.Fatalf("a slow success must not close a tripped breaker: %v %v", err, breaker.State())
+	}
+}
+
+func TestCircuitBreakerCountsPanicsAsFailures(t *testing.T) {
+	breaker := circuitbreaker.New(1, time.Hour)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("panics propagate")
+			}
+		}()
+		_ = breaker.Call(func() error { panic("boom") })
+	}()
+	if breaker.State() != circuitbreaker.Open {
+		t.Fatalf("panic counted as failure: %v", breaker.State())
+	}
+}
+
+func TestCircuitBreakerExecuteReturnsValues(t *testing.T) {
+	breaker := circuitbreaker.New(1, time.Hour)
+	value, err := circuitbreaker.Execute(breaker, func() (int, error) { return 42, nil })
+	if err != nil || value != 42 {
+		t.Fatalf("execute: %d %v", value, err)
+	}
+	if _, err := circuitbreaker.Execute(breaker, func() (int, error) { return 0, errDownstream }); !errors.Is(err, errDownstream) {
+		t.Fatalf("execute error: %v", err)
+	}
+	if _, err := circuitbreaker.Execute(breaker, func() (int, error) { return 1, nil }); !errors.Is(err, circuitbreaker.ErrOpen) {
+		t.Fatalf("execute while open: %v", err)
+	}
+	for state, want := range map[circuitbreaker.State]string{
+		circuitbreaker.Closed: "closed", circuitbreaker.Open: "open", circuitbreaker.HalfOpen: "half-open",
+	} {
+		if state.String() != want {
+			t.Fatalf("%d: %s", state, state)
+		}
+	}
+}
+
+func TestCircuitBreakerRegistryReadsEnv(t *testing.T) {
+	t.Setenv("CIRCUIT_BREAKER_THRESHOLD", "2")
+	t.Setenv("CIRCUIT_BREAKER_RESET_TIMEOUT", "60")
+	now := time.Unix(1_700_000_000, 0)
+	registry := circuitbreaker.NewRegistry(circuitbreaker.WithClock(func() time.Time { return now }))
+	breaker := registry.Get("openai")
+	if registry.Get("openai") != breaker || registry.Get("vector-store") == breaker {
+		t.Fatal("one breaker per name")
+	}
+	_ = breaker.Call(func() error { return errDownstream })
+	if breaker.State() != circuitbreaker.Closed {
+		t.Fatal("threshold 2 from env")
+	}
+	_ = breaker.Call(func() error { return errDownstream })
+	now = now.Add(59 * time.Second)
+	if err := breaker.Call(func() error { return nil }); !errors.Is(err, circuitbreaker.ErrOpen) {
+		t.Fatalf("reset timeout 60s from env: %v", err)
+	}
+	now = now.Add(time.Second)
+	if err := breaker.Call(func() error { return nil }); err != nil {
+		t.Fatalf("probe after reset: %v", err)
+	}
+
+	t.Setenv("CIRCUIT_BREAKER_THRESHOLD", "not-a-number")
+	t.Setenv("CIRCUIT_BREAKER_RESET_TIMEOUT", "0")
+	defaults := circuitbreaker.NewRegistry().Get("defaults")
+	for range circuitbreaker.DefaultThreshold - 1 {
+		_ = defaults.Call(func() error { return errDownstream })
+	}
+	if defaults.State() != circuitbreaker.Closed {
+		t.Fatal("invalid env falls back to the default threshold")
+	}
+	_ = defaults.Call(func() error { return errDownstream })
+	if defaults.State() != circuitbreaker.Open {
+		t.Fatal("default threshold trips")
+	}
+}

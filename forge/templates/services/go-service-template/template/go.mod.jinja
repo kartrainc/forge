@@ -1,0 +1,19 @@
+module {{ project_name }}
+
+go {{ go_version }}.0
+
+require (
+	github.com/go-chi/chi/v5 v5.5.0
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.11.0
+	github.com/pressly/goose/v3 v3.29.0
+	gopkg.in/yaml.v3 v3.0.1
+{%- if include_platform_auth | default(false) %}
+	forge.local/platform-auth-go v0.0.0
+{%- endif %}
+)
+{%- if include_platform_auth | default(false) %}
+
+// The platform-auth SDK ships in the project at packages/platform-auth-go.
+replace forge.local/platform-auth-go => ../../packages/platform-auth-go
+{%- endif %}

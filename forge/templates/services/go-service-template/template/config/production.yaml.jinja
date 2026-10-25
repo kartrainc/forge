@@ -1,0 +1,14 @@
+logging:
+  level: "info"
+  pretty: false
+
+security:
+  auth:
+    # Only a project that generates the platform-auth middleware enables auth;
+    # without it the production profile would demand an issuer it never uses.
+    enabled: {{ 'true' if include_platform_auth | default(false) else 'false' }}
+
+server:
+  cors:
+    allow_origins: []
+    allow_credentials: true

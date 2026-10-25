@@ -1,0 +1,175 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/routes"
+	"{{ project_name }}/tests/testutil"
+)
+
+// unreachable is a syntactically valid url nothing listens on; the pool is lazy.
+const unreachable = "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1"
+
+func TestApplicationServesHealthAndInfo(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.App.Name = "{{ project_name }}"
+	pool, err := db.NewPool(context.Background(), unreachable, 2, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	handler := app.New(&cfg, pool)
+	if status, body := testutil.Do(t, handler, http.MethodGet, "/api/v1/health/live", nil); status != 200 || body["status"] != "UP" {
+		t.Fatalf("live: %d %v", status, body)
+	}
+	status, body := testutil.Do(t, handler, http.MethodGet, "/api/v1/health/ready", nil)
+	if status != http.StatusServiceUnavailable || body["status"] != "DOWN" {
+		t.Fatalf("ready without a database: %d %v", status, body)
+	}
+	if status, body := testutil.Do(t, handler, http.MethodGet, "/api/v1/info", nil); status != 200 || body["title"] != "{{ project_name }}" {
+		t.Fatalf("info: %d %v", status, body)
+	}
+	for _, path := range []string{"/api/v1", "/api/v1/"} {
+		if status, body := testutil.Do(t, handler, http.MethodGet, path, nil); status != 200 || body["message"] == nil {
+			t.Fatalf("home %s: %d %v", path, status, body)
+		}
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+	if recorder.Header().Get("X-Request-Id") == "" {
+		t.Fatal("responses carry a correlation id")
+	}
+	if status, body := testutil.Do(t, handler, http.MethodGet, "/api/v1/missing", nil); status != http.StatusNotFound || testutil.ErrorCode(body) != "NOT_FOUND" {
+		t.Fatalf("unknown route: %d %v", status, body)
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/info", nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method: %d", recorder.Code)
+	}
+}
+
+func TestReadinessReportsHealthyDatabase(t *testing.T) {
+	router := chi.NewRouter()
+	routes.Register(router, routes.Deps{DB: okPinger{}})
+	status, body := testutil.Do(t, router, http.MethodGet, "/api/v1/health/ready", nil)
+	if status != 200 || body["status"] != "UP" {
+		t.Fatalf("ready: %d %v", status, body)
+	}
+}
+
+func TestPoolConfiguration(t *testing.T) {
+	if _, err := db.NewPool(context.Background(), "::not a url::", 0, 0); err == nil {
+		t.Fatal("invalid urls are rejected")
+	}
+	pool, err := db.NewPool(context.Background(), unreachable, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	t.Setenv("DATABASE_URL", "postgresql://env/db")
+	if db.URL("postgresql://config/db") != "postgresql://env/db" {
+		t.Fatal("DATABASE_URL wins")
+	}
+	t.Setenv("DATABASE_URL", "")
+	if db.URL("postgresql://config/db") != "postgresql://config/db" {
+		t.Fatal("configured url is the fallback")
+	}
+}
+
+func TestListenHonoursPort(t *testing.T) {
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := free.Addr().(*net.TCPAddr).Port
+	free.Close()
+	t.Setenv("PORT", strconv.Itoa(port))
+	listener, err := app.Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listener.Addr().(*net.TCPAddr).Port != port {
+		t.Fatalf("listening on %v", listener.Addr())
+	}
+	listener.Close()
+	t.Setenv("PORT", "not-a-port")
+	if _, err := app.Listen(0); err == nil {
+		t.Fatal("invalid PORT must fail")
+	}
+	t.Setenv("PORT", "")
+	listener, err = app.Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+}
+
+func TestServeDrainsOnCancel(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Serve(ctx, listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTeapot)
+		}))
+	}()
+	response, err := http.Get("http://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusTeapot {
+		t.Fatalf("status %d", response.StatusCode)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	closed, _ := net.Listen("tcp", "127.0.0.1:0")
+	closed.Close()
+	if err := app.Serve(context.Background(), closed, http.NotFoundHandler()); err == nil || errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("a closed listener fails: %v", err)
+	}
+}
+
+func TestLoggerLevels(t *testing.T) {
+	if !app.Logger("debug", false).Enabled(context.Background(), -4) {
+		t.Fatal("debug enables debug")
+	}
+	if app.Logger("bogus", true).Enabled(context.Background(), -4) {
+		t.Fatal("unknown levels fall back to info")
+	}
+}
+
+func TestIdentityContext(t *testing.T) {
+	dev := identity.Dev()
+	if dev.Subject != identity.DevSubject || dev.TenantID.String() != identity.DevSubject || len(dev.Roles) != 2 {
+		t.Fatalf("dev identity %+v", dev)
+	}
+	custom := identity.New(uuid.New(), "subject")
+	got, ok := identity.FromContext(identity.WithContext(context.Background(), custom))
+	if !ok || got.Subject != "subject" {
+		t.Fatal("identity round-trips through context")
+	}
+	if _, ok := identity.FromContext(context.Background()); ok {
+		t.Fatal("no identity on a bare context")
+	}
+}

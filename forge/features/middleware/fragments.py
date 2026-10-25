@@ -76,6 +76,7 @@ def register_all(api: ForgeAPI) -> None:
                     dependencies=("@fastify/rate-limit@11.2.1",),
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(fragment_dir=_impl("rate_limit", "rust")),
+                BackendLanguage.GO: FragmentImplSpec(fragment_dir=_impl("rate_limit", "go")),
             },
         )
     )
@@ -95,6 +96,9 @@ def register_all(api: ForgeAPI) -> None:
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(
                     fragment_dir=_impl("security_headers", "rust"),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("security_headers", "go"),
                 ),
             },
         )

@@ -1,0 +1,89 @@
+package e2e_test
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/worker"
+)
+
+// workerBrokerURL is REDIS_URL when set, otherwise an in-process miniredis
+// the worker binary reaches over TCP.
+func workerBrokerURL(t *testing.T) string {
+	t.Helper()
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		return url
+	}
+	return "redis://" + miniredis.RunT(t).Addr() + "/0"
+}
+
+func TestWorkerBinaryRejectsInvalidConfiguration(t *testing.T) {
+	for name, env := range map[string][]string{
+		"invalid broker url":    {"ENV=testing", "TASKIQ_BROKER_URL=http://not-redis"},
+		"unreachable broker":    {"ENV=testing", "TASKIQ_BROKER_URL=redis://127.0.0.1:1/0"},
+		"production auth guard": {"ENV=production", "APP__SECURITY__AUTH__ENABLED=true", "GATEKEEPER_ISSUER=", "SERVICE_AUDIENCE="},
+	} {
+		if err := command(t, "worker", env...).Run(); err == nil {
+			t.Fatalf("%s must exit non-zero", name)
+		}
+	}
+}
+
+func TestWorkerBinaryProcessesJobsAndStopsGracefully(t *testing.T) {
+	url := workerBrokerURL(t)
+	process := command(t, "worker", "ENV=testing", "APP__LOGGING__LEVEL=info", "TASKIQ_BROKER_URL="+url)
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	name := uuid.NewString()
+	executed, drained := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(drained)
+		scanner := bufio.NewScanner(stdout)
+		seen := false
+		for scanner.Scan() {
+			var entry map[string]any
+			if !seen && json.Unmarshal(scanner.Bytes(), &entry) == nil &&
+				entry["msg"] == "hello_job executed" && entry["name"] == name {
+				seen = true
+				close(executed)
+			}
+		}
+	}()
+
+	client, err := worker.NewClient(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	task, _ := worker.NewHelloTask(worker.HelloJob{Name: name})
+	if _, err := client.Enqueue(task); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	select {
+	case <-executed:
+		ran = true
+	case <-time.After(20 * time.Second):
+	}
+	_ = process.Process.Signal(syscall.SIGTERM)
+	<-drained
+	err = process.Wait()
+	if !ran {
+		t.Fatal("the worker did not execute the hello job")
+	}
+	if err != nil {
+		t.Fatalf("graceful shutdown must exit 0: %v", err)
+	}
+}

@@ -105,7 +105,7 @@ def _apply_deps_candidate(
             status="errored",
             error=(
                 f"cannot infer backend language from rel_path={cand.rel_path!r} "
-                f"(expected pyproject.toml / package.json / Cargo.toml)"
+                f"(expected pyproject.toml / package.json / Cargo.toml / go.mod)"
             ),
         )
 
@@ -171,6 +171,8 @@ def _lang_from_manifest_relpath(rel_path: str) -> BackendLanguage | None:
         return BackendLanguage.NODE
     if name == "Cargo.toml":
         return BackendLanguage.RUST
+    if name == "go.mod":
+        return BackendLanguage.GO
     return None
 
 

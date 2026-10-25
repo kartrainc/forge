@@ -1,0 +1,246 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/internal/models"
+	"{{ project_name }}/internal/routes"
+	"{{ project_name }}/internal/services"
+	"{{ project_name }}/tests/testutil"
+)
+
+const itemsPath = "/api/v1/{{ entity_plural }}"
+
+// memoryRepo is an in-memory ItemRepository scoped by tenant.
+type memoryRepo struct {
+	items map[uuid.UUID]models.Item
+	fail  error
+}
+
+func newMemoryRepo() *memoryRepo { return &memoryRepo{items: map[uuid.UUID]models.Item{}} }
+
+func (m *memoryRepo) List(_ context.Context, ident identity.IdentityContext, params models.ListParams) (models.Page[models.Item], error) {
+	if m.fail != nil {
+		return models.Page[models.Item]{}, m.fail
+	}
+	page := models.Page[models.Item]{Items: []models.Item{}, Skip: params.Skip, Limit: params.Limit}
+	for _, item := range m.items {
+		if item.CustomerID == ident.TenantID && (params.Status == "" || item.Status == params.Status) &&
+			(params.Search == "" || strings.Contains(item.Name, params.Search)) {
+			page.Items = append(page.Items, item)
+		}
+	}
+	page.Total = int64(len(page.Items))
+	return page, nil
+}
+
+func (m *memoryRepo) GetByID(_ context.Context, ident identity.IdentityContext, id uuid.UUID) (*models.Item, error) {
+	if m.fail != nil {
+		return nil, m.fail
+	}
+	if item, ok := m.items[id]; ok && item.CustomerID == ident.TenantID {
+		return &item, nil
+	}
+	return nil, nil
+}
+
+func (m *memoryRepo) FindByName(ctx context.Context, ident identity.IdentityContext, name string) (*models.Item, error) {
+	return m.FindByNameExcluding(ctx, ident, name, uuid.Nil)
+}
+
+func (m *memoryRepo) FindByNameExcluding(_ context.Context, ident identity.IdentityContext, name string, exclude uuid.UUID) (*models.Item, error) {
+	for _, item := range m.items {
+		if item.CustomerID == ident.TenantID && item.Name == name && item.ID != exclude {
+			return &item, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *memoryRepo) Create(_ context.Context, ident identity.IdentityContext, data models.CreateItem) (*models.Item, error) {
+	item := models.Item{ID: uuid.New(), Name: data.Name, Description: data.Description, Tags: data.Tags,
+		Status: "DRAFT", CustomerID: ident.TenantID, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	m.items[item.ID] = item
+	return &item, nil
+}
+
+func (m *memoryRepo) Update(_ context.Context, ident identity.IdentityContext, id uuid.UUID, data models.UpdateItem) (*models.Item, error) {
+	item, ok := m.items[id]
+	if !ok || item.CustomerID != ident.TenantID {
+		return nil, nil
+	}
+	if data.Name != nil {
+		item.Name = *data.Name
+	}
+	if data.Status != nil {
+		item.Status = *data.Status
+	}
+	m.items[id] = item
+	return &item, nil
+}
+
+func (m *memoryRepo) Delete(_ context.Context, _ identity.IdentityContext, id uuid.UUID) error {
+	delete(m.items, id)
+	return nil
+}
+
+func itemsHandler(repo *memoryRepo) http.Handler {
+	router := chi.NewRouter()
+	routes.Register(router, routes.Deps{DB: okPinger{}, Items: services.NewItemService(repo)})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		router.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), identity.Dev())))
+	})
+}
+
+type okPinger struct{}
+
+func (okPinger) Ping(context.Context) error { return nil }
+
+func TestItemLifecycleThroughRoutes(t *testing.T) {
+	handler := itemsHandler(newMemoryRepo())
+	status, item := testutil.Do(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "Lifecycle", "tags": []string{"a"}})
+	if status != http.StatusCreated {
+		t.Fatalf("create: %d %v", status, item)
+	}
+	endpoint := itemsPath + "/" + item["id"].(string)
+	if status, _ := testutil.Do(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "Lifecycle"}); status != http.StatusConflict {
+		t.Fatalf("duplicate: %d", status)
+	}
+	if status, body := testutil.Do(t, handler, http.MethodGet, endpoint, nil); status != http.StatusOK || body["name"] != "Lifecycle" {
+		t.Fatalf("get: %d %v", status, body)
+	}
+	if status, body := testutil.Do(t, handler, http.MethodPatch, endpoint, map[string]any{"name": "Updated", "status": "ACTIVE"}); status != http.StatusOK || body["name"] != "Updated" {
+		t.Fatalf("patch: %d %v", status, body)
+	}
+	if status, body := testutil.Do(t, handler, http.MethodPatch, endpoint, map[string]any{}); status != http.StatusOK || body["name"] != "Updated" {
+		t.Fatalf("empty patch: %d %v", status, body)
+	}
+	status, page := testutil.Do(t, handler, http.MethodGet, itemsPath+"?search=Upd&status=ACTIVE&limit=500&skip=0", nil)
+	if status != http.StatusOK || page["total"] != float64(1) || page["limit"] != float64(100) {
+		t.Fatalf("list: %d %v", status, page)
+	}
+	if status, _ := testutil.Do(t, handler, http.MethodDelete, endpoint, nil); status != http.StatusNoContent {
+		t.Fatalf("delete: %d", status)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPatch} {
+		status, body := testutil.Do(t, handler, method, endpoint, map[string]any{"name": "gone"})
+		if status != http.StatusNotFound || testutil.ErrorCode(body) != "NOT_FOUND" {
+			t.Fatalf("%s missing item: %d %v", method, status, body)
+		}
+	}
+}
+
+func TestItemRequestValidation(t *testing.T) {
+	repo := newMemoryRepo()
+	handler := itemsHandler(repo)
+	_, first := testutil.Do(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "first"})
+	_, _ = testutil.Do(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "second"})
+	firstPath := itemsPath + "/" + first["id"].(string)
+	cases := []struct {
+		method, url string
+		payload     any
+		status      int
+		code        string
+	}{
+		{http.MethodGet, itemsPath + "?limit=0", nil, 422, "VALIDATION_FAILED"},
+		{http.MethodGet, itemsPath + "?skip=-1", nil, 422, "VALIDATION_FAILED"},
+		{http.MethodGet, itemsPath + "?limit=ten", nil, 422, "VALIDATION_FAILED"},
+		{http.MethodPost, itemsPath, "{not json", 422, "VALIDATION_FAILED"},
+		{http.MethodPost, itemsPath, map[string]any{"description": "no name"}, 422, "VALIDATION_FAILED"},
+		{http.MethodGet, itemsPath + "/not-a-uuid", nil, 422, "INVALID_INPUT"},
+		{http.MethodPatch, itemsPath + "/not-a-uuid", map[string]any{}, 422, "INVALID_INPUT"},
+		{http.MethodDelete, itemsPath + "/not-a-uuid", nil, 422, "INVALID_INPUT"},
+		{http.MethodPatch, firstPath, "{not json", 422, "VALIDATION_FAILED"},
+		{http.MethodPatch, firstPath, map[string]any{"name": ""}, 422, "VALIDATION_FAILED"},
+		{http.MethodPatch, firstPath, map[string]any{"name": "second"}, 409, "ALREADY_EXISTS"},
+	}
+	for _, tc := range cases {
+		status, body := testutil.Do(t, handler, tc.method, tc.url, tc.payload)
+		if status != tc.status || testutil.ErrorCode(body) != tc.code {
+			t.Fatalf("%s %s: %d %v", tc.method, tc.url, status, body)
+		}
+	}
+	oversized := `{"name":"` + strings.Repeat("x", 2<<20) + `"}`
+	limited := middleware.BodyLimit(1 << 20)(handler)
+	if status, _ := testutil.Do(t, limited, http.MethodPost, itemsPath, oversized); status != 422 {
+		t.Fatalf("oversized body: %d", status)
+	}
+}
+
+func TestRepositoryFailuresSurfaceAsErrors(t *testing.T) {
+	repo := newMemoryRepo()
+	repo.fail = apperrors.New(apperrors.DatabaseUnavailable, "down")
+	handler := itemsHandler(repo)
+	id := uuid.NewString()
+	for _, tc := range []struct{ method, url string }{
+		{http.MethodGet, itemsPath},
+		{http.MethodGet, itemsPath + "/" + id},
+		{http.MethodPatch, itemsPath + "/" + id},
+		{http.MethodDelete, itemsPath + "/" + id},
+	} {
+		if status, _ := testutil.Do(t, handler, tc.method, tc.url, map[string]any{}); status != 503 {
+			t.Fatalf("%s %s: %d", tc.method, tc.url, status)
+		}
+	}
+	service := services.NewItemService(failingNames{repo})
+	if _, err := service.Create(context.Background(), identity.Dev(), models.CreateItem{Name: "x"}); !errors.Is(err, errNames) {
+		t.Fatalf("create: %v", err)
+	}
+}
+
+var errNames = errors.New("names unavailable")
+
+// failingNames fails name lookups while delegating the rest.
+type failingNames struct{ *memoryRepo }
+
+func (failingNames) FindByName(context.Context, identity.IdentityContext, string) (*models.Item, error) {
+	return nil, errNames
+}
+
+func TestUpdateConflictsAndVanishingRows(t *testing.T) {
+	ctx, dev := context.Background(), identity.Dev()
+	repo := newMemoryRepo()
+	service := services.NewItemService(vanishing{repo})
+	item, _ := repo.Create(ctx, dev, models.CreateItem{Name: "one"})
+	name := "two"
+	if _, err := service.Update(ctx, dev, item.ID, models.UpdateItem{Name: &name}); apperrors.As(err).Code != apperrors.NotFound {
+		t.Fatalf("vanished row: %v", err)
+	}
+	conflicting := services.NewItemService(failingExcluding{repo})
+	if _, err := conflicting.Update(ctx, dev, item.ID, models.UpdateItem{Name: &name}); !errors.Is(err, errNames) {
+		t.Fatalf("lookup failure: %v", err)
+	}
+	broken := services.NewItemService(failingUpdate{repo})
+	if _, err := broken.Update(ctx, dev, item.ID, models.UpdateItem{Name: &name}); !errors.Is(err, errNames) {
+		t.Fatalf("update failure: %v", err)
+	}
+}
+
+type vanishing struct{ *memoryRepo }
+
+func (vanishing) Update(context.Context, identity.IdentityContext, uuid.UUID, models.UpdateItem) (*models.Item, error) {
+	return nil, nil
+}
+
+type failingExcluding struct{ *memoryRepo }
+
+func (failingExcluding) FindByNameExcluding(context.Context, identity.IdentityContext, string, uuid.UUID) (*models.Item, error) {
+	return nil, errNames
+}
+
+type failingUpdate struct{ *memoryRepo }
+
+func (failingUpdate) Update(context.Context, identity.IdentityContext, uuid.UUID, models.UpdateItem) (*models.Item, error) {
+	return nil, errNames
+}

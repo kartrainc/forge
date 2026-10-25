@@ -88,6 +88,7 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: _GATEKEEPER_IMPL,
                 BackendLanguage.NODE: _GATEKEEPER_IMPL,
                 BackendLanguage.RUST: _GATEKEEPER_IMPL,
+                BackendLanguage.GO: _GATEKEEPER_IMPL,
             },
             # ``gatekeeper`` keys the fragment's own declarative compose.yaml
             # entry into ``plan.capabilities``; ``redis`` pulls in the BFF
@@ -167,6 +168,22 @@ def register_all(api: ForgeAPI) -> None:
                     # the Phase 7 middleware fragment's
                     # ``platform-auth = { path = "../packages/platform-auth-rs" }``
                     # entry.
+                ),
+            },
+        )
+    )
+
+    # Go SDK at ``<project>/packages/platform-auth-go/`` (module
+    # ``forge.local/platform-auth-go``). Go services require it through the
+    # base template's go.mod ``replace`` directive (gated on
+    # ``include_platform_auth``), so the impl declares no dependencies.
+    api.add_fragment(
+        Fragment(
+            name="platform_auth_sdk_go",
+            implementations={
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("platform_auth_sdk_go", "go"),
+                    scope="project",
                 ),
             },
         )
@@ -388,6 +405,23 @@ def register_all(api: ForgeAPI) -> None:
         )
     )
 
+    # Go service wiring: ``internal/middleware/platform_auth.go`` verifies the
+    # bearer and binds ``identity.IdentityContext``; ``app.InitPlatformAuth``
+    # builds the guard at FORGE:STARTUP_INIT from GATEKEEPER_ISSUER /
+    # SERVICE_AUDIENCE (falling back to security.auth.*). With
+    # security.auth.enabled=false, token-less requests get the dev identity.
+    api.add_fragment(
+        Fragment(
+            name="platform_auth_go_middleware",
+            implementations={
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("platform_auth_go_middleware", "go"),
+                ),
+            },
+            depends_on=("platform_auth_sdk_go",),
+        )
+    )
+
     # Phase 2 (continued) — Gatekeeper signing-key init service.
     #
     # One-shot init container that generates ECDSA P-256 signing keys to
@@ -408,6 +442,7 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: _GATEKEEPER_KEYGEN_IMPL,
                 BackendLanguage.NODE: _GATEKEEPER_KEYGEN_IMPL,
                 BackendLanguage.RUST: _GATEKEEPER_KEYGEN_IMPL,
+                BackendLanguage.GO: _GATEKEEPER_KEYGEN_IMPL,
             },
             # The keygen init container's compose.yaml registers under
             # capability ``gatekeeper-keygen``; declaring it here pulls
@@ -433,6 +468,7 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: _GATEKEEPER_REALM_SYNC_IMPL,
                 BackendLanguage.NODE: _GATEKEEPER_REALM_SYNC_IMPL,
                 BackendLanguage.RUST: _GATEKEEPER_REALM_SYNC_IMPL,
+                BackendLanguage.GO: _GATEKEEPER_REALM_SYNC_IMPL,
             },
             capabilities=("gatekeeper-realm-sync",),
         )

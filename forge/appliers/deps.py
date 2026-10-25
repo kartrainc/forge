@@ -1,7 +1,8 @@
 """Applier for a fragment's language-specific dependency adds.
 
 Merges fragment-declared deps into the target backend's package
-manifest (``pyproject.toml`` / ``package.json`` / ``Cargo.toml``) in a
+manifest (``pyproject.toml`` / ``package.json`` / ``Cargo.toml`` /
+``go.mod``) in a
 way that preserves user-authored entries. Raises
 :class:`FragmentError` when the manifest is missing, malformed, or the
 fragment's spec string doesn't parse.
@@ -62,6 +63,8 @@ def _add_dependencies(
         _add_node_deps(backend_dir / "package.json", deps, project_root=project_root)
     elif lang is BackendLanguage.RUST:
         _add_rust_deps(backend_dir / "Cargo.toml", deps)
+    elif lang is BackendLanguage.GO:
+        _add_go_deps(backend_dir / "go.mod", deps)
 
 
 def _add_python_deps(pyproject: Path, deps: tuple[str, ...]) -> None:
@@ -190,6 +193,68 @@ def _rewrite_workspace_spec(
         if current.parent == current:
             return None
         current = current.parent
+
+
+def _parse_go_dep(dep: str) -> tuple[str, str]:
+    """Split ``module@version`` (the only Go form; versions are exact).
+
+    >>> _parse_go_dep("github.com/redis/go-redis/v9@v9.23.0")
+    ('github.com/redis/go-redis/v9', 'v9.23.0')
+    """
+    module, sep, version = dep.strip().rpartition("@")
+    if not sep or not module or not version.startswith("v"):
+        raise FragmentError(
+            f"Go dependency {dep!r} must be 'module@vX.Y.Z'",
+            code=FRAGMENT_DEP_SPEC_INVALID,
+            context={"dep": dep, "language": "go"},
+        )
+    return module, version
+
+
+def _go_required_modules(text: str) -> set[str]:
+    """Module paths already named by a ``require`` directive in go.mod."""
+    modules: set[str] = set()
+    in_block = False
+    for raw in text.splitlines():
+        line = raw.split("//", 1)[0].strip()
+        if in_block:
+            if line == ")":
+                in_block = False
+            elif line:
+                modules.add(line.split()[0])
+        elif line == "require (":
+            in_block = True
+        elif line.startswith("require "):
+            modules.add(line.split()[1])
+    return modules
+
+
+def _add_go_deps(go_mod: Path, deps: tuple[str, ...]) -> None:
+    """Add ``require`` lines for modules go.mod does not name yet.
+
+    Versions are exact (minimal version selection); ``go mod tidy`` resolves
+    go.sum and indirect modules afterwards. Existing requirements are
+    preserved — forge never clobbers hand-edited versions.
+    """
+    if not go_mod.is_file():
+        raise FragmentError(
+            f"go.mod not found at {go_mod}",
+            code=FRAGMENT_DEPS_FILE_MISSING,
+            context={"path": str(go_mod), "language": "go"},
+        )
+    text = go_mod.read_text(encoding="utf-8")
+    present = _go_required_modules(text)
+    additions = [
+        f"{module} {version}"
+        for module, version in (_parse_go_dep(dep) for dep in deps)
+        if module not in present
+    ]
+    if not additions:
+        return
+    if not text.endswith("\n"):
+        text += "\n"
+    text += "\nrequire (\n" + "".join(f"\t{line}\n" for line in additions) + ")\n"
+    go_mod.write_text(text, encoding="utf-8")
 
 
 def _add_rust_deps(cargo_toml: Path, deps: tuple[str, ...]) -> None:

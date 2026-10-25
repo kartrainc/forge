@@ -1,0 +1,175 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"testing"
+	"time"
+
+	platformauth "forge.local/platform-auth-go"
+	"forge.local/platform-auth-go/authtest"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/tests/testutil"
+)
+
+const (
+	platformAuthAudience = "svc-{{ project_name }}"
+	platformAuthTenant   = "33333333-3333-4333-8333-333333333333"
+	platformAuthSubject  = "44444444-4444-4444-8444-444444444444"
+	platformAuthNoDB     = "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1"
+)
+
+// platformAuthProbe echoes the identities the middleware bound.
+var platformAuthProbe = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	local, bound := identity.FromContext(r.Context())
+	verified, sdkBound := platformauth.IdentityFromContext(r.Context())
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"bound": bound, "verified": sdkBound && verified.Subject == local.Subject,
+		"tenant": local.TenantID.String(), "subject": local.Subject, "slug": local.TenantSlug,
+		"roles": local.Roles, "scopes": local.Scopes, "actor": local.Actor,
+	})
+})
+
+func platformAuthCall(t *testing.T, handler http.Handler, path, token string) (int, http.Header, map[string]any) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	body := map[string]any{}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &body)
+	return recorder.Code, recorder.Header(), body
+}
+
+// resetPlatformAuth clears the process-wide guard once the test's env is restored.
+func resetPlatformAuth(t *testing.T) {
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+	})
+}
+
+func TestPlatformAuthMiddlewareBindsVerifiedIdentity(t *testing.T) {
+	issuer := authtest.NewIssuer()
+	defer issuer.Close()
+	jwks, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{})
+	_ = jwks.RegisterIssuer(issuer.URL(), issuer.JWKSURL())
+	guard, err := platformauth.NewAuthGuard(platformauth.NewAuthGuardConfig(platformAuthAudience, jwks))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, devMode := range []bool{false, true} {
+		handler := middleware.PlatformAuth(middleware.PlatformAuthOptions{Guard: guard, DevMode: devMode})(platformAuthProbe)
+		options := issuer.Options(platformAuthAudience, platformAuthSubject, platformAuthTenant)
+		options.Roles = []string{"user"}
+		options.Scopes = []string{"items:read"}
+		options.Act = map[string]any{"client_id": "svc-caller"}
+		options.ExtraClaims = map[string]any{platformauth.DefaultTenantSlugClaim: "acme"}
+		status, _, body := platformAuthCall(t, handler, "/api/v1/items", issuer.Token(options))
+		if status != http.StatusOK || body["verified"] != true || body["tenant"] != platformAuthTenant ||
+			body["subject"] != platformAuthSubject || body["slug"] != "acme" || body["actor"] != "svc-caller" {
+			t.Fatalf("dev=%v verified token: %d %v", devMode, status, body)
+		}
+		status, header, body := platformAuthCall(t, handler, "/api/v1/items", "not-a-token")
+		if status != http.StatusUnauthorized || header.Get("WWW-Authenticate") != "Bearer" || body["title"] != "invalid_token" {
+			t.Fatalf("dev=%v invalid token: %d %v", devMode, status, body)
+		}
+		if status, _, body := platformAuthCall(t, handler, "/api/v1/health/live", ""); status != http.StatusOK || body["bound"] != false {
+			t.Fatalf("dev=%v excluded path: %d %v", devMode, status, body)
+		}
+	}
+	strict := middleware.PlatformAuth(middleware.PlatformAuthOptions{Guard: guard})(platformAuthProbe)
+	status, _, body := platformAuthCall(t, strict, "/api/v1/items", "")
+	if status != http.StatusUnauthorized || body["type"] != platformauth.ProblemTypePrefix+"invalid_token" || body["status"] != float64(401) {
+		t.Fatalf("missing token: %d %v", status, body)
+	}
+	converted := middleware.ToIdentity(platformauth.IdentityContext{Subject: "s", Roles: []string{"r"}, Scopes: []string{"a:b"}})
+	if converted.Subject != "s" || !slices.Equal(converted.Roles, []string{"r"}) || !slices.Equal(converted.Scopes, []string{"a:b"}) {
+		t.Fatalf("conversion %+v", converted)
+	}
+}
+
+func TestPlatformAuthDevModeAndMissingGuard(t *testing.T) {
+	dev := middleware.PlatformAuth(middleware.PlatformAuthOptions{DevMode: true})(platformAuthProbe)
+	status, _, body := platformAuthCall(t, dev, "/api/v1/items", "")
+	if status != http.StatusOK || body["subject"] != identity.DevSubject || body["verified"] != false {
+		t.Fatalf("dev identity: %d %v", status, body)
+	}
+	cases := []struct {
+		handler http.Handler
+		token   string
+	}{
+		{handler: dev, token: "any"},
+		{handler: middleware.PlatformAuth(middleware.PlatformAuthOptions{})(platformAuthProbe)},
+	}
+	for _, tc := range cases {
+		if status, _, body := platformAuthCall(t, tc.handler, "/api/v1/items", tc.token); status != http.StatusServiceUnavailable || body["title"] != "service_misconfigured" {
+			t.Fatalf("missing guard: %d %v", status, body)
+		}
+	}
+}
+
+func TestInitPlatformAuthWiresTheApplication(t *testing.T) {
+	resetPlatformAuth(t)
+	issuer := authtest.NewIssuer()
+	defer issuer.Close()
+	for _, name := range []string{"GATEKEEPER_ISSUER", "SERVICE_AUDIENCE", "TENANT_ID_CLAIM"} {
+		t.Setenv(name, "")
+	}
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = true
+	if err := app.InitPlatformAuth(&cfg); err == nil {
+		t.Fatal("enabled auth requires an issuer and an audience")
+	}
+	cfg.Security.Auth.Enabled = false
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatalf("dev mode tolerates a missing issuer: %v", err)
+	}
+
+	pool, err := db.NewPool(context.Background(), platformAuthNoDB, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	t.Setenv("GATEKEEPER_ISSUER", issuer.URL()+"/")
+	t.Setenv("SERVICE_AUDIENCE", platformAuthAudience)
+	t.Setenv("TENANT_ID_CLAIM", "https://example.test/tenant")
+	cfg.Security.Auth.Enabled = true
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	handler := app.New(&cfg, pool)
+	options := issuer.Options(platformAuthAudience, platformAuthSubject, platformAuthTenant)
+	options.TenantIDClaim = "https://example.test/tenant"
+	if status, _, body := platformAuthCall(t, handler, "/api/v1/missing", issuer.Token(options)); status != http.StatusNotFound || testutil.ErrorCode(body) != "NOT_FOUND" {
+		t.Fatalf("authenticated request reaches the router: %d %v", status, body)
+	}
+	if status, header, _ := platformAuthCall(t, handler, "/api/v1/missing", ""); status != http.StatusUnauthorized || header.Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("enabled auth rejects anonymous requests: %d", status)
+	}
+	if status, _, _ := platformAuthCall(t, handler, "/api/v1/info", ""); status != http.StatusOK {
+		t.Fatalf("public routes stay open: %d", status)
+	}
+
+	t.Setenv("GATEKEEPER_ISSUER", "")
+	t.Setenv("SERVICE_AUDIENCE", "")
+	cfg.Security.Auth.ServerURL = issuer.URL()
+	cfg.Security.Auth.Audience = platformAuthAudience
+	cfg.Security.Auth.JWKSURI = "http://127.0.0.1:1/jwks"
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, body := platformAuthCall(t, app.New(&cfg, pool), "/api/v1/missing", issuer.Token(options)); status != http.StatusUnauthorized || body["title"] != "invalid_token" {
+		t.Fatalf("security.auth.jwks_uri is the configured JWKS: %d %v", status, body)
+	}
+}

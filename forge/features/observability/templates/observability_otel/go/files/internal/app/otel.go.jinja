@@ -1,0 +1,29 @@
+package app
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/otel"
+)
+
+// StartOTel installs the OTLP trace exporter (a no-op without
+// OTEL_EXPORTER_OTLP_ENDPOINT) and returns the flush to defer until exit.
+func StartOTel(ctx context.Context, cfg *config.Config) func() {
+	shutdown, err := otel.Configure(ctx, cfg.App.Name)
+	if err != nil {
+		slog.Warn("opentelemetry disabled", "error", err)
+	}
+	return func() {
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(flush); err != nil {
+			slog.Warn("opentelemetry flush failed", "error", err)
+		}
+	}
+}
+
+func otelTracing(next http.Handler) http.Handler { return otel.Middleware(next) }

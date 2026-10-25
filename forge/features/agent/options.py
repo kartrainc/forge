@@ -120,7 +120,7 @@ by changing one env var — no regeneration.
 
 OPTIONS: none | openai | anthropic | ollama | bedrock
 BACKENDS:
-  - openai     python, node, rust    (Pillar D.2 — tier-1, three built-ins)
+  - openai     python, node, rust, go (Pillar D.2 — tier-1, every built-in)
   - anthropic  python                (Python-only — Anthropic SDK ecosystem)
   - ollama     python                (Python-only — ollama-python is the canonical client)
   - bedrock    python                (Python-only — aioboto3)
@@ -129,11 +129,11 @@ Selecting ``anthropic`` / ``ollama`` / ``bedrock`` on a project with no
 Python backend is REJECTED at config time: the adapter is Python-only, so
 the service would otherwise start with the abstract ``llm_port`` wired to
 no adapter and fail at the first call. Add a Python backend, pick
-``openai`` (works on all three), or install a plugin-provided adapter
+``openai`` (works on every built-in backend), or install a plugin-provided adapter
 (Featured Plugin tier — see ``docs/known-issues.md``).
 
 DEPENDENCY: provider-specific SDK (openai / @ai-sdk/openai / async-openai
-            / anthropic / ollama / aioboto3)
+            / openai-go / anthropic / ollama / aioboto3)
 ENV: provider-specific API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)""",
             category=FeatureCategory.CONVERSATIONAL_AI,
             enables={

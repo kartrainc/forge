@@ -1,0 +1,166 @@
+package integration_test
+
+import (
+	"context"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/data/repositories"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/models"
+	"{{ project_name }}/migrations"
+	"{{ project_name }}/tests/testutil"
+)
+
+const itemsPath = "/api/v1/{{ entity_plural }}"
+
+// isolatedSchema migrates a fresh schema and returns a url whose connections
+// use it, so tests never touch the developer's tables.
+func isolatedSchema(t *testing.T) string {
+	t.Helper()
+	base := testutil.DatabaseURL(t)
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := "forge_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		admin.Close()
+	})
+	parsed, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	scoped := parsed.String()
+	if err := migrations.Up(ctx, scoped); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.Up(ctx, scoped); err != nil {
+		t.Fatalf("migrations must be idempotent: %v", err)
+	}
+	return scoped
+}
+
+func application(t *testing.T, databaseURL string) (http.Handler, *pgxpool.Pool) {
+	t.Helper()
+	pool, err := db.NewPool(context.Background(), databaseURL, 4, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	cfg := config.Defaults()
+	return app.New(&cfg, pool), pool
+}
+
+func TestReadinessQueriesRealPostgres(t *testing.T) {
+	handler, _ := application(t, testutil.DatabaseURL(t))
+	status, body := testutil.Do(t, handler, http.MethodGet, "/api/v1/health/ready", nil)
+	if status != http.StatusOK || body["status"] != "UP" {
+		t.Fatalf("ready: %d %v", status, body)
+	}
+}
+
+func TestItemLifecycleUsesRealRouterAndPostgres(t *testing.T) {
+	handler, _ := application(t, isolatedSchema(t))
+	status, item := testutil.Do(t, handler, http.MethodPost, itemsPath,
+		map[string]any{"name": "Lifecycle", "description": "test", "tags": []string{"test"}})
+	if status != http.StatusCreated {
+		t.Fatalf("create: %d %v", status, item)
+	}
+	endpoint := itemsPath + "/" + item["id"].(string)
+	if _, body := testutil.Do(t, handler, http.MethodGet, endpoint, nil); body["name"] != "Lifecycle" {
+		t.Fatalf("get: %v", body)
+	}
+	if status, _ := testutil.Do(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "Lifecycle"}); status != http.StatusConflict {
+		t.Fatalf("duplicate: %d", status)
+	}
+	status, updated := testutil.Do(t, handler, http.MethodPatch, endpoint,
+		map[string]any{"name": "Updated", "status": "ACTIVE", "tags": []string{"updated"}, "description": "changed"})
+	if status != http.StatusOK || updated["name"] != "Updated" || updated["status"] != "ACTIVE" {
+		t.Fatalf("patch: %d %v", status, updated)
+	}
+	status, page := testutil.Do(t, handler, http.MethodGet, itemsPath+"?search=Updated&status=ACTIVE&limit=10&skip=0", nil)
+	if status != http.StatusOK || page["total"] != float64(1) || page["has_more"] != false {
+		t.Fatalf("list: %d %v", status, page)
+	}
+	if status, _ := testutil.Do(t, handler, http.MethodGet, itemsPath+"?limit=0", nil); status != http.StatusUnprocessableEntity {
+		t.Fatalf("limit=0: %d", status)
+	}
+	if status, _ := testutil.Do(t, handler, http.MethodDelete, endpoint, nil); status != http.StatusNoContent {
+		t.Fatalf("delete: %d", status)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPatch} {
+		if status, _ := testutil.Do(t, handler, method, endpoint, map[string]any{"name": "gone"}); status != http.StatusNotFound {
+			t.Fatalf("%s deleted item: %d", method, status)
+		}
+	}
+}
+
+func TestRepositoryIsTenantScoped(t *testing.T) {
+	_, pool := application(t, isolatedSchema(t))
+	ctx := context.Background()
+	repo := repositories.NewPgItemRepository(pool)
+	owner := identity.New(uuid.New(), uuid.NewString())
+	other := identity.New(uuid.New(), uuid.NewString())
+	status := "ACTIVE"
+	item, err := repo.Create(ctx, owner, models.CreateItem{Name: "private", Status: &status})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(item.Tags) != "[]" || item.Status != "ACTIVE" {
+		t.Fatalf("defaults: %+v", item)
+	}
+	if found, err := repo.GetByID(ctx, other, item.ID); err != nil || found != nil {
+		t.Fatalf("cross-tenant read: %v %v", found, err)
+	}
+	if found, err := repo.FindByName(ctx, other, "private"); err != nil || found != nil {
+		t.Fatalf("cross-tenant name lookup: %v %v", found, err)
+	}
+	name := "renamed"
+	if updated, err := repo.Update(ctx, other, item.ID, models.UpdateItem{Name: &name}); err != nil || updated != nil {
+		t.Fatalf("cross-tenant update: %v %v", updated, err)
+	}
+	page, err := repo.List(ctx, other, models.ListParams{Limit: 10})
+	if err != nil || page.Total != 0 {
+		t.Fatalf("cross-tenant list: %+v %v", page, err)
+	}
+	if err := repo.Delete(ctx, other, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if found, _ := repo.GetByID(ctx, owner, item.ID); found == nil {
+		t.Fatal("another tenant's delete must not remove the row")
+	}
+	if _, err := repo.Create(ctx, owner, models.CreateItem{Name: strings.Repeat("x", 300)}); err == nil {
+		t.Fatal("constraint violations surface as errors")
+	}
+	pool.Close()
+	if _, err := repo.List(ctx, owner, models.ListParams{Limit: 10}); err == nil {
+		t.Fatal("a closed pool fails")
+	}
+	if err := repo.Delete(ctx, owner, item.ID); err == nil {
+		t.Fatal("a closed pool fails deletes")
+	}
+}
+
+func TestMigrationsRejectUnreachableDatabase(t *testing.T) {
+	if err := migrations.Up(context.Background(), "postgresql://postgres:postgres@127.0.0.1:1/none?connect_timeout=1"); err == nil {
+		t.Fatal("an unreachable database fails")
+	}
+}

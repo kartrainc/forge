@@ -170,6 +170,7 @@ def _build_backends_from_cfg(
                     python_version=be_cfg.get("python_version", "3.13"),
                     node_version=be_cfg.get("node_version", "22"),
                     rust_edition=be_cfg.get("rust_edition", "2024"),
+                    go_version=str(be_cfg.get("go_version", "1.27")),
                     server_port=be_cfg.get("server_port", 5000 + i),
                     app_template=be_cfg.get("app_template", "crud-service"),
                     sdk_consumption=be_cfg.get("sdk_consumption"),
@@ -193,6 +194,7 @@ def _build_backends_from_cfg(
             python_version=r.get("python_version", "backend", "python_version", default="3.13"),
             node_version=r.get("node_version", "backend", "node_version", default="22"),
             rust_edition=r.get("rust_edition", "backend", "rust_edition", default="2024"),
+            go_version=str(r.get("go_version", "backend", "go_version", default="1.27")),
             server_port=r.get("backend_port", "backend", "server_port", default=5000),
         )
     ]

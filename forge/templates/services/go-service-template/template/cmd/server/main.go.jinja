@@ -1,0 +1,57 @@
+// Command server runs the {{ project_name }} HTTP service.
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	// FORGE:IMPORTS
+)
+
+func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	// Load and validate config at startup so the fail-closed auth guard runs:
+	// it rejects a production-like env with auth enabled but
+	// GATEKEEPER_ISSUER/SERVICE_AUDIENCE unset.
+	cfg, err := config.Load(config.LoadOptions{})
+	if err != nil {
+		slog.Error("configuration error", "error", err)
+		return 1
+	}
+	slog.SetDefault(app.Logger(cfg.Logging.Level, cfg.Logging.Pretty))
+	slog.Info("configuration validated", "env", cfg.App.Env)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// FORGE:STARTUP_INIT
+
+	pool, err := db.NewPool(ctx, db.URL(cfg.DB.URL), cfg.DB.PoolMax,
+		time.Duration(cfg.DB.StatementTimeoutMS)*time.Millisecond)
+	if err != nil {
+		slog.Error("database configuration error", "error", err)
+		return 1
+	}
+	defer pool.Close()
+
+	listener, err := app.Listen(cfg.Server.Port)
+	if err != nil {
+		slog.Error("listen failed", "error", err)
+		return 1
+	}
+	if err := app.Serve(ctx, listener, app.New(cfg, pool)); err != nil {
+		slog.Error("server failed", "error", err)
+		return 1
+	}
+	// FORGE:SHUTDOWN
+	return 0
+}
