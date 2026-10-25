@@ -2,3 +2,6 @@
 *.sh text eol=lf
 forge/templates/init-db.sh text eol=lf
 install text eol=lf
+
+# Keep the vendored Nuxt UI skill byte-identical to upstream (its test checks the Git blob hashes)
+forge/templates/_common/skills/nuxt-ui/** text eol=lf
