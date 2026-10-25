@@ -111,7 +111,7 @@ class TestFlutterAnswersPlacement:
         config = ProjectConfig(
             project_name="Test App",
             backends=[bc],
-            frontend=fc,
+            frontends=[fc],
             include_keycloak=False,
         )
         config.output_dir = str(tmp_path)

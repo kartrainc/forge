@@ -84,7 +84,7 @@ def recommend(request: RecommendationRequest) -> dict:
                             features=service.features,
                         )
                     ],
-                    frontend=None,
+                    frontends=[],
                     options=service.options,
                 )
                 config.validate()

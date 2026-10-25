@@ -98,7 +98,7 @@ def test_airlock_client_generates_and_wires_provider(tmp_path: Path) -> None:
                 sdk_consumption="none",
             )
         ],
-        frontend=None,
+        frontends=[],
         options={"airlock.client": True},
     )
     backend = Path(generate(cfg, quiet=True, dry_run=True)) / "services" / "api"

@@ -331,7 +331,7 @@ def _collect_inputs() -> ProjectConfig | None:
     config = ProjectConfig(
         project_name=project_name,
         backends=backends,
-        frontend=frontend,
+        frontends=([frontend] if frontend is not None else []),
         include_keycloak=include_keycloak,
         keycloak_port=keycloak_port,
     )

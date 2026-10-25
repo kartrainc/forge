@@ -41,7 +41,7 @@ def _scenarios() -> list[tuple[str, dict]]:
                     BackendConfig(name="user-api", language=BackendLanguage.PYTHON, server_port=8001),
                     BackendConfig(name="billing", language=BackendLanguage.NODE, server_port=8002),
                 ],
-                frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="shop"),
+                frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="shop")],
                 include_keycloak=True,
             ),
         ),

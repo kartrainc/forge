@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import difflib
+from collections.abc import Callable
 from typing import Any, cast
 
 from forge.config import (
     DEFAULT_REALM,
+    PRIMARY_FRONTEND_NAME,
     BackendConfig,
     BackendLanguage,
     FrontendConfig,
@@ -43,7 +45,8 @@ _KNOWN_TOP_LEVEL_CONFIG_KEYS: frozenset[str] = frozenset(
         "output_dir",
         "backend",  # single-backend shorthand (back-compat with `backends:`)
         "backends",  # multi-backend list
-        "frontend",
+        "frontend",  # single-frontend table (back-compat with `frontends:`)
+        "frontends",  # multi-frontend list; the first entry is the primary
         "include_keycloak",
         "keycloak",  # nested {port, realm, ...}
         "keycloak_port",  # flat shorthand used by matrix scenario configs
@@ -114,6 +117,72 @@ def _normalize_features(raw: Any, default: list[str] | None = None) -> list[str]
     return [f.strip() for f in str(raw).split(",") if f.strip()]
 
 
+# Frontend settings a ``frontends:`` entry may carry, with the CLI flag that sets
+# the same value for the single ``frontend:`` table.
+_FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
+    "author_name": "author_name",
+    "package_manager": "package_manager",
+    "include_auth": "include_auth",
+    "include_chat": "include_chat",
+    "include_openapi": "include_openapi",
+    "server_port": "frontend_port",
+    "default_color_scheme": "color_scheme",
+    "org_name": "org_name",
+    "api_base_url": "api_base_url",
+    "api_proxy_target": "api_proxy_target",
+    "generate_e2e_tests": "generate_e2e_tests",
+    "layout": "layout",
+    "ui_kit": "ui_kit",
+}
+# CLI flags that describe the single frontend / backend. Beside a ``frontends:``
+# / ``backends:`` list there is no single unit for them to describe.
+_FRONTEND_FLAGS: tuple[str, ...] = ("frontend", *_FRONTEND_FLAG_FOR_KEY.values())
+_BACKEND_FLAGS: tuple[str, ...] = (
+    "backend_language",
+    "backend_name",
+    "backend_port",
+    "features",
+    "python_version",
+    "node_version",
+    "rust_edition",
+    "go_version",
+)
+
+
+def _list_or_absent(cfg: dict[str, Any], key: str) -> list[Any] | None:
+    """The ``backends:`` / ``frontends:`` value: a list, or ``None`` when the key is absent.
+
+    Any other value (a mapping written where a list was meant, a scalar) is
+    refused: falling through to the single-unit path would silently replace
+    what the user wrote with defaults.
+    """
+    value = cfg.get(key)
+    if value is None or isinstance(value, list):
+        return value
+    raise ValueError(
+        f"'{key}:' must be a list of tables, got {type(value).__name__}; "
+        "write each entry as a '- ' list item."
+    )
+
+
+def _reject_flags_with_list(args: argparse.Namespace, flags: tuple[str, ...], key: str) -> None:
+    """Refuse unit CLI flags beside a ``backends:`` / ``frontends:`` list.
+
+    The list branch reads every value from its entries, so a flag would be read
+    from nowhere and the project would silently ignore it — the same
+    confidently-wrong result ``_reject_unknown_top_level_keys`` guards against.
+    Every flag defaults to ``None``; ``--no-auth`` yields ``False`` and counts.
+    """
+    given = [flag for flag in flags if getattr(args, flag, None) is not None]
+    if given:
+        shown = ", ".join("--" + flag.replace("_", "-") for flag in given)
+        raise ValueError(
+            f"{shown} cannot be combined with a '{key}:' list, from the config file "
+            f"or the --platform preset; set the value on the entries of '{key}:' in a "
+            "config file instead."
+        )
+
+
 def _backend_language(value: object) -> BackendLanguage:
     """Resolve a backend language string, erroring on unknown values.
 
@@ -148,12 +217,13 @@ def _build_backends_from_cfg(
 
     Supports both `backends:` (list) and `backend:` (single) for backward compatibility.
     """
-    backends_raw = r.cfg.get("backends")
+    backends_raw = _list_or_absent(r.cfg, "backends")
     if isinstance(backends_raw, list):
         # An explicit list — possibly empty — is the user expressing intent.
         # An empty list means "frontend-only project (backend.mode=none)";
         # ProjectConfig.validate() enforces coherence with options. Only the
         # *absent* key falls through to the single-backend placeholder below.
+        _reject_flags_with_list(r.args, _BACKEND_FLAGS, "backends")
         backends: list[BackendConfig] = []
         for i, raw in enumerate(backends_raw):
             if not isinstance(raw, dict):
@@ -200,30 +270,50 @@ def _build_backends_from_cfg(
     ]
 
 
-def _build_frontend_from_cfg(
-    r: _Resolver, project_name: str, description: str
-) -> tuple[FrontendConfig | None, bool]:
-    """Build optional frontend config; returns (frontend, include_auth)."""
-    fw_str = r.get("frontend", "frontend", "framework", default="none")
-    # Resolve through resolve_frontend_framework so a plugin framework (e.g.
-    # ``solid``) parses from a config file's ``frontend.framework`` instead of
-    # being silently coerced to NONE by ``FRAMEWORK_MAP.get(..., NONE)``. A
-    # genuinely unknown value still surfaces a clear error.
+def _explicit_features(table: dict[str, Any]) -> list[str] | None:
+    """A frontend's page list when the table sets one, else ``None``.
+
+    ``None`` keeps the template's default of a page per backend feature; an
+    explicit ``[]`` means no pages. A bare ``features:`` (YAML null) counts as
+    unset, so it cannot silently produce an app without pages.
+    """
+    raw = table.get("features")
+    return None if raw is None else _normalize_features(raw)
+
+
+def _frontend_framework(value: object) -> FrontendFramework:
+    """Resolve a frontend framework string, erroring on unknown values.
+
+    Resolve through ``resolve_frontend_framework`` so a plugin framework (e.g.
+    ``solid``) parses from a config file instead of being silently coerced to
+    NONE. A genuinely unknown value still surfaces a clear error.
+    """
     from forge.config import (  # noqa: PLC0415
         available_frontend_frameworks,
         resolve_frontend_framework,
     )
 
     try:
-        framework = resolve_frontend_framework(str(fw_str))
+        # cast: a plugin framework is a _PluginFramework sentinel that behaves
+        # like a FrontendFramework member at runtime but isn't statically one.
+        return cast("FrontendFramework", resolve_frontend_framework(str(value)))
     except ValueError:
         valid = ", ".join(available_frontend_frameworks())
         raise ValueError(
-            f"Unknown frontend framework {fw_str!r}; valid frameworks are {valid}."
+            f"Unknown frontend framework {value!r}; valid frameworks are {valid}."
         ) from None
-    if framework == FrontendFramework.NONE:
-        return None, False
 
+
+def _frontend_config(
+    framework: FrontendFramework,
+    name: str,
+    get: Callable[[str, Any], Any],
+    project_name: str,
+    description: str,
+    *,
+    features: list[str] | None,
+) -> FrontendConfig:
+    """Build one frontend from ``get(key, default)``; the single table and list entries share it."""
     # A plugin frontend declares its package manager on its FrontendSpec; use
     # that as the default (an explicit user value still wins) so a headless
     # ``--frontend <plugin>`` matches what the interactive prompt picks.
@@ -231,43 +321,111 @@ def _build_frontend_from_cfg(
 
     _spec = FRONTEND_SPECS.get(framework.value)
     _pkg_default = _spec.package_manager if _spec is not None else "npm"
-
-    include_auth = r.get("include_auth", "frontend", "include_auth", default=True)
-    frontend = FrontendConfig(
-        # cast: a plugin framework is a _PluginFramework sentinel that behaves
-        # like a FrontendFramework member at runtime but isn't statically one.
-        framework=cast("FrontendFramework", framework),
+    return FrontendConfig(
+        framework=framework,
         project_name=project_name,
         description=description,
-        author_name=r.get("author_name", "frontend", "author_name", default="Your Name"),
-        package_manager=r.get(
-            "package_manager", "frontend", "package_manager", default=_pkg_default
-        ),
-        include_auth=include_auth,
-        include_chat=r.get("include_chat", "frontend", "include_chat", default=False),
-        include_openapi=r.get("include_openapi", "frontend", "include_openapi", default=False),
-        server_port=r.get("frontend_port", "frontend", "server_port", default=5173),
-        default_color_scheme=r.get(
-            "color_scheme", "frontend", "default_color_scheme", default="blue"
-        ),
-        org_name=r.get("org_name", "frontend", "org_name", default="com.example"),
+        features=features,
+        author_name=get("author_name", "Your Name"),
+        package_manager=get("package_manager", _pkg_default),
+        include_auth=get("include_auth", True),
+        include_chat=get("include_chat", False),
+        include_openapi=get("include_openapi", False),
+        server_port=get("server_port", 5173),
+        default_color_scheme=get("default_color_scheme", "blue"),
+        org_name=get("org_name", "com.example"),
         # ``api_base_url`` and ``api_proxy_target`` are first-class
-        # FrontendConfig fields (see ``forge/config/_frontend.py:171``)
-        # that the cfg dict couldn't reach before. Pipe them through so
-        # YAML can express ``frontend.api_base_url`` directly — preserving
-        # the dataclass contract for consumers that read it (the Flutter
-        # post-generate task today; future Vue/Svelte direct consumers).
-        # Note: the Vue/Svelte variable mapper currently reads the
-        # equivalent option path ``frontend.api_target.url`` instead.
-        api_base_url=r.get("api_base_url", "frontend", "api_base_url", default=""),
-        api_proxy_target=r.get("api_proxy_target", "frontend", "api_proxy_target", default=""),
-        generate_e2e_tests=r.get(
-            "generate_e2e_tests", "frontend", "generate_e2e_tests", default=True
-        ),
-        layout=r.get("layout", "frontend", "layout", default="sidebar"),
-        ui_kit=r.get("ui_kit", "frontend", "ui_kit", default="shadcn"),
+        # FrontendConfig fields that the cfg dict couldn't reach before. Pipe
+        # them through so YAML can express ``frontend.api_base_url`` directly —
+        # preserving the dataclass contract for consumers that read it (the
+        # Flutter post-generate task today; future Vue/Svelte direct consumers).
+        # Note: the Vue/Svelte variable mapper currently reads the equivalent
+        # option path ``frontend.api_target.url`` instead.
+        api_base_url=get("api_base_url", ""),
+        api_proxy_target=get("api_proxy_target", ""),
+        generate_e2e_tests=get("generate_e2e_tests", True),
+        layout=get("layout", "sidebar"),
+        ui_kit=get("ui_kit", "shadcn"),
+        name=name,
     )
-    return frontend, include_auth
+
+
+def _build_frontend_from_cfg(
+    r: _Resolver, project_name: str, description: str
+) -> tuple[FrontendConfig | None, bool]:
+    """Build the single ``frontend:`` table (or CLI flags); returns (frontend, include_auth)."""
+    fw_str = r.get("frontend", "frontend", "framework", default="none")
+    framework = _frontend_framework(fw_str)
+    if framework == FrontendFramework.NONE:
+        return None, False
+
+    def get(key: str, default: Any) -> Any:
+        return r.get(_FRONTEND_FLAG_FOR_KEY[key], "frontend", key, default=default)
+
+    table = r.cfg.get("frontend")
+    table = table if isinstance(table, dict) else {}
+    features = _explicit_features(table)
+    # ``name`` has no CLI flag; the table names the app as a list entry does.
+    name = PRIMARY_FRONTEND_NAME if table.get("name") is None else str(table["name"])
+    frontend = _frontend_config(framework, name, get, project_name, description, features=features)
+    return frontend, frontend.include_auth
+
+
+def _build_frontends_from_cfg(
+    r: _Resolver, project_name: str, description: str
+) -> tuple[list[FrontendConfig], bool]:
+    """Build the frontend list from CLI args + config file; returns (frontends, include_auth).
+
+    Supports both ``frontends:`` (list; the first entry is the primary) and
+    ``frontend:`` (single table), mirroring ``_build_backends_from_cfg``.
+    """
+    frontends_raw = _list_or_absent(r.cfg, "frontends")
+    if isinstance(frontends_raw, list):
+        _reject_flags_with_list(r.args, _FRONTEND_FLAGS, "frontends")
+        frontends: list[FrontendConfig] = []
+        for i, raw in enumerate(frontends_raw):
+            # Unlike a backend entry, a frontend's position matters (index 0 is
+            # the primary, and the default name and port follow the index), so
+            # a malformed entry is refused rather than skipped.
+            if not isinstance(raw, dict):
+                raise ValueError(f"frontends[{i}] must be a table, got {type(raw).__name__}.")
+            fe_cfg = cast("dict[str, Any]", raw)
+            framework = _frontend_framework(fe_cfg.get("framework", "none"))
+            if framework == FrontendFramework.NONE:
+                raise ValueError(
+                    f"frontends[{i}] needs a framework; 'none' only makes sense for the "
+                    "single 'frontend:' table."
+                )
+            if i == 0:
+                default_name = PRIMARY_FRONTEND_NAME
+            elif framework == FrontendFramework.FLUTTER:
+                default_name = f"frontend_{i}"  # a Dart package name
+            else:
+                default_name = f"frontend-{i}"
+            features = _explicit_features(fe_cfg)
+
+            def get(
+                key: str, default: Any, _cfg: dict[str, Any] = fe_cfg, _port: int = 5173 + i
+            ) -> Any:
+                if key == "server_port":
+                    default = _port
+                value = _cfg.get(key)
+                return default if value is None else value
+
+            frontends.append(
+                _frontend_config(
+                    framework,
+                    default_name if fe_cfg.get("name") is None else str(fe_cfg["name"]),
+                    get,
+                    project_name,
+                    description,
+                    features=features,
+                )
+            )
+        return frontends, any(fc.include_auth for fc in frontends)
+
+    frontend, include_auth = _build_frontend_from_cfg(r, project_name, description)
+    return ([frontend] if frontend is not None else []), include_auth
 
 
 def _flatten_nested(raw: Any, prefix: str = "") -> dict[str, Any]:
@@ -349,6 +507,16 @@ def _deep_merge_under(base: dict[str, Any], override: dict[str, Any]) -> dict[st
             merged[key] = sub
         else:
             merged[key] = ov
+    # A preset's single ``frontend`` table applies to the primary entry of a user
+    # ``frontends:`` list, and never survives beside it: the two keys are exclusive.
+    if isinstance(override.get("frontends"), list) and isinstance(base.get("frontend"), dict):
+        entries = list(override["frontends"])
+        if entries and isinstance(entries[0], dict):
+            primary: dict[str, Any] = dict(base["frontend"])
+            primary.update(entries[0])
+            entries[0] = primary
+        merged["frontends"] = entries
+        merged.pop("frontend", None)
     return merged
 
 
@@ -418,6 +586,8 @@ def _build_config(
     # platform preset is merged in — a silently-dropped ``fronend:`` used to
     # generate a frontend-less project with a 0 exit code.
     _reject_unknown_top_level_keys(cfg)
+    if isinstance(cfg, dict) and "frontend" in cfg and "frontends" in cfg:
+        raise ValueError("Set either 'frontend:' or 'frontends:', not both.")
 
     # Platform preset (Phase 4) — apply BEFORE anything else so it sits as the
     # lowest-priority layer: the preset's config dict is deep-merged UNDER the
@@ -436,7 +606,7 @@ def _build_config(
     output_dir = r.get("output_dir", "output_dir", default=".")
 
     backends = _build_backends_from_cfg(r, project_name, description)
-    frontend, include_auth = _build_frontend_from_cfg(r, project_name, description)
+    frontends, include_auth = _build_frontends_from_cfg(r, project_name, description)
     options = _build_options(args, cfg)
 
     # ``include_keycloak`` follows ``frontend.include_auth`` by default,
@@ -515,10 +685,12 @@ def _build_config(
         default=keycloak_client_id_from(project_name),
     )
 
-    if frontend and include_keycloak:
-        frontend.keycloak_url = f"http://localhost:{keycloak_port}"
-        frontend.keycloak_realm = kc_realm
-        frontend.keycloak_client_id = kc_client_id
+    if include_keycloak:
+        # Sign-in is project-level: every frontend uses the project's realm and client.
+        for fc in frontends:
+            fc.keycloak_url = f"http://localhost:{keycloak_port}"
+            fc.keycloak_realm = kc_realm
+            fc.keycloak_client_id = kc_client_id
 
     # Layered-component selection: a top-level `components: [Name, ...]` list in
     # the config file (additive; absent ⇒ flat option/fragment generation).
@@ -540,7 +712,7 @@ def _build_config(
         project_name=project_name,
         output_dir=str(output_dir),
         backends=backends,
-        frontend=frontend,
+        frontends=frontends,
         include_keycloak=include_keycloak,
         keycloak_port=keycloak_port,
         platform_template=platform_name,

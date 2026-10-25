@@ -21,7 +21,7 @@ def _cfg(backends: list[BackendConfig], *, frontend=None, include_keycloak=False
     return ProjectConfig(
         project_name="acme app",
         backends=backends,
-        frontend=frontend,
+        frontends=([frontend] if frontend is not None else []),
         include_keycloak=include_keycloak,
     )
 

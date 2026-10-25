@@ -75,14 +75,16 @@ def render() -> Iterator[Render]:
                 )
                 for index, (name, features) in enumerate(backends.items(), 1)
             ],
-            frontend=FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_auth=auth,
-                include_chat=False,
-                include_openapi=False,
-                ui_kit=ui_kit,
-            ),
+            frontends=[
+                FrontendConfig(
+                    project_name="frontend",
+                    framework=FrontendFramework.VUE,
+                    include_auth=auth,
+                    include_chat=False,
+                    include_openapi=False,
+                    ui_kit=ui_kit,
+                )
+            ],
         )
         roots.append(Path(generate(config, quiet=True, dry_run=True)))
         return roots[-1]

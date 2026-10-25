@@ -41,16 +41,18 @@ def check(
                 **({"features": features} if features else {}),
             )
         ],
-        frontend=FrontendConfig(
-            project_name="frontend",
-            framework=FrontendFramework(language),
-            include_auth=auth,
-            include_chat=False,
-            include_openapi=False,
-            ui_kit=ui_kit,
-        )
+        frontends=[
+            FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework(language),
+                include_auth=auth,
+                include_chat=False,
+                include_openapi=False,
+                ui_kit=ui_kit,
+            )
+        ]
         if frontend
-        else None,
+        else [],
     )
     rendered = generate(config, quiet=True, dry_run=True)
     try:

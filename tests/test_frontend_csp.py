@@ -46,12 +46,14 @@ def _config(
     return ProjectConfig(
         project_name="csp",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontend=FrontendConfig(
-            project_name="frontend",
-            framework=framework,
-            include_chat=False,
-            include_openapi=framework == FrontendFramework.FLUTTER,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="frontend",
+                framework=framework,
+                include_chat=False,
+                include_openapi=framework == FrontendFramework.FLUTTER,
+            )
+        ],
         options=dict(options),
     )
 
@@ -125,9 +127,11 @@ def test_an_external_api_is_admitted_by_its_origin() -> None:
         ProjectConfig(
             project_name="csp",
             backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-            frontend=FrontendConfig(
-                project_name="frontend", framework=FrontendFramework.VUE, include_chat=True
-            ),
+            frontends=[
+                FrontendConfig(
+                    project_name="frontend", framework=FrontendFramework.VUE, include_chat=True
+                )
+            ],
         ),
     ],
     ids=["option-off", "svelte", "flutter", "no-frontend", "vue-with-chat"],

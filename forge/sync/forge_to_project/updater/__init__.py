@@ -563,18 +563,17 @@ def _update_locked(
     # (the resolver doesn't need one), but the topology-aware Helm chart needs
     # ``has_frontend`` to be correct on ``forge --update``.
     if config.frontend is None and frontend_framework != FrontendFramework.NONE:
-        config.frontend = FrontendConfig(
-            framework=frontend_framework, project_name=config.project_name
-        )
+        primary = FrontendConfig(framework=frontend_framework, project_name=config.project_name)
         if frontend_framework == FrontendFramework.VUE:
             # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
             if data.frontend.ui_kit:
-                config.frontend.ui_kit = data.frontend.ui_kit
+                primary.ui_kit = data.frontend.ui_kit
             # A Vue project with the chat is served without the content-security
             # policy (forge.frontend_csp), which the Helm chart's values carry.
-            config.frontend.include_chat = _recorded_include_chat(
+            primary.include_chat = _recorded_include_chat(
                 frontend_app_dir(project_root, data.frontend, frontend_framework)
             )
+        config.frontend = primary
 
     from forge.config._topology import compute_topology  # noqa: PLC0415
     from forge.synthesis import compute_platform_synthesis  # noqa: PLC0415

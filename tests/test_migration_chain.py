@@ -153,7 +153,7 @@ def test_update_preserves_rechained_migrations(tmp_path: Path) -> None:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         options=opts,
         option_origins={k: "user" for k in opts},
         output_dir=str(tmp_path),

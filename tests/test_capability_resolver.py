@@ -26,7 +26,7 @@ def _project(
     return ProjectConfig(
         project_name="P",
         backends=backends,
-        frontend=None,
+        frontends=[],
         options=options or {},
         option_origins=option_origins or {},
     )
@@ -507,7 +507,7 @@ class TestAuthKeycloakCoercion:
         return ProjectConfig(
             project_name="P",
             backends=[BackendConfig(name="svc", project_name="P", language=BackendLanguage.PYTHON)],
-            frontend=None,
+            frontends=[],
             include_keycloak=include_keycloak,
             keycloak_port=18080,
             options=options or {},

@@ -8,7 +8,9 @@ projects); plugins extend the registry via
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import Enum
 
 from forge.config._validators import validate_features, validate_port
@@ -176,13 +178,34 @@ FRONTEND_RESERVED = frozenset(
     }
 )
 
+# The first frontend of a project is the *primary*: it keeps everything a
+# single-frontend project has always had (the ``apps/frontend`` folder, the
+# ``frontend`` compose service on ``app.localhost``, the e2e harness). Further
+# frontends are added beside it under their own name and host.
+PRIMARY_FRONTEND_NAME = "frontend"
+PRIMARY_HOST_LABEL = "app"
+PRIMARY_LOCAL_HOST = f"{PRIMARY_HOST_LABEL}.localhost"
+
+# A frontend's name becomes its folder, its package name, its host label, its
+# compose service and router and its Helm resources, so it must be a DNS label.
+# Flutter's template validates ``project_slug`` as a Dart package name
+# (snake_case), and the app folder *is* that slug; the host and the Kubernetes
+# names use the DNS form (underscores → hyphens, see ``dns_name``).
+_DNS_LABEL = re.compile(r"^[a-z]([a-z0-9-]*[a-z0-9])?$")
+_DART_PACKAGE = re.compile(r"^[a-z][a-z0-9_]*[a-z0-9]$")
+MAX_FRONTEND_NAME_LENGTH = 40
+
 
 @dataclass
 class FrontendConfig:
     framework: FrontendFramework
     project_name: str
     description: str = "A frontend application"
-    features: list[str] = field(default_factory=list)
+    # The CRUD pages this app renders. ``None`` (the default, and what every
+    # pre-existing config has) means every backend feature, as the template
+    # always rendered; an explicit list is exactly those pages, so ``[]`` is
+    # an app with no CRUD pages. See :meth:`page_features`.
+    features: list[str] | None = None
     author_name: str = "Your Name"
     version: str = "0.1.0"
     package_manager: str = "npm"
@@ -200,6 +223,42 @@ class FrontendConfig:
     generate_e2e_tests: bool = True
     layout: str = "sidebar"  # UI app-shell layout; see forge.layout_variants
     ui_kit: str = "shadcn"  # Vue only: component library; see forge.ui_kits
+    # The app's name: its ``apps/<name>`` folder and package name. The primary
+    # frontend's default is the name every single-frontend project uses.
+    name: str = PRIMARY_FRONTEND_NAME
+
+    @property
+    def dns_name(self) -> str:
+        """The name as a DNS label — the host, compose service and Helm names use it.
+
+        Equal to ``name`` for every non-Flutter frontend; a Flutter name is a
+        Dart package name (``frontend_1``), whose underscores become hyphens.
+        """
+        return self.name.replace("_", "-")
+
+    def page_features(self, all_features: Sequence[str]) -> list[str]:
+        """The CRUD pages this app renders: ``features`` when set, else every backend feature."""
+        if self.features is None:
+            return list(all_features)
+        return list(self.features)
+
+    def _validate_name(self) -> None:
+        if self.framework == FrontendFramework.FLUTTER:
+            pattern, shape = _DART_PACKAGE, "snake_case (lowercase letters, digits, underscores)"
+        else:
+            pattern, shape = _DNS_LABEL, "a DNS label (lowercase letters, digits, hyphens)"
+        if not pattern.match(self.name) or len(self.name) > MAX_FRONTEND_NAME_LENGTH:
+            raise ValueError(
+                f"Frontend name '{self.name}' must be {shape} of at most "
+                f"{MAX_FRONTEND_NAME_LENGTH} characters: it names the app's folder, "
+                "package and host."
+            )
+        # The compose template emits a ``<backend>-migrate`` service per backend.
+        if self.dns_name.endswith("-migrate"):
+            raise ValueError(
+                f"Frontend name '{self.name}' is reserved — it collides with a backend's "
+                "'*-migrate' docker-compose service. Choose a different name."
+            )
 
     def effective_mode(self, options_mode: str = "generate") -> str:
         """Collapse two sources of frontend-mode truth into one value.
@@ -249,9 +308,10 @@ class FrontendConfig:
                 "Flutter requires include_openapi=True "
                 "(the home feature's retrofit client depends on the generated OpenAPI bindings)."
             )
+        self._validate_name()
         validate_port(self.server_port, "Frontend port")
-        validate_features(self.features)
-        for f in self.features:
+        validate_features(self.features or [])
+        for f in self.features or ():
             if f in FRONTEND_RESERVED:
                 raise ValueError(f"Feature '{f}' is reserved in the frontend template.")
         valid_managers = {
@@ -293,3 +353,13 @@ class FrontendConfig:
         from forge.ui_kits import check_frontend  # noqa: PLC0415
 
         check_frontend(self)
+
+
+def frontend_host_label(fc: FrontendConfig, *, primary: bool) -> str:
+    """The first label of the app's host: ``app`` for the primary, else its DNS name."""
+    return PRIMARY_HOST_LABEL if primary else fc.dns_name
+
+
+def frontend_local_host(fc: FrontendConfig, *, primary: bool) -> str:
+    """The compose host of the app: ``app.localhost`` for the primary, ``<name>.localhost`` else."""
+    return f"{frontend_host_label(fc, primary=primary)}.localhost"

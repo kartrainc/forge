@@ -39,7 +39,7 @@ def _make_config(
     return ProjectConfig(
         project_name="Test App",
         backends=[bc],
-        frontend=fc,
+        frontends=([fc] if fc is not None else []),
         include_keycloak=include_keycloak,
         keycloak_port=8080,
     )

@@ -15,9 +15,11 @@ def test_svelte_shared_override_rejected_even_with_restamped_hash(tmp_path, sour
         project_name="svelte-integrity",
         output_dir=str(tmp_path),
         backends=[BackendConfig(name="api", features=["items"])],
-        frontend=FrontendConfig(
-            framework=FrontendFramework.SVELTE, project_name="web", include_openapi=False
-        ),
+        frontends=[
+            FrontendConfig(
+                framework=FrontendFramework.SVELTE, project_name="web", include_openapi=False
+            )
+        ],
         include_keycloak=False,
     )
     root = generate(config, quiet=True, dry_run=True)

@@ -58,7 +58,7 @@ def _project(frontend: FrontendConfig, components: list[str] | None = None) -> P
     return ProjectConfig(
         project_name="kits",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontend=frontend,
+        frontends=[frontend],
         components=components or [],
     )
 

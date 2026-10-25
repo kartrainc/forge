@@ -24,7 +24,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from forge.config._backend import BackendConfig
-from forge.config._frontend import FRONTEND_RESERVED, FrontendConfig, FrontendFramework
+from forge.config._frontend import (
+    FRONTEND_RESERVED,
+    PRIMARY_FRONTEND_NAME,
+    PRIMARY_HOST_LABEL,
+    PRIMARY_LOCAL_HOST,
+    FrontendConfig,
+    FrontendFramework,
+    frontend_host_label,
+    frontend_local_host,
+)
 
 if TYPE_CHECKING:
     from forge.options import Option
@@ -63,7 +72,10 @@ class ProjectConfig:
     project_name: str
     output_dir: str = "."
     backends: list[BackendConfig] = field(default_factory=list)
-    frontend: FrontendConfig | None = None
+    # The project's frontends, in order; the first is the primary (see
+    # ``forge.config._frontend``). ``frontend`` below reads and writes it the way
+    # ``backend`` does for ``backends``.
+    frontends: list[FrontendConfig] = field(default_factory=list)
     include_keycloak: bool = False
     keycloak_port: int = 18080
     # Phase 4 (platform synthesis): optional named platform preset
@@ -113,6 +125,47 @@ class ProjectConfig:
             self.backends[0] = value
         else:
             self.backends.append(value)
+
+    # Backward compatibility: single frontend access (the primary)
+    @property
+    def frontend(self) -> FrontendConfig | None:
+        """Return the primary (first) frontend, or None. For backward compatibility."""
+        return self.frontends[0] if self.frontends else None
+
+    @frontend.setter
+    def frontend(self, value: FrontendConfig | None) -> None:
+        """Set the primary frontend. For backward compatibility."""
+        if value is None:
+            self.frontends = []
+        elif self.frontends:
+            self.frontends[0] = value
+        else:
+            self.frontends.append(value)
+
+    @property
+    def active_frontends(self) -> list[FrontendConfig]:
+        """The frontends that render an app (``framework != NONE``), in order."""
+        return [fc for fc in self.frontends if fc.framework != FrontendFramework.NONE]
+
+    def is_primary_frontend(self, fc: FrontendConfig) -> bool:
+        """Whether ``fc`` is the first frontend — the one a single-frontend project has.
+
+        Compared by name (validated unique), so a copy of the primary still counts.
+        """
+        return bool(self.frontends) and fc.name == self.frontends[0].name
+
+    def frontend_host(self, fc: FrontendConfig) -> str:
+        """The compose host the app is served on (``app.localhost`` for the primary)."""
+        return frontend_local_host(fc, primary=self.is_primary_frontend(fc))
+
+    @property
+    def frontend_host_labels(self) -> list[str]:
+        """Host labels of the non-primary frontends; the primary's is fixed to ``app``."""
+        return [
+            frontend_host_label(fc, primary=False)
+            for fc in self.active_frontends
+            if not self.is_primary_frontend(fc)
+        ]
 
     @property
     def typed(self) -> TypedConfig:
@@ -246,10 +299,12 @@ class ProjectConfig:
         validate_slug(self.project_slug)
         for bc in self.backends:
             bc.validate()
-        if self.frontend:
-            self.frontend.validate()
+        for fc in self.frontends:
+            fc.validate()
         self._validate_backend_uniqueness()
+        self._validate_frontend_uniqueness()
         self._validate_features_against_reserved()
+        self._validate_frontend_pages()
         ports = self._validate_ports()
         if self.include_keycloak:
             self._validate_keycloak_ports(ports)
@@ -852,9 +907,74 @@ class ProjectConfig:
                 )
             db_names[db_name] = bc.name
 
+    def _validate_frontend_uniqueness(self) -> None:
+        """Frontend names must be unique as names *and* as the hosts and services derived from them."""
+        names = [fc.name for fc in self.frontends]
+        if len(names) != len(set(names)):
+            raise ValueError("Frontend names must be unique.")
+        # A frontend without a framework renders nothing; it only stands for
+        # "no frontend" on its own. Beside other entries it would hold the
+        # primary's place without an app, and the recipe (which records rendered
+        # apps only) would read the next entry back as the primary.
+        if len(self.frontends) > 1 and any(
+            fc.framework == FrontendFramework.NONE for fc in self.frontends
+        ):
+            raise ValueError(
+                "A frontend with framework 'none' can only be the project's only frontend; "
+                "remove it from the list."
+            )
+        backend_names = {bc.name for bc in self.backends}
+        dns_names: dict[str, str] = {}
+        for fc in self.frontends:
+            primary = self.is_primary_frontend(fc)
+            for candidate in {fc.name, fc.dns_name}:
+                if candidate in backend_names:
+                    raise ValueError(
+                        f"Frontend name '{fc.name}' collides with backend '{candidate}': "
+                        "docker-compose services share one namespace. Rename one."
+                    )
+                reserved = candidate in self._RESERVED_SERVICE_NAMES and not (
+                    primary and candidate == PRIMARY_FRONTEND_NAME
+                )
+                if reserved:
+                    raise ValueError(
+                        f"Frontend name '{fc.name}' is reserved — it collides with a fixed "
+                        f"docker-compose infra/service key ({sorted(self._RESERVED_SERVICE_NAMES)}). "
+                        "Choose a different frontend name."
+                    )
+            if not primary and fc.dns_name == PRIMARY_HOST_LABEL:
+                raise ValueError(
+                    f"Frontend name '{fc.name}' is reserved: '{PRIMARY_HOST_LABEL}' is the "
+                    f"primary frontend's host label ({PRIMARY_LOCAL_HOST}). Choose a different name."
+                )
+            # Derived-host collision: a Vue ``staff-ui`` and a Flutter ``staff_ui``
+            # would both serve ``staff-ui.localhost``.
+            if fc.dns_name in dns_names:
+                raise ValueError(
+                    f"Frontends '{dns_names[fc.dns_name]}' and '{fc.name}' derive the same "
+                    f"host name '{fc.dns_name}' (underscores normalize to hyphens); they would "
+                    "serve the same host. Rename one."
+                )
+            dns_names[fc.dns_name] = fc.name
+
+    def _validate_frontend_pages(self) -> None:
+        """An explicit page list names backend features: the template routes each page to its backend."""
+        if not self.backends:
+            # Frontend-only projects (``backend.mode=none``) top ``all_features``
+            # up from the frontend's own list; nothing to check against.
+            return
+        backend_features = {f for bc in self.backends for f in bc.features}
+        for fc in self.active_frontends:
+            unknown = [f for f in fc.features or () if f not in backend_features]
+            if unknown:
+                raise ValueError(
+                    f"Frontend '{fc.name}' lists pages {unknown} that no backend declares as a "
+                    "feature; a page needs the backend's API behind it."
+                )
+
     def _validate_features_against_reserved(self) -> None:
         """Backend feature names must not collide with frontend's reserved page names."""
-        if not (self.frontend and self.frontend.framework != FrontendFramework.NONE):
+        if not self.active_frontends:
             return
         for bc in self.backends:
             for f in bc.features:
@@ -877,15 +997,13 @@ class ProjectConfig:
                     f"and '{ports[bc.server_port]}'."
                 )
             ports[bc.server_port] = bc.name
-        if (
-            self.frontend
-            and self.frontend.framework != FrontendFramework.NONE
-            and self.frontend.framework != FrontendFramework.FLUTTER
-        ):
-            p = self.frontend.server_port
+        for fc in self.active_frontends:
+            if fc.framework == FrontendFramework.FLUTTER:
+                continue
+            p = fc.server_port
             if p in ports:
-                raise ValueError(f"Port {p} is used by both frontend and {ports[p]}.")
-            ports[p] = "frontend"
+                raise ValueError(f"Port {p} is used by both {fc.name} and {ports[p]}.")
+            ports[p] = fc.name
         # Reserve the host ports the compose template publishes for infra
         # services (Traefik dashboard always; Postgres/pgAdmin when Postgres
         # renders; Redis/Gatekeeper/Keycloak under Keycloak). Derived from the
@@ -932,8 +1050,8 @@ class ProjectConfig:
                 if f not in seen:
                     seen.add(f)
                     features.append(f)
-        if self.frontend:
-            for f in self.frontend.features:
+        for fc in self.frontends:
+            for f in fc.features or ():
                 if f not in seen:
                     seen.add(f)
                     features.append(f)
@@ -950,5 +1068,5 @@ class ProjectConfig:
 
     @property
     def frontend_slug(self) -> str:
-        """Fixed directory name for the generated frontend application."""
-        return "frontend"
+        """Directory name of the primary frontend (``apps/<slug>``). Backward compat."""
+        return self.frontends[0].name if self.frontends else PRIMARY_FRONTEND_NAME

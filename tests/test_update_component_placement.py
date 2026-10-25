@@ -30,12 +30,14 @@ def _vue_project(tmp_path: Path) -> tuple[Path, ProjectConfig]:
         project_name="upd_comp",
         output_dir=str(tmp_path),
         backends=[BackendConfig(name="api", project_name="upd_comp", server_port=5000)],
-        frontend=FrontendConfig(
-            framework=FrontendFramework.VUE,
-            project_name="upd_comp",
-            server_port=5173,
-            features=["items"],
-        ),
+        frontends=[
+            FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="upd_comp",
+                server_port=5173,
+                features=["items"],
+            )
+        ],
     )
     root = generate(cfg, quiet=True, dry_run=True)
     return root, cfg
