@@ -118,6 +118,9 @@ def _build_preview(config, plan) -> dict[str, Any]:
             if config.frontend and config.frontend.framework.value != "none"
             else None
         ),
+        "frontends": [
+            {"name": fc.name, "framework": fc.framework.value} for fc in config.active_frontends
+        ],
         "capabilities": sorted(plan.capabilities),
         "option_values": dict(plan.option_values),
         "fragments": fragments,
@@ -147,7 +150,14 @@ def _print_tree(preview: dict[str, Any]) -> None:
         or "(none)"
     )
     _w(f"backends  : {backends_line}\n")
-    _w(f"frontend  : {preview['frontend'] or '(none)'}\n")
+    if len(preview["frontends"]) > 1:
+        # Several apps: each by name, the primary first, like the backends line.
+        frontends_line = ", ".join(
+            fe["name"] + " (" + fe["framework"] + ")" for fe in preview["frontends"]
+        )
+        _w(f"frontends : {frontends_line}\n")
+    else:
+        _w(f"frontend  : {preview['frontend'] or '(none)'}\n")
     _w(f"caps      : {', '.join(preview['capabilities']) or '(none)'}\n")
     _w(f"fragments : {len(preview['fragments'])}\n")
     _w("\n")

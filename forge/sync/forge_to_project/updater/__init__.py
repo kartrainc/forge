@@ -69,9 +69,11 @@ from forge.sync.forge_to_project.uninstaller import (
     uninstall_fragment,
 )
 from forge.sync.forge_to_project.updater._merge_driver import (
+    FrontendTarget,
     _apply_fragment,
     apply_features,
     apply_project_features,
+    frontend_targets,
 )
 from forge.sync.forge_to_project.updater._template_render import _build_template_update_tasks
 from forge.sync.lock import acquire_lock
@@ -237,9 +239,14 @@ def _update_locked(
             )
         )
 
+    # The recorded frontend is attached before resolving, so the resolver gates
+    # frontend-targeted fragments and checks UI kits exactly as generate does;
+    # the topology-aware Helm chart and codegen below need it too.
+    recorded = _recorded_frontend(project_root, data, frontend_framework)
     config = ProjectConfig(
         project_name=data.project_name or project_root.name,
         backends=resolver_backends,
+        frontends=[recorded] if recorded is not None else [],
         options=dict(data.options),
         # Carry origins through so the resolver can distinguish user-set
         # options from defaulted-but-persisted ones. Without this, a
@@ -558,23 +565,6 @@ def _update_locked(
                     "project-scope fragment(s) (no backend to host them)"
                 )
 
-    # Attach the recorded frontend BEFORE computing deployment topology (and
-    # before codegen below): the updater builds ``config`` without a frontend
-    # (the resolver doesn't need one), but the topology-aware Helm chart needs
-    # ``has_frontend`` to be correct on ``forge --update``.
-    if config.frontend is None and frontend_framework != FrontendFramework.NONE:
-        primary = FrontendConfig(framework=frontend_framework, project_name=config.project_name)
-        if frontend_framework == FrontendFramework.VUE:
-            # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
-            if data.frontend.ui_kit:
-                primary.ui_kit = data.frontend.ui_kit
-            # A Vue project with the chat is served without the content-security
-            # policy (forge.frontend_csp), which the Helm chart's values carry.
-            primary.include_chat = _recorded_include_chat(
-                frontend_app_dir(project_root, data.frontend, frontend_framework)
-            )
-        config.frontend = primary
-
     from forge.config._topology import compute_topology  # noqa: PLC0415
     from forge.synthesis import compute_platform_synthesis  # noqa: PLC0415
 
@@ -591,12 +581,15 @@ def _update_locked(
         file_baselines=file_baselines,
         collector=collector,
         option_values=plan.option_values,
-        frontend_framework=frontend_framework,
         # Route frontend-targeted fragments into the recorded frontend app on
         # update, exactly like generate (generator.py). Without an app dir they
         # would be skipped; the updater once passed None and orphaned every
         # component fragment's files/src/... tree at the project root.
-        frontend_dir=frontend_app_dir(project_root, data.frontend, frontend_framework),
+        frontends=frontend_targets(
+            config,
+            project_root,
+            app_dirs=_recorded_app_dirs(project_root, data, recorded, frontend_framework),
+        ),
         # Keep the topology-aware Helm chart current on --update: per-backend
         # ports flow through ``topology``; ``primary_server_port`` covers any
         # residual single-port ``{{ server_port }}`` usage (the updater used to
@@ -1154,6 +1147,51 @@ def frontend_app_dir(
     return project_root / (frontend.app_dir or "apps/frontend")
 
 
+def _recorded_frontend(
+    project_root: Path,
+    data: ForgeTomlData,
+    framework: FrontendFramework | _PluginFramework,
+) -> FrontendConfig | None:
+    """The frontend ``forge.toml`` records, as a :class:`FrontendConfig`, or ``None``.
+
+    It carries the manifest's framework and UI kit and, from the app's Copier
+    answers, whether it has the AI chat; the app directory is passed alongside
+    (:func:`_recorded_app_dirs`). Shared by
+    ``forge --update`` and ``--plan-update`` so both see the frontend the
+    generator rendered.
+    """
+    if framework == FrontendFramework.NONE:
+        return None
+    # cast: a plugin frontend's sentinel behaves like a member (see update_project).
+    frontend = FrontendConfig(
+        framework=cast("FrontendFramework", framework),
+        project_name=data.project_name or project_root.name,
+    )
+    if framework == FrontendFramework.VUE:
+        # The recorded Vue UI kit selects fragments' files-<kit>/ trees.
+        if data.frontend.ui_kit:
+            frontend.ui_kit = data.frontend.ui_kit
+        # A Vue project with the chat is served without the content-security
+        # policy (forge.frontend_csp), which the Helm chart's values carry.
+        frontend.include_chat = _recorded_include_chat(
+            frontend_app_dir(project_root, data.frontend, framework)
+        )
+    return frontend
+
+
+def _recorded_app_dirs(
+    project_root: Path,
+    data: ForgeTomlData,
+    recorded: FrontendConfig | None,
+    framework: FrontendFramework | _PluginFramework,
+) -> dict[str, Path]:
+    """Frontend name → the app directory the manifest records for it."""
+    app_dir = frontend_app_dir(project_root, data.frontend, framework)
+    if recorded is None or app_dir is None:
+        return {}
+    return {recorded.name: app_dir}
+
+
 def _recorded_include_chat(app_dir: Path | None) -> bool:
     """Whether the frontend app was generated with the AI chat.
 
@@ -1286,6 +1324,7 @@ def _restamp_forge_toml(
 
 
 __all__ = [
+    "FrontendTarget",
     "_apply_fragment",
     "_frontend_framework_from_manifest",
     "_infer_backends",
@@ -1294,5 +1333,6 @@ __all__ = [
     "apply_project_features",
     "classify_project_state",
     "frontend_app_dir",
+    "frontend_targets",
     "update_project",
 ]

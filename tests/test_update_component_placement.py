@@ -1,7 +1,7 @@
 """Regression: ``forge --update`` routes component_* fragments into the
 frontend app dir (audit #2).
 
-The generate path passes ``frontend_dir=apps/<slug>`` to
+The generate path passes the app at ``apps/<slug>`` (``frontends=``) to
 ``apply_project_features`` (``generator.py``), so ``component_<Name>``
 fragments emit into the frontend app that builds them. The updater called
 ``apply_project_features`` WITHOUT ``frontend_dir`` (defaulting to None), so
@@ -11,7 +11,7 @@ written to the PROJECT ROOT — an orphaned tree nothing builds — instead of
 so the codegen pass can't rescue them and the running app keeps the stale
 component.
 
-This pins the updater to compute + forward ``frontend_dir`` exactly like the
+This pins the updater to compute + forward the recorded app exactly like the
 generator, so component fixes reach the app on update.
 """
 
@@ -43,23 +43,24 @@ def _vue_project(tmp_path: Path) -> tuple[Path, ProjectConfig]:
     return root, cfg
 
 
-def test_update_forwards_frontend_dir_for_component_placement(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_update_forwards_frontend_dir_for_component_placement(tmp_path: Path, monkeypatch) -> None:
     root, cfg = _vue_project(tmp_path)
 
     captured: dict[str, object] = {}
     real = updater_mod.apply_project_features
 
     def _spy(*args, **kwargs):
-        captured["frontend_dir"] = kwargs.get("frontend_dir")
+        captured["frontends"] = kwargs.get("frontends")
         return real(*args, **kwargs)
 
     monkeypatch.setattr(updater_mod, "apply_project_features", _spy)
     update_project(root, quiet=True, no_template_update=True)
 
-    assert "frontend_dir" in captured, "updater never called apply_project_features"
-    assert captured["frontend_dir"] == root / "apps" / cfg.frontend_slug, (
-        "updater must pass frontend_dir=apps/<slug> so component_* fragments land in the "
-        f"frontend app dir (not orphaned at the project root); got {captured['frontend_dir']!r}"
+    assert "frontends" in captured, "updater never called apply_project_features"
+    targets = list(captured["frontends"] or ())
+    app_dirs = [target.app_dir for target in targets]
+    assert [(t.name, t.ui_kit) for t in targets] == [(cfg.frontend_slug, "shadcn")]
+    assert app_dirs == [root / "apps" / cfg.frontend_slug], (
+        "updater must pass the recorded app (apps/<slug>) so component_* fragments land in "
+        f"the frontend app dir (not orphaned at the project root); got {app_dirs!r}"
     )

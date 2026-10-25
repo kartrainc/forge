@@ -358,12 +358,16 @@ def _print_summary(config: ProjectConfig) -> None:
         print(
             f"  Backend:    Python {config.backend.python_version} on port {config.backend.server_port}"
         )
-    if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-        fw = config.frontend.framework.value.capitalize()
-        if config.frontend.framework != FrontendFramework.FLUTTER:
-            fw += f" on port {config.frontend.server_port}"
-        print(f"  Frontend:   {fw}")
-        print(f"  Features:   {', '.join(config.all_features)}")
+    if config.active_frontends:
+        for fc in config.active_frontends:
+            fw = fc.framework.value.capitalize()
+            if fc.framework != FrontendFramework.FLUTTER:
+                fw += f" on port {fc.server_port}"
+            if not config.is_primary_frontend(fc):
+                fw += f" ({fc.name})"
+            print(f"  Frontend:   {fw}")
+        pages = config.active_frontends[0].page_features(config.all_features)
+        print(f"  Features:   {', '.join(pages)}")
     else:
         print("  Frontend:   None")
     print(f"  Auth:       {'Keycloak' if config.include_keycloak else 'Disabled'}")

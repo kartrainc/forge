@@ -275,15 +275,15 @@ def subjects(config: ProjectConfig, root: Path | None = None) -> list[dict]:
         for b in config.backends
         if config.backend_mode == "generate"
     ]
-    if config.frontend and config.frontend.framework.value != "none":
-        items.append(
-            {
-                "name": config.frontend_slug,
-                "path": f"apps/{config.frontend_slug}",
-                "language": config.frontend.framework.value,
-                "runtime": "stable",
-            }
-        )
+    items.extend(
+        {
+            "name": fc.name,
+            "path": f"apps/{fc.name}",
+            "language": fc.framework.value,
+            "runtime": "stable",
+        }
+        for fc in config.active_frontends
+    )
     if root:
         for parent in [
             root / "sdks",

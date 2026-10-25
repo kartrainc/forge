@@ -14,6 +14,7 @@ from forge.config import (
     DEFAULT_REALM,
     TRAEFIK_DASHBOARD_PORT,
     BackendLanguage,
+    FrontendConfig,
     FrontendFramework,
     ProjectConfig,
 )
@@ -306,10 +307,15 @@ def render_workspace_cargo_toml(
     return cargo_path
 
 
-def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render a two-stage production Dockerfile into the frontend directory."""
+def render_frontend_dockerfile(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render a two-stage production Dockerfile into the frontend directory.
+
+    ``frontend`` defaults to the primary.
+    """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerfile called without a frontend configured")
 
@@ -335,17 +341,19 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
     return dockerfile_path
 
 
-def render_frontend_dockerignore(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render the ``.dockerignore`` of the frontend image's build context.
+def render_frontend_dockerignore(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render the ``.dockerignore`` of a frontend image's build context.
 
     The build context is the whole application directory, and ``COPY . .``
     merges a directory file by file over what the image already holds. The
     Dockerfile installs from the lockfile and builds from source, so a host
     install, build output and ``.env.*.local`` files (which ``vite build``
-    reads) stay out of the context.
+    reads) stay out of the context. ``frontend`` defaults to the primary.
     """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerignore called without a frontend configured")
 
@@ -588,11 +596,14 @@ def render_service_registry(
     return registry_path
 
 
-def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
+def render_nginx_conf(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
     """Render nginx.conf into the frontend directory.
 
     It serves the static build with an SPA fallback and, under ``security.csp``,
-    the headers and nonce policy of :mod:`forge.frontend_csp`.
+    the headers and nonce policy of :mod:`forge.frontend_csp` for ``frontend``
+    (default: the primary).
     """
     from forge import frontend_csp  # noqa: PLC0415
 
@@ -600,8 +611,8 @@ def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
     template = env.get_template("deploy/nginx.conf.j2")
     output = template.render(
         {
-            "security_headers": frontend_csp.security_headers(config),
-            "content_security_policy": frontend_csp.content_security_policy(config),
+            "security_headers": frontend_csp.security_headers(config, frontend),
+            "content_security_policy": frontend_csp.content_security_policy(config, frontend),
             "nonce_placeholder": frontend_csp.NONCE_PLACEHOLDER,
             "nonce_variable": frontend_csp.NONCE_VARIABLE,
         }

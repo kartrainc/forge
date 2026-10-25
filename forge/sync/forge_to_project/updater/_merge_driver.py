@@ -7,7 +7,8 @@ Split out from the original ``updater.py`` god module — see
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +18,7 @@ from forge.fragment_context import FragmentContext, UpdateMode
 from forge.sync.provenance import ProvenanceCollector
 
 if TYPE_CHECKING:
-    from forge.config import FrontendFramework
+    from forge.config import FrontendFramework, ProjectConfig
     from forge.fragments import Fragment, FragmentImplSpec
     from forge.middleware_spec import MiddlewareSpec
 
@@ -127,37 +128,87 @@ def apply_features(
         )
 
 
-def project_fragment_root(
-    fragment: Fragment,
+@dataclass(frozen=True)
+class FrontendTarget:
+    """One frontend app a frontend-targeted project fragment can land in.
+
+    ``ui_kit`` is the app's Vue UI kit (``None`` for other frameworks), which
+    selects a fragment's ``files-<kit>/`` tree. ``excluded_fragments`` names the
+    fragments this app must not receive although its framework and kit fit: the
+    component fragments whose closure the kit cannot render (see
+    :func:`forge.capability_resolver.component_fragments_for_kit`).
+    """
+
+    framework: FrontendFramework
+    app_dir: Path
+    ui_kit: str | None = None
+    excluded_fragments: frozenset[str] = frozenset()
+    name: str = ""
+
+
+def frontend_targets(
+    config: ProjectConfig,
     project_root: Path,
     *,
-    frontend_framework: FrontendFramework | None,
-    frontend_dir: Path | None,
-) -> tuple[Path | None, str]:
-    """Where a project-scoped fragment applies: ``(root, "")``, or ``(None, reason)``.
+    app_dirs: Mapping[str, Path] | None = None,
+) -> tuple[FrontendTarget, ...]:
+    """The apps of ``config`` that frontend-targeted fragments can land in, primary first.
 
-    A fragment without ``target_frontends`` applies at the project root. One
-    with ``target_frontends`` ships code for those frameworks, written
-    app-relative (``files/src/...``), so it applies inside the frontend app
-    ``frontend_dir`` (``apps/<slug>/``), never at the project root. It is
-    skipped when the project's ``frontend_framework`` is not one it targets
-    (``FrontendFramework.NONE`` for a frontend-less project; ``None`` when the
-    caller does not know the frontend, which skips this check), and when no app
-    directory is known, since there is then no correct place for its files.
+    Each app lives at ``apps/<name>`` unless ``app_dirs`` (frontend name → app
+    directory, as a manifest records it) says otherwise.
+    """
+    from forge.capability_resolver import (  # noqa: PLC0415
+        component_fragments_for_kit,
+        selected_component_fragments,
+    )
+    from forge.ui_kits import applies_to  # noqa: PLC0415
+
+    selected = selected_component_fragments(config)
+    targets: list[FrontendTarget] = []
+    for fc in config.active_frontends:
+        kit = fc.ui_kit if applies_to(fc.framework) else None
+        excluded = selected - component_fragments_for_kit(config, kit) if kit else frozenset()
+        app_dir = (app_dirs or {}).get(fc.name) or project_root / "apps" / fc.name
+        targets.append(FrontendTarget(fc.framework, app_dir, kit, frozenset(excluded), fc.name))
+    return tuple(targets)
+
+
+def project_fragment_roots(
+    fragment: Fragment,
+    project_root: Path,
+    frontends: Sequence[FrontendTarget],
+) -> tuple[list[tuple[Path, str | None]], str]:
+    """Where a project-scoped fragment applies: ``([(root, ui_kit), ...], "")``, or ``([], reason)``.
+
+    A fragment without ``target_frontends`` applies once, at the project root
+    (``ui_kit`` ``None``: the caller's project-level kit applies). One with
+    ``target_frontends`` ships code for those frameworks, written app-relative
+    (``files/src/...``), so it applies inside every app of ``frontends`` that
+    can take it — never at the project root: its framework is targeted, its kit
+    is one the fragment declares (any, when it declares none), and the app does
+    not exclude it. Each such app gets the fragment with its own kit. With no
+    app that fits there is no correct place for its files and it is skipped.
     Generation, ``forge --update`` and the ``--plan-update`` preview share this
     decision.
     """
     targets = fragment.target_frontends
     if not targets:
-        return project_root, ""
-    if frontend_framework is not None and frontend_framework not in targets:
-        return None, (
-            f"target_frontends={[f.value for f in targets]}, "
-            f"project frontend={frontend_framework.value}"
-        )
-    if frontend_dir is None:
-        return None, "targets a frontend but no frontend app directory is known"
-    return frontend_dir, ""
+        return [(project_root, None)], ""
+    roots = [
+        (fe.app_dir, fe.ui_kit)
+        for fe in frontends
+        if fe.framework in targets
+        # ``ui_kits`` restricts Vue apps (the only ones with a kit) to those kits.
+        and (fe.ui_kit is None or not fragment.ui_kits or fe.ui_kit in fragment.ui_kits)
+        and fragment.name not in fe.excluded_fragments
+    ]
+    if roots:
+        return roots, ""
+    present = ", ".join(sorted({fe.framework.value for fe in frontends})) or "none"
+    reason = f"target_frontends={[f.value for f in targets]}, project frontend={present}"
+    if any(fe.framework in targets for fe in frontends):
+        reason += " (no app's UI kit takes it)"
+    return [], reason
 
 
 # The top-level ``name:`` of a Flutter app's pubspec.yaml (a Dart package name).
@@ -194,8 +245,7 @@ def apply_project_features(
     file_baselines: Mapping[str, str] | None = None,
     collector: ProvenanceCollector | None = None,
     option_values: Mapping[str, Any] | None = None,
-    frontend_framework: FrontendFramework | None = None,
-    frontend_dir: Path | None = None,
+    frontends: Sequence[FrontendTarget] = (),
     primary_server_port: int | None = None,
     topology: Mapping[str, Any] | None = None,
     ui_kit: str | None = None,
@@ -212,60 +262,57 @@ def apply_project_features(
     See :func:`apply_features` for ``update_mode``, ``file_baselines``,
     and ``option_values`` semantics.
 
-    ``frontend_framework`` and ``frontend_dir`` place frontend-targeted
-    fragments; see :func:`project_fragment_root`. ``ui_kit`` is the Vue UI
-    kit, which selects a fragment's ``files-<kit>/`` tree.
+    ``frontends`` are the apps frontend-targeted fragments land in, each with
+    its own kit; see :func:`project_fragment_roots`. ``ui_kit`` is the project's
+    Vue UI kit (the primary's), which selects a project-root fragment's
+    ``files-<kit>/`` tree.
     """
     if option_values is None:
         option_values = {}
     for rf in resolved:
-        apply_root, skip_reason = project_fragment_root(
-            rf.fragment,
-            project_root,
-            frontend_framework=frontend_framework,
-            frontend_dir=frontend_dir,
-        )
-        if apply_root is None:
+        roots, skip_reason = project_fragment_roots(rf.fragment, project_root, frontends)
+        if not roots:
             if not quiet:
                 print(f"  [frag] skipping '{rf.fragment.name}' — {skip_reason}")
             continue
-        for lang in rf.target_backends:
-            impl = rf.fragment.implementations[lang]
-            if impl.scope == "project":
-                if not quiet:
-                    print(f"  [frag] applying '{rf.fragment.name}' to {apply_root}")
-                # 5000 mirrors BackendConfig's own default server_port; the
-                # primary backend's port (when known) makes project-level
-                # templates like the Helm values.yaml render the real port.
-                proxy = BackendConfig(
-                    name=project_proxy_name(apply_root, project_root),
-                    project_name="",
-                    language=lang,
-                    server_port=primary_server_port if primary_server_port else 5000,
-                )
-                ctx = FragmentContext.filtered(
-                    backend_config=proxy,
-                    backend_dir=apply_root,
-                    project_root=project_root,
-                    option_values=option_values,
-                    reads_options=impl.reads_options,
-                    provenance=collector,
-                    update_mode=update_mode,
-                    file_baselines=file_baselines,
-                    project_topology=topology,
-                    ui_kit=ui_kit,
-                )
-                # Project-scope fragments typically don't declare middlewares
-                # (they emit project-level files like AGENTS.md). Pass the
-                # tuple anyway so the pipeline API stays uniform.
-                _resolve_apply_fragment()(
-                    ctx,
-                    impl,
-                    rf.fragment.name,
-                    middlewares=rf.fragment.middlewares,
-                    shared_env_vars=rf.fragment.shared_env_vars,
-                )
-                break
+        for apply_root, root_kit in roots:
+            for lang in rf.target_backends:
+                impl = rf.fragment.implementations[lang]
+                if impl.scope == "project":
+                    if not quiet:
+                        print(f"  [frag] applying '{rf.fragment.name}' to {apply_root}")
+                    # 5000 mirrors BackendConfig's own default server_port; the
+                    # primary backend's port (when known) makes project-level
+                    # templates like the Helm values.yaml render the real port.
+                    proxy = BackendConfig(
+                        name=project_proxy_name(apply_root, project_root),
+                        project_name="",
+                        language=lang,
+                        server_port=primary_server_port if primary_server_port else 5000,
+                    )
+                    ctx = FragmentContext.filtered(
+                        backend_config=proxy,
+                        backend_dir=apply_root,
+                        project_root=project_root,
+                        option_values=option_values,
+                        reads_options=impl.reads_options,
+                        provenance=collector,
+                        update_mode=update_mode,
+                        file_baselines=file_baselines,
+                        project_topology=topology,
+                        ui_kit=ui_kit if apply_root == project_root else root_kit,
+                    )
+                    # Project-scope fragments typically don't declare middlewares
+                    # (they emit project-level files like AGENTS.md). Pass the
+                    # tuple anyway so the pipeline API stays uniform.
+                    _resolve_apply_fragment()(
+                        ctx,
+                        impl,
+                        rf.fragment.name,
+                        middlewares=rf.fragment.middlewares,
+                        shared_env_vars=rf.fragment.shared_env_vars,
+                    )
+                    break
 
 
 def _apply_fragment(
