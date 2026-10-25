@@ -256,6 +256,22 @@ up` created only `POSTGRES_DB`.
   delete the Postgres volume once after updating, for example with
   `docker compose down -v`, which also deletes the other volumes.
 
+### Frontend image build context (unreleased)
+
+The frontend image is built from the whole `apps/<frontend>` directory, and
+its `COPY . .` merges that directory file by file over the image's own
+install. A host `node_modules`, build output and `.env.*.local` files were
+sent with every `docker compose build`, and a local `.env.production.local`
+was inlined into the served bundle. Every frontend now ships
+`apps/<frontend>/.dockerignore`.
+
+- A project without the file gets it on the next update.
+- A project that wrote its own `apps/<frontend>/.dockerignore` makes the
+  update stop with `New generator output collides with user file`. Move your
+  file aside, run the update, then fold your own patterns into the generated
+  file: it is scaffold, so later updates keep your edit or propose a
+  `.forge-merge` sidecar.
+
 ### Frontend content-security policy (unreleased)
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,

@@ -11,6 +11,7 @@ from forge.config import (
 from forge.docker_manager import (
     render_compose,
     render_frontend_dockerfile,
+    render_frontend_dockerignore,
     render_keycloak_realm,
     render_nginx_conf,
 )
@@ -191,6 +192,37 @@ class TestRenderFrontendDockerfile:
             path = render_frontend_dockerfile(config, tmp_path)
             content = path.read_text(encoding="utf-8")
             assert "nginx.conf" in content
+
+
+def _ignore_patterns(path):
+    lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
+
+
+class TestRenderFrontendDockerignore:
+    def test_node_context_leaves_out_the_host_install_builds_and_local_env(self, tmp_path):
+        config = _make_config(framework=FrontendFramework.VUE)
+        path = render_frontend_dockerignore(config, tmp_path)
+
+        assert path == tmp_path / ".dockerignore"
+        patterns = _ignore_patterns(path)
+        for pattern in ("node_modules", "dist", "build", ".svelte-kit", ".env.local", ".env.*.local"):
+            assert pattern in patterns
+
+    def test_node_context_keeps_what_the_image_builds_from(self, tmp_path):
+        config = _make_config(framework=FrontendFramework.SVELTE)
+        patterns = _ignore_patterns(render_frontend_dockerignore(config, tmp_path))
+
+        for kept in ("package.json", "package-lock.json", ".env", ".env.development", "src"):
+            assert kept not in patterns
+
+    def test_flutter_context_leaves_out_the_build_and_tool_cache(self, tmp_path):
+        config = _make_config(framework=FrontendFramework.FLUTTER)
+        patterns = _ignore_patterns(render_frontend_dockerignore(config, tmp_path))
+
+        assert "build" in patterns
+        assert ".dart_tool" in patterns
+        assert "node_modules" not in patterns
 
 
 class TestRenderNginxConf:

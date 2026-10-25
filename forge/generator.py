@@ -43,6 +43,7 @@ from forge.config import (
 from forge.docker_manager import (
     render_compose,
     render_frontend_dockerfile,
+    render_frontend_dockerignore,
     render_init_db,
     render_keycloak_realm,
     render_nginx_conf,
@@ -789,6 +790,7 @@ def _generate_frontend_extras(
             _log("  Rendering frontend Dockerfile ...")
             frontend_dir = project_root / "apps" / config.frontend_slug
             render_frontend_dockerfile(config, frontend_dir)
+            render_frontend_dockerignore(config, frontend_dir)
             render_nginx_conf(config, frontend_dir)
 
 

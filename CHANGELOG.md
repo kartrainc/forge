@@ -127,6 +127,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   reports a bind-mounted 0644 file as executable but refuses to run it, so on
   macOS only `POSTGRES_DB` was created and Keycloak and every backend's
   migration failed.
+- Emit `apps/<frontend>/.dockerignore` for the frontend image. Its build
+  context is the whole application directory, and `COPY . .` merges a host
+  `node_modules`, build output and `.env.*.local` files file by file over the
+  image's own install: a local install sent hundreds of megabytes of context
+  to every `docker compose build`, and a local `.env.production.local` was
+  inlined into the served bundle.
 
 ### Platform routing
 
