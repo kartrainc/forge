@@ -1,0 +1,155 @@
+package e2e_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os/exec"
+	"strconv"
+	"strings"
+	"testing"
+
+	"{{ project_name }}/tests/testutil"
+)
+
+// migrateWithEnv runs the migrate binary with env added and returns its
+// stdout, its stdout and stderr together, and its exit code.
+func migrateWithEnv(t *testing.T, env []string, args ...string) (string, string, int) {
+	t.Helper()
+	cmd := command(t, "migrate", append([]string{"ENV=testing"}, env...)...)
+	cmd.Args = append(cmd.Args, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	var exit *exec.ExitError
+	if err := cmd.Run(); err != nil && !errors.As(err, &exit) {
+		t.Fatal(err)
+	}
+	return stdout.String(), stdout.String() + stderr.String(), cmd.ProcessState.ExitCode()
+}
+
+// migrateBinary runs the migrate binary against url and returns all of its
+// output and its exit code.
+func migrateBinary(t *testing.T, url string, args ...string) (string, int) {
+	t.Helper()
+	_, output, code := migrateWithEnv(t, []string{"DATABASE_URL=" + url}, args...)
+	return output, code
+}
+
+func migrateBinaryOK(t *testing.T, url string, args ...string) string {
+	t.Helper()
+	stdout, output, code := migrateWithEnv(t, []string{"DATABASE_URL=" + url}, args...)
+	if code != 0 {
+		t.Fatalf("migrate %v: exit %d\n%s", args, code, output)
+	}
+	return stdout
+}
+
+func migratePending(status string) int {
+	pending := 0
+	for _, line := range strings.Split(strings.TrimSpace(status), "\n")[1:] {
+		if fields := strings.Fields(line); len(fields) > 1 && fields[1] == "pending" {
+			pending++
+		}
+	}
+	return pending
+}
+
+func migrateVersion(t *testing.T, url string) int64 {
+	t.Helper()
+	version, err := strconv.ParseInt(strings.TrimSpace(migrateBinaryOK(t, url, "version")), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return version
+}
+
+func TestMigrationBinarySubcommands(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	if version := migrateVersion(t, schema.URL); version != 0 {
+		t.Fatalf("fresh version: %d", version)
+	}
+	if migratePending(migrateBinaryOK(t, schema.URL, "status")) == 0 {
+		t.Fatal("a fresh database has pending migrations")
+	}
+	if schema.HasTable(t, "goose_db_version") {
+		t.Fatal("status and version do not create the version table")
+	}
+	migrateBinaryOK(t, schema.URL)
+	migrateBinaryOK(t, schema.URL, "up")
+	latest := migrateVersion(t, schema.URL)
+	if !schema.HasTable(t, "items") || latest == 0 {
+		t.Fatalf("up applies the schema: version %d", latest)
+	}
+	if pending := migratePending(migrateBinaryOK(t, schema.URL, "status")); pending != 0 {
+		t.Fatalf("pending after up: %d", pending)
+	}
+	migrateBinaryOK(t, schema.URL, "down")
+	if pending := migratePending(migrateBinaryOK(t, schema.URL, "status")); pending != 1 || migrateVersion(t, schema.URL) >= latest {
+		t.Fatalf("down rolls back one migration: %d pending", pending)
+	}
+	migrateBinaryOK(t, schema.URL)
+	if migrateVersion(t, schema.URL) != latest {
+		t.Fatal("up re-applies the rolled back migration")
+	}
+}
+
+func TestMigrationBinaryAppliesOutOfOrder(t *testing.T) {
+	const projectVersion = 99999
+	schema := testutil.NewSchema(t)
+	migrateBinaryOK(t, schema.URL)
+	for migrateVersion(t, schema.URL) > 0 {
+		migrateBinaryOK(t, schema.URL, "down")
+	}
+	if _, err := schema.Admin.Exec(context.Background(),
+		"INSERT INTO "+schema.Name+".goose_db_version (version_id, is_applied) VALUES ($1, true)",
+		projectVersion); err != nil {
+		t.Fatal(err)
+	}
+	migrateBinaryOK(t, schema.URL)
+	if !schema.HasTable(t, "items") || migrateVersion(t, schema.URL) != projectVersion {
+		t.Fatal("lower-numbered migrations apply below a recorded project migration")
+	}
+
+	orphan := false
+	for _, line := range strings.Split(migrateBinaryOK(t, schema.URL, "status"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[0] == "99999" && fields[1] == "applied" && strings.HasSuffix(line, "(no file)") {
+			orphan = true
+		}
+	}
+	if !orphan {
+		t.Fatal("status lists the applied version without a file")
+	}
+	if out, code := migrateBinary(t, schema.URL, "down"); code != 1 ||
+		!strings.Contains(out, "no migration file for applied versions 99999") {
+		t.Fatalf("down names the version without a file: exit %d\n%s", code, out)
+	}
+}
+
+func TestMigrationBinaryFailures(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	for _, line := range []string{"sideways", "up extra"} {
+		args := strings.Fields(line)
+		if out, code := migrateBinary(t, schema.URL, args...); code != 2 || !strings.Contains(out, "usage") {
+			t.Fatalf("migrate %v: exit %d\n%s", args, code, out)
+		}
+	}
+	if out, code := migrateBinary(t, schema.URL, "down"); code != 1 || !strings.Contains(out, "no applied migration") {
+		t.Fatalf("down on an empty database: exit %d\n%s", code, out)
+	}
+	if out, code := migrateBinary(t, "::not a url::", "status"); code != 1 || !strings.Contains(out, "invalid database url") {
+		t.Fatalf("invalid url: exit %d\n%s", code, out)
+	}
+	unreachable := "postgresql://postgres:postgres@127.0.0.1:1/none?connect_timeout=1"
+	if out, code := migrateBinary(t, unreachable); code != 1 || !strings.Contains(out, "migration failed") {
+		t.Fatalf("unreachable database: exit %d\n%s", code, out)
+	}
+	brokenConfig := []string{"DATABASE_URL=" + schema.URL, "APP__DB__POOL_MIN=99"}
+	if _, out, code := migrateWithEnv(t, brokenConfig, "status"); code != 1 || !strings.Contains(out, "configuration error") {
+		t.Fatalf("broken configuration: exit %d\n%s", code, out)
+	}
+	if _, out, code := migrateWithEnv(t, brokenConfig, "sideways"); code != 2 || !strings.Contains(out, "usage") {
+		t.Fatalf("an unknown command with a broken configuration: exit %d\n%s", code, out)
+	}
+}

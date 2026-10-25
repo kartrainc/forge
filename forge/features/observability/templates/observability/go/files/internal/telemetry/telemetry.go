@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -89,7 +90,8 @@ func (h traceLogHandler) WithGroup(name string) slog.Handler {
 // inside a recording span pass through, so nested tracing middleware does not
 // duplicate spans.
 func Middleware(next http.Handler) http.Handler {
-	traced := otelhttp.NewHandler(nameSpanByRoute(next), "http.server", otelhttp.WithSpanNameFormatter(spanName))
+	traced := otelhttp.NewHandler(nameSpanByRoute(next), "http.server",
+		otelhttp.WithSpanNameFormatter(spanName), otelhttp.WithMeterProvider(metricnoop.NewMeterProvider()))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if trace.SpanFromContext(r.Context()).IsRecording() {
 			next.ServeHTTP(w, r)

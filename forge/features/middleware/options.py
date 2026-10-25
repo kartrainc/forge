@@ -3,7 +3,7 @@
 Covers correlation IDs, rate limiting, security headers, PII-redacting
 log filters, and opt-in HTTP response caching. Every option here is a
 backend-only concern; the resolver expands the realising fragment per
-target backend (Python / Node / Rust) where that backend supports it.
+target backend (Python / Node / Rust / Go) where that backend supports it.
 """
 
 from __future__ import annotations
@@ -90,10 +90,16 @@ ENDPOINTS: none — middleware decorates every response.""",
 A logging.Filter attached at startup that scrubs emails, bearer tokens,
 common API-key shapes (sk-*, sk-ant-*, AIza*, hf_*), and
 password=/api_key= value pairs from every log record before handlers
-run. Helps satisfy GDPR / SOC2 log-hygiene requirements without
+run. Go redacts every logger the service builds (server, worker,
+migrate) and is stricter: it also scrubs URL credentials, raw JWTs,
+Authorization values and *_token= / *_secret= / *_password= pairs
+(JSON-quoted too), and masks any value whose key ends in password,
+secret, token, api_key, private_key, authorization, cookie or
+credentials, including inside maps, structs and http.Header values.
+Helps satisfy GDPR / SOC2 log-hygiene requirements without
 per-call-site discipline.
 
-BACKENDS: python
+BACKENDS: python, go
 ENDPOINTS: none — applies to logger output globally.""",
             category=FeatureCategory.RELIABILITY,
             enables={True: ("pii_redaction",)},
@@ -131,12 +137,17 @@ ENDPOINTS: none — middleware decorates every response.""",
 Wires a cache backend at startup so route handlers can decorate
 themselves for server-side response caching. Python uses fastapi-cache2
 with a Redis backend (falls back to in-memory if RESPONSE_CACHE_URL
-isn't set); Node uses @fastify/caching. No blanket behavior change —
-handlers opt in per-endpoint.
+isn't set); Node uses @fastify/caching; Go ships a net/http middleware
+with the same Redis / in-memory selection, keyed per tenant, subject,
+actor, scopes and roles, where an unreachable Redis means fast misses.
+No blanket behavior change — handlers opt in per-endpoint.
 
-BACKENDS: python, node
-ENDPOINTS: none — decorate existing routes with @cache(expire=N).
-REQUIRES: RESPONSE_CACHE_URL pointing at Redis (recommended for prod).""",
+BACKENDS: python, node, go
+ENDPOINTS: none — decorate existing routes with @cache(expire=N)
+(Go: wrap them with middleware.CacheResponse(ttl, namespace), inside
+the auth middleware).
+REQUIRES: RESPONSE_CACHE_URL pointing at Redis (recommended for prod).
+Go keys start with RESPONSE_CACHE_PREFIX, default "<service>:cache".""",
             category=FeatureCategory.RELIABILITY,
             stability="beta",
             enables={True: ("response_cache",)},

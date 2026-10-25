@@ -85,7 +85,7 @@ def _tier_badge(row: dict[str, Any]) -> str:
     Operators picking a non-Python backend can scan this column to see
     which options actually apply to them: ``T1`` means all built-in
     backends ship; ``T2`` means a documented migration to T1; ``T3``
-    means Python-only and won't reach Node/Rust.
+    means Python-only and won't reach Node/Rust/Go.
     """
     return f"T{row.get('parity_tier', 1)}"
 

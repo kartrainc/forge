@@ -10,8 +10,8 @@ Every middleware fragment forge ships has the same shape per backend: add
 an import line at the language's middleware-imports anchor, and add a
 registration block at the middleware-registration anchor. The per-backend
 idioms differ (``app.add_middleware(X)`` for FastAPI, ``await
-app.register(X, ...)`` for Fastify, ``.layer(X)`` for Axum) but the structure
-is identical.
+app.register(X, ...)`` for Fastify, ``.layer(X)`` for Axum, a
+``middleware.X,`` list entry for Go/chi) but the structure is identical.
 
 Before Epic K, each fragment shipped one ``inject.yaml`` per backend that
 re-encoded the same ceremony with small language-specific tweaks. Adding a
@@ -85,15 +85,20 @@ class MiddlewareSpec:
     Attributes:
         name: Fragment-scoped identifier, used in ``FORGE:BEGIN`` /
             ``FORGE:END`` sentinels. Typically matches ``Fragment.name``.
-        backend: Which backend this spec applies to. A fragment supporting
-            Python + Node + Rust ships three specs, one per backend.
+        backend: Which backend this spec applies to. A fragment ships one
+            spec per backend it supports.
         order: Insertion order. Lower renders earlier. Middleware fragments
             canonically order by "outermost first": ``correlation_id=90``,
             ``security_headers=80``, ``rate_limit=50``. The `injections`
             produced for a fragment are stable across runs because renderers
-            sort by ``(order, name)``.
+            sort by ``(order, name)``. Across fragments the resolver's apply
+            order (``Fragment.order`` within a dependency tier) decides, so
+            keep the two equal. On Go the order only ranks a spec against
+            other entries after the registration marker; see
+            :func:`render_chi_middleware`.
         import_snippet: The import line injected at the language's
-            ``FORGE:MIDDLEWARE_IMPORTS`` anchor.
+            ``FORGE:MIDDLEWARE_IMPORTS`` anchor. Go may leave it empty: its
+            middleware lives in the already-imported ``middleware`` package.
         register_snippet: The registration block injected at the language's
             ``FORGE:MIDDLEWARE_REGISTRATION`` anchor. May span multiple
             lines — include a leading comment as part of the snippet if you
@@ -161,6 +166,10 @@ def _axum_target() -> str:
 
 def _axum_mod_target() -> str:
     return "src/middleware/mod.rs"
+
+
+def _chi_target() -> str:
+    return "internal/app/app.go"
 
 
 def render_fastapi_middleware(spec: MiddlewareSpec, feature_key: str) -> tuple[_Injection, ...]:
@@ -258,7 +267,57 @@ def render_axum_layer(spec: MiddlewareSpec, feature_key: str) -> tuple[_Injectio
     return tuple(out)
 
 
-# Dispatch table. Adding a new backend (Go, Java, Elixir) = register a
+def render_chi_middleware(spec: MiddlewareSpec, feature_key: str) -> tuple[_Injection, ...]:
+    """Emit _Injection records for a Go/chi (net/http) middleware.
+
+    ``register_snippet`` is one or more entries of the
+    ``[]middleware.Middleware{...}`` list in ``internal/app/app.go``, each
+    ending with a comma (e.g. ``"middleware.Timeout(30 * time.Second),"``).
+    The list's first entry is the outermost middleware. Registrations go
+    ``after`` the marker, so each one applied later lands above the earlier
+    ones and a higher ``order`` is outermost, as on the other backends, but
+    only among the entries after the marker: ``MiddlewareSpec``
+    registrations and ``rate_limit``. The built-in Go fragments register
+    ``before`` the marker in ``inject.yaml`` (security headers, tracing,
+    metrics, platform auth, tenant RLS), so every one of them wraps a
+    ``MiddlewareSpec`` entry whatever its ``order``. The base
+    ``devIdentity`` (``auth.mode=none``) stays innermost.
+
+    Snippets are inserted verbatim, so they can only reference packages
+    ``app.go`` imports. The module path is the backend name, so a
+    middleware's code belongs in ``internal/middleware`` (package
+    ``middleware``, already imported). ``import_snippet`` is optional: when
+    set (a stdlib or third-party import spec such as ``"time"``), it lands
+    inside the import block at ``FORGE:MIDDLEWARE_IMPORTS``.
+    """
+    from forge.appliers.plan import _Injection  # noqa: PLC0415
+
+    out: list[_Injection] = []
+    if spec.import_snippet.strip():
+        out.append(
+            _Injection(
+                feature_key=feature_key,
+                target=_chi_target(),
+                marker="FORGE:MIDDLEWARE_IMPORTS",
+                snippet=spec.import_snippet,
+                position="before",
+                zone=spec.attach_zone,
+            )
+        )
+    out.append(
+        _Injection(
+            feature_key=feature_key,
+            target=_chi_target(),
+            marker="FORGE:MIDDLEWARE_REGISTRATION",
+            snippet=spec.register_snippet,
+            position="after",
+            zone=spec.attach_zone,
+        )
+    )
+    return tuple(out)
+
+
+# Dispatch table. Adding a new backend (Java, Elixir) = register a
 # renderer here. The INJECTOR_REGISTRY pattern Epic B introduces for AST
 # injectors would subsume this in a future unification, but for Epic K the
 # dispatch is small enough to keep explicit.
@@ -269,6 +328,7 @@ _RENDERERS: dict[
     BackendLanguage.PYTHON: render_fastapi_middleware,
     BackendLanguage.NODE: render_fastify_plugin,
     BackendLanguage.RUST: render_axum_layer,
+    BackendLanguage.GO: render_chi_middleware,
 }
 
 

@@ -11,7 +11,7 @@ adding a workaround to generated runtime.
 | --- | --- |
 | `forge` is not on PATH | Confirm installation from GitHub with `uv tool list`; run `uv tool update-shell`, then restart the terminal. The distribution is `forge-cli`; the executable is `forge`. |
 | A package named `forge` was installed from a registry | Use the [documented GitHub installation](../guides/getting-started.md#install-and-inspect); a similarly named registry package is not this distribution. |
-| Generation cannot find Python/Node/Rust/Flutter | Run `forge --doctor` and the native tool's version/doctor command. Check the selected template's requirements and the CI toolchain for that target. |
+| Generation cannot find Python/Node/Rust/Go/Flutter | Run `forge --doctor` and the native tool's version/doctor command. Check the selected template's requirements and the CI toolchain for that target. |
 | Flutter package/codegen/analyzer failure | Preserve the native logs and use the generated app's dependency/codegen instructions. A successful package download is not a successful analyzer or coverage run. |
 | Windows path-length failure | Use a short checkout/output directory and follow [Windows development](../guides/windows.md) for Git/OS long-path settings. |
 | Typechecker results differ from CI | Run `uv sync --locked --dev` in the Forge checkout; compare its locked tool version and the failing CI job. Run the `ty` canary only when diagnosing that tool's behavior. |

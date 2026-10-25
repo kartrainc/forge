@@ -331,6 +331,9 @@ _VALUE_REQUIRES_BACKEND: dict[tuple[str, object], frozenset[BackendLanguage]] = 
     ("queue.backend", "bullmq"): frozenset({BackendLanguage.NODE}),
     ("queue.backend", "apalis"): frozenset({BackendLanguage.RUST}),
     ("queue.backend", "asynq"): frozenset({BackendLanguage.GO}),
+    # ``shared_rls`` ships on Python and Go (``allowed_backends`` on the
+    # option); the per-tenant-schema strategy is Python-only.
+    ("database.multitenancy", "schema_per_tenant"): frozenset({BackendLanguage.PYTHON}),
 }
 
 # Options where EVERY "active" (non-none / non-false) value is Python-only in
@@ -590,9 +593,9 @@ def _check_multitenancy_deferred(config: ProjectConfig) -> None:
         f"forge.toml (so a future version can realise it without a config "
         f"migration), but generation cannot proceed: it would produce a "
         f"project with no tenant isolation. Use database.multitenancy="
-        f"'shared_rls' (Postgres Row-Level Security) or 'schema_per_tenant' "
-        f"(per-tenant Postgres schema), both Python, today — or 'none' for "
-        f"application-layer scoping only.",
+        f"'shared_rls' (Postgres Row-Level Security; Python and Go) or "
+        f"'schema_per_tenant' (per-tenant Postgres schema; Python) today — or "
+        f"'none' for application-layer scoping only.",
         code=OPTIONS_INVALID_VALUE,
         context={
             "option": path,

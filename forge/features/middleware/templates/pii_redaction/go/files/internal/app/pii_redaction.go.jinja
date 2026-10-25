@@ -1,0 +1,32 @@
+package app
+
+import (
+	"log"
+	"log/slog"
+
+	"{{ project_name }}/internal/pii"
+)
+
+func init() {
+	WrapLogHandler(pii.NewHandler)
+}
+
+// builtinLogHandler is slog's initial handler. It writes through the log
+// package, which slog.SetDefault points back at the new default, so it is
+// replaced rather than wrapped.
+var builtinLogHandler = slog.Default().Handler()
+
+// InstallPIIRedaction makes the default logger scrub emails, credentials,
+// tokens, API keys and secret values from every record. Loggers built by
+// Logger already redact; call it after installing a logger built elsewhere.
+// Repeated calls are no-ops.
+func InstallPIIRedaction() {
+	handler := slog.Default().Handler()
+	if pii.Redacts(handler) {
+		return
+	}
+	if handler == builtinLogHandler {
+		handler = slog.NewTextHandler(log.Writer(), nil)
+	}
+	slog.SetDefault(slog.New(pii.NewHandler(handler)))
+}

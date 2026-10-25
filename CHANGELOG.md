@@ -93,6 +93,75 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   token, refetch a JWKS for an unknown `kid` at most once per 10 s, keep
   `db.pool_max` unless `PGX_MAX_CONNECTIONS` is set, ship every `cmd/*` binary in
   the image, and enable production authentication only with platform auth.
+- The Go `migrate` binary takes `up` (the default), `down`, `status` and
+  `version`. It applies out-of-order migrations: forge numbers its migrations
+  below `00100` and projects number theirs from `00100`, so a later forge
+  migration still applies below an applied project migration. `status` and
+  `version` only read `goose_db_version`: they take no lock, return while
+  another run migrates, and never create the table. `status` lists applied
+  versions that have no file as `(no file)`, `down` names them instead of
+  failing with `version not found` and warns when it rolls back `00099`
+  (row-level security), and an invalid command exits 2 even when the
+  configuration is broken. The Go `OPERATIONS.md` documents the exit codes, the
+  keep-applied-files rule and row-level security for project tables.
+- Lint Go services with staticcheck 0.8.2 in `forge` verification and the
+  generated Go CI.
+- Render declarative `MiddlewareSpec` registrations for Go as chi middleware,
+  and find literal edits in Go sources with tree-sitter-go. The middleware
+  ordering design note in `docs/FEATURES.md` covers the Go stack.
+- `pii_redaction` now covers Go (parity tier 2: Python and Go). Every logger
+  built by `app.Logger` redacts, so the server, worker and `migrate` binaries do,
+  including lines logged before the configuration loads; fragments wrap it
+  through the new `app.WrapLogHandler` hook. It redacts messages, attributes,
+  groups and `slog.Any` values (maps, structs, slices, `http.Header`,
+  `*url.URL`, Stringers, `[]byte`), masks secret-named keys of any value kind
+  (`password`, `token`, `apikey`, `secretkey`, `authorization`, `cookie`, …,
+  case- and separator-insensitive), and catches URL credentials, raw JWTs,
+  `Authorization` values and quoted or prefixed secret pairs. Records with
+  nothing to redact pass through without extra allocations.
+- `response_cache` now covers Go: an in-memory LRU store, or Redis when
+  `RESPONSE_CACHE_URL` is set. Entries are keyed by tenant, subject, actor,
+  scopes, roles and the escaped path; only 200 responses without `Set-Cookie`
+  or `no-store`/`private` are cached; the handler's `Cache-Control` is kept and
+  `private` added for identity-scoped entries; hop-by-hop headers are never
+  stored; flushed (streaming) responses pass through; ETags are stable across
+  replicas. An unreachable Redis costs at most ~300 ms once and then a 5 s
+  bypass, never a hung request (250 ms client limits, no retries, the entry is
+  stored after the response is sent). The default key prefix is
+  `<service>:cache`.
+- `observability.otel` on Go also pushes RED metrics over OTLP with Python's
+  names, labels and buckets (`http.server.request.count`,
+  `http.server.request.duration`, `http.server.active_requests`, labelled by
+  the chi route pattern) plus Go runtime metrics. Non-standard methods are
+  recorded as `_OTHER`, and otelhttp's own server metrics stay off, so client
+  `Host` headers and methods cannot add series.
+- `reliability.service_client` now covers Go: `internal/clients` retries
+  idempotent requests (GET, HEAD, OPTIONS, PUT, DELETE, or any request with an
+  `Idempotency-Key` header) after a 5xx, a 429 (honouring `Retry-After`), a
+  failed connection or a timeout, with jittered backoff. It follows no
+  redirects, rejects paths that do not start with `/`, caps decoded responses at
+  16 MiB (`MaxResponseBytes`), shares one in-flight client-credentials token
+  fetch, propagates the correlation and caller identity headers, and reuses the
+  generated circuit breaker (counting only 5xx responses, failed connections and
+  timeouts) and the platform-auth S2S client when those options are on.
+- `database.multitenancy=shared_rls` now covers Go: migration `00099` enables
+  and forces the `tenant_isolation_items` policy, and every items repository
+  call runs in a transaction that binds `app.current_tenant` with
+  `set_config(..., true)`. Header, subdomain and token-claim resolution take the
+  same `TENANT_*` settings as Python. Without a verified token, the header or
+  subdomain tenant becomes the request identity's tenant (a header tenant that
+  is not a UUID gets 400 `INVALID_INPUT`; subdomains count only when the
+  leftmost label is a UUID); a verified token's tenant always wins.
+  `TENANT_RLS_GUC` must stay `app.current_tenant`. The RLS integration tests run
+  as the `DATABASE_URL` role when it does not bypass RLS. `schema_per_tenant`
+  stays Python-only and is rejected for Go with a clear error.
+- `forge --update` runs `go mod tidy` on the regenerated Go services before
+  comparing them with the project, as generation does. It no longer rewrites a
+  tidied `go.mod` into an untidy one, which made `go build`, the generated CI,
+  image builds and the quality gates fail with "go: updates to go.mod needed"
+  even on a no-op update. `go.sum` follows its `go.mod` and is recorded in
+  `forge.toml` again. Updating or planning an update of a project with Go
+  services requires `go` on PATH.
 
 ### Vue UI kits
 

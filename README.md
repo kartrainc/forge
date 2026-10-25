@@ -128,7 +128,7 @@ forge --doctor
 The [installation guide](docs/guides/getting-started.md#install-and-inspect) also
 covers the bootstrap installer. Pin a release or commit for reproducible team
 installations. Docker and Compose v2 run the development stack; local generation
-and tests may also need the selected Node, Rust, or Flutter toolchains.
+and tests may also need the selected Node, Rust, Go, or Flutter toolchains.
 
 ### Generate and run
 
@@ -370,7 +370,7 @@ migration requirements live in [CHANGELOG.md](CHANGELOG.md) and [UPGRADING.md](U
 | Implemented area | Validation and detail |
 | --- | --- |
 | Auth-stack rebuild | Gatekeeper authority, BFF sessions, internal ES256 tokens, service delegation; [auth contract](docs/auth-architecture.md) |
-| Cross-SDK parity contract | Python/Node/Rust authentication behavior checked by [contract tests](tests/contract/auth_sdk_parity/) |
+| Cross-SDK parity contract | Python/Node/Rust/Go authentication behavior checked by [contract tests](tests/contract/auth_sdk_parity/) |
 | Generated-code gates | Windows/Linux policy checks and selected Python, Node, Rust, Go, Vue, and Svelte native configurations in [CI](.github/workflows/generated-quality.yml) |
 | Generator and rendered projects | OS tests, generation/toolchain matrices, Compose smoke, and round-trip lanes; [validation matrix](docs/operations/validation-matrix.md) |
 
@@ -379,7 +379,7 @@ use the [1.2 upgrade guide](UPGRADING.md#11--12--auth-stack-rebuild-unreleased)
 when migrating from the older Keycloak-direct model.
 
 The [capability limits](docs/reference/limitations.md) are part of the platform
-contract. OpenAI adapters exist for Python/Node/Rust; Anthropic, Ollama, Bedrock,
+contract. OpenAI adapters exist for Python/Node/Rust/Go; Anthropic, Ollama, Bedrock,
 RAG, and platform MCP adapters currently target Python. Feature and component
 parity varies. Browser quality tests do not establish a complete deployed
 login/tenant journey. Flutter's LCOV adapter exists, but native device/E2E coverage was not

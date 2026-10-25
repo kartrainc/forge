@@ -1,0 +1,83 @@
+// Package tenancy isolates tenants with Postgres Row-Level Security
+// (database.multitenancy=shared_rls): it resolves each request's tenant and
+// binds it to the app.current_tenant setting for the length of one
+// transaction, which the tenant_isolation_* policies compare with customer_id.
+package tenancy
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// Tenant resolution strategies (database.tenant_resolution).
+const (
+	ResolutionTokenClaim = "token_claim"
+	ResolutionHeader     = "header"
+	ResolutionSubdomain  = "subdomain"
+)
+
+// Generated defaults; the TENANT_* environment variables override them.
+const (
+	DefaultResolution = {{ options['database.tenant_resolution'] | tojson }}
+	DefaultClaimPath  = {{ options['database.tenant_claim_path'] | tojson }}
+	DefaultHeaderName = {{ options['database.tenant_header_name'] | tojson }}
+	// DefaultGUC must match the policies in migrations/00099_enable_rls.sql.
+	DefaultGUC = "app.current_tenant"
+)
+
+// Settings configures tenant resolution and binding.
+type Settings struct {
+	Resolution string
+	ClaimPath  string
+	HeaderName string
+	GUC        string
+}
+
+// DefaultSettings returns the generated defaults.
+func DefaultSettings() Settings {
+	return Settings{
+		Resolution: DefaultResolution,
+		ClaimPath:  DefaultClaimPath,
+		HeaderName: DefaultHeaderName,
+		GUC:        DefaultGUC,
+	}
+}
+
+// LoadSettings reads TENANT_RESOLUTION, TENANT_CLAIM_PATH, TENANT_HEADER_NAME
+// and TENANT_RLS_GUC through getenv, falling back to the defaults for unset
+// variables, and validates the result.
+func LoadSettings(getenv func(string) string) (Settings, error) {
+	value := func(name, fallback string) string {
+		if raw := getenv(name); raw != "" {
+			return strings.TrimSpace(raw)
+		}
+		return fallback
+	}
+	settings := Settings{
+		Resolution: value("TENANT_RESOLUTION", DefaultResolution),
+		ClaimPath:  value("TENANT_CLAIM_PATH", DefaultClaimPath),
+		HeaderName: value("TENANT_HEADER_NAME", DefaultHeaderName),
+		GUC:        value("TENANT_RLS_GUC", DefaultGUC),
+	}
+	return settings, settings.Validate()
+}
+
+// Validate rejects an unknown strategy, empty names and a GUC other than
+// DefaultGUC, the only one the RLS policies read.
+func (s Settings) Validate() error {
+	switch s.Resolution {
+	case ResolutionTokenClaim, ResolutionHeader, ResolutionSubdomain:
+	default:
+		return fmt.Errorf("TENANT_RESOLUTION=%q is invalid; valid: header, subdomain, token_claim", s.Resolution)
+	}
+	switch {
+	case s.ClaimPath == "":
+		return errors.New("TENANT_CLAIM_PATH must be non-empty")
+	case s.HeaderName == "":
+		return errors.New("TENANT_HEADER_NAME must be non-empty")
+	case s.GUC != DefaultGUC:
+		return fmt.Errorf("TENANT_RLS_GUC=%q is unsupported; the RLS policies in migrations/00099_enable_rls.sql read %s", s.GUC, DefaultGUC)
+	}
+	return nil
+}

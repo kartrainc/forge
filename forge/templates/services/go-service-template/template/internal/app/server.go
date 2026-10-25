@@ -50,6 +50,14 @@ func Serve(ctx context.Context, listener net.Listener, handler http.Handler) err
 	return nil
 }
 
+var logHandlerWrappers []func(slog.Handler) slog.Handler
+
+// WrapLogHandler decorates the handler of every logger Logger builds, so
+// cmd/server, cmd/worker and cmd/migrate share it. Call it from an init func.
+func WrapLogHandler(wrap func(slog.Handler) slog.Handler) {
+	logHandlerWrappers = append(logHandlerWrappers, wrap)
+}
+
 // Logger builds the JSON (or pretty text) slog logger for level.
 func Logger(level string, pretty bool) *slog.Logger {
 	var parsed slog.Level
@@ -57,8 +65,12 @@ func Logger(level string, pretty bool) *slog.Logger {
 		parsed = slog.LevelInfo
 	}
 	options := &slog.HandlerOptions{Level: parsed}
+	var handler slog.Handler = slog.NewJSONHandler(os.Stdout, options)
 	if pretty {
-		return slog.New(slog.NewTextHandler(os.Stdout, options))
+		handler = slog.NewTextHandler(os.Stdout, options)
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, options))
+	for _, wrap := range logHandlerWrappers {
+		handler = wrap(handler)
+	}
+	return slog.New(handler)
 }

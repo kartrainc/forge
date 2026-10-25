@@ -14,6 +14,7 @@ from __future__ import annotations
 from forge.specs.middleware import (
     MiddlewareSpec,
     render_axum_layer,
+    render_chi_middleware,
     render_fastapi_middleware,
     render_fastify_plugin,
     render_middleware_injections,
@@ -22,6 +23,7 @@ from forge.specs.middleware import (
 __all__ = [
     "MiddlewareSpec",
     "render_axum_layer",
+    "render_chi_middleware",
     "render_fastapi_middleware",
     "render_fastify_plugin",
     "render_middleware_injections",

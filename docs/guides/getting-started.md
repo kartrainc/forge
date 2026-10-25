@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/cchifor/forge/main/install | bash
 
 Use an immutable release or commit for reproducible team installations. Docker
 and Compose v2 run the emitted development stack. Local generation/testing can
-also require Node, Rust, or Flutter for the selected targets; `--doctor` reports
+also require Node, Rust, Go, or Flutter for the selected targets; `--doctor` reports
 what is available. See [Windows development](windows.md) for platform specifics.
 
 ## Generate manually

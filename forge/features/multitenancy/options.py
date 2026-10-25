@@ -11,7 +11,7 @@ generated persistence layer:
   shared database; every tenant-scoped table gets ``ENABLE ROW LEVEL
   SECURITY`` + a ``USING (customer_id = current_setting('app.current_tenant'))``
   policy, and each request/transaction binds the GUC via a session hook.
-  Python tier-1 (Postgres-only).
+  Python + Go (Postgres-only).
 - ``schema_per_tenant``: per-tenant Postgres schema. Each tenant's tables
   live in their own ``tenant_<id>`` schema; a request middleware resolves the
   tenant and a session ``begin`` hook binds ``SET LOCAL search_path`` to that
@@ -83,23 +83,30 @@ Discriminator for how strongly tenants are isolated in the database.
   "not yet implemented" error rather than silently producing an un-isolated
   project. Use ``shared_rls`` or ``schema_per_tenant`` today.
 
-BACKENDS: python (shared_rls, schema_per_tenant). The non-``none`` strategies
-are Python-only in 1.x — the GUC/search_path hooks + Alembic stack target the
-SQLAlchemy / Alembic stack the python-service-template ships.
+BACKENDS: python (shared_rls, schema_per_tenant), go (shared_rls). Go ships
+``shared_rls`` as a goose migration with the same policy on ``items`` plus a pgx
+transaction scope that binds ``app.current_tenant`` with ``set_config(..., true)``
+for every items-repository call; project tables add the policy in the migration
+that creates them. Without a verified token (``auth.mode=none`` or the
+platform-auth dev mode) a Go request's header/subdomain tenant becomes its
+identity's tenant and must be a UUID (400 otherwise). ``schema_per_tenant`` is
+Python-only.
 ENGINE: postgres. The GUC / search_path hooks are no-ops on non-Postgres
 dialects.""",
             category=FeatureCategory.PLATFORM,
             requires_database=True,
-            # The non-``none`` strategies ship a Python-only realisation in
-            # 1.x. ``allowed_backends`` is only enforced for an ACTIVE value
-            # (``is_active_value`` — i.e. a value whose ``enables`` is
+            # The non-``none`` strategies ship Python (and, for shared_rls, Go)
+            # realisations. ``allowed_backends`` is only enforced for an ACTIVE
+            # value (``is_active_value`` — i.e. a value whose ``enables`` is
             # non-empty); ``none`` maps to no fragments so the default never
             # trips the check. Setting it here lets the resolver +
             # ProjectConfig walker reject e.g. ``shared_rls`` on a Node/Rust
             # project with a clear message instead of a runtime no-op.
-            allowed_backends=(BackendLanguage.PYTHON,),
+            # ``schema_per_tenant`` on a Go-only project is rejected by the
+            # resolver's ``_VALUE_REQUIRES_BACKEND`` table.
+            allowed_backends=(BackendLanguage.PYTHON, BackendLanguage.GO),
             enables={
-                "shared_rls": ("multitenancy_rls_python",),
+                "shared_rls": ("multitenancy_rls_python", "multitenancy_rls_go"),
                 "schema_per_tenant": ("multitenancy_schema_per_tenant_python",),
                 # ``db_per_tenant`` intentionally maps to no fragment — it is
                 # recognised-but-deferred (separate databases / connection pools
@@ -128,14 +135,16 @@ identical across both; only the binding mechanism differs. Inert when
   via a dot-path (``database.tenant_claim_path``), reusing the auth
   ``ClaimMapper`` seam the OIDC / in_memory providers ship. The middleware
   reads ``request.state.identity`` (bound by the platform-auth middleware)
-  and extracts the configured claim.
+  and extracts the configured claim. Go reads the platform-auth SDK's
+  verified claims and falls back to the bound identity's tenant.
 - ``header``: read the tenant id from a gateway-injected request header
   (``database.tenant_header_name``). For deployments where an upstream
   proxy / API gateway already resolved + validated the tenant.
 - ``subdomain``: parse the leftmost label of the request Host header
-  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing.
+  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing. Go
+  only reads a UUID label as a tenant (``example.com`` and IP hosts carry none).
 
-BACKENDS: python. Inert unless ``database.multitenancy != none``.""",
+BACKENDS: python, go. Inert unless ``database.multitenancy != none``.""",
             category=FeatureCategory.PLATFORM,
             requires_database=True,
         )
@@ -154,8 +163,8 @@ by the auth ``ClaimMapper`` (``organization.id`` reads
 ``https://example.com/tenant`` is matched as a whole key first). Defaults to
 ``tenant_id`` to match the platform-auth SDK's default tenant claim.
 
-BACKENDS: python. Written into the generated ``TenantResolver`` config; no
-fragment is keyed off the value.""",
+BACKENDS: python, go. Written into the generated ``TenantResolver`` config;
+no fragment is keyed off the value.""",
             category=FeatureCategory.PLATFORM,
             requires_database=True,
         )
@@ -172,8 +181,8 @@ Used when ``database.tenant_resolution=header``. The HTTP header the
 ``TenantResolver`` reads the tenant id from (case-insensitive). Defaults to
 ``X-Tenant-ID``.
 
-BACKENDS: python. Written into the generated ``TenantResolver`` config; no
-fragment is keyed off the value.""",
+BACKENDS: python, go. Written into the generated ``TenantResolver`` config;
+no fragment is keyed off the value.""",
             category=FeatureCategory.PLATFORM,
             requires_database=True,
         )

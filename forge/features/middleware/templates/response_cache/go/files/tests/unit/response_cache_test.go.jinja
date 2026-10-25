@@ -1,0 +1,700 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+)
+
+type cacheProbe struct {
+	calls  int
+	status int
+	header map[string]string
+	body   string
+}
+
+func (p *cacheProbe) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	p.calls++
+	w.Header().Set("Content-Type", "application/json")
+	for name, value := range p.header {
+		w.Header().Set(name, value)
+	}
+	if p.status != 0 {
+		w.WriteHeader(p.status)
+	}
+	body := p.body
+	if body == "" {
+		body = fmt.Sprintf(`{"call":%d}`, p.calls)
+	}
+	_, _ = w.Write([]byte(body))
+}
+
+type cacheRequest struct {
+	method   string
+	target   string
+	header   map[string]string
+	identity *identity.IdentityContext
+}
+
+func sendCached(handler http.Handler, request cacheRequest) *httptest.ResponseRecorder {
+	method := request.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	r := httptest.NewRequest(method, request.target, nil)
+	for name, value := range request.header {
+		r.Header.Set(name, value)
+	}
+	if request.identity != nil {
+		r = r.WithContext(identity.WithContext(r.Context(), *request.identity))
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, r)
+	return recorder
+}
+
+func newMemoryCache() *middleware.ResponseCache {
+	return middleware.NewResponseCache(middleware.NewMemoryResponseCacheStore(0), "forge:cache")
+}
+
+func TestResponseCacheServesHitsWithFastAPICacheHeaders(t *testing.T) {
+	probe := &cacheProbe{}
+	handler := newMemoryCache().Middleware(30*time.Second, "items")(probe)
+	miss := sendCached(handler, cacheRequest{target: "/api/v1/items?b=2&a=1"})
+	etag := miss.Header().Get("ETag")
+	if miss.Code != http.StatusOK || miss.Body.String() != `{"call":1}` ||
+		miss.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" ||
+		miss.Header().Get("Cache-Control") != "max-age=30" || !strings.HasPrefix(etag, `W/"`) {
+		t.Fatalf("miss: %d %q %v", miss.Code, miss.Body.String(), miss.Header())
+	}
+	hit := sendCached(handler, cacheRequest{target: "/api/v1/items?a=1&b=2"})
+	if probe.calls != 1 || hit.Body.String() != `{"call":1}` || hit.Header().Get("ETag") != etag ||
+		hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" ||
+		hit.Header().Get("Content-Type") != "application/json" || hit.Header().Get("Content-Length") != "10" {
+		t.Fatalf("hit: calls=%d %q %v", probe.calls, hit.Body.String(), hit.Header())
+	}
+	if maxAge, _ := strconv.Atoi(strings.TrimPrefix(hit.Header().Get("Cache-Control"), "max-age=")); maxAge < 1 || maxAge > 30 {
+		t.Fatalf("a hit reports the remaining ttl: %q", hit.Header().Get("Cache-Control"))
+	}
+	for _, candidate := range []string{etag, strings.TrimPrefix(etag, "W/"), `"other", ` + etag, "*"} {
+		notModified := sendCached(handler, cacheRequest{target: "/api/v1/items?a=1&b=2", header: map[string]string{"If-None-Match": candidate}})
+		if notModified.Code != http.StatusNotModified || notModified.Body.Len() != 0 || notModified.Header().Get("ETag") != etag {
+			t.Fatalf("If-None-Match %q: %d %q", candidate, notModified.Code, notModified.Body.String())
+		}
+	}
+	stale := sendCached(handler, cacheRequest{target: "/api/v1/items?a=1&b=2", header: map[string]string{"If-None-Match": `W/"stale"`}})
+	if stale.Code != http.StatusOK || probe.calls != 1 {
+		t.Fatalf("a different ETag gets the cached body: %d calls=%d", stale.Code, probe.calls)
+	}
+	if other := sendCached(handler, cacheRequest{target: "/api/v1/items?a=2"}); other.Body.String() != `{"call":2}` {
+		t.Fatalf("the query is part of the key: %q", other.Body.String())
+	}
+}
+
+func TestResponseCacheHonoursRequestCacheControlAndMethods(t *testing.T) {
+	probe := &cacheProbe{}
+	handler := newMemoryCache().Middleware(time.Minute, "")(probe)
+	sendCached(handler, cacheRequest{target: "/items"})
+	refreshed := sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Cache-Control": "no-cache"}})
+	if refreshed.Body.String() != `{"call":2}` || refreshed.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" {
+		t.Fatalf("no-cache skips the lookup: %q", refreshed.Body.String())
+	}
+	if hit := sendCached(handler, cacheRequest{target: "/items"}); hit.Body.String() != `{"call":2}` {
+		t.Fatalf("no-cache refreshes the entry: %q", hit.Body.String())
+	}
+	bypass := sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Cache-Control": "max-age=0, No-Store"}})
+	if bypass.Body.String() != `{"call":3}` || bypass.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+		t.Fatalf("no-store bypasses the cache: %q %v", bypass.Body.String(), bypass.Header())
+	}
+	if hit := sendCached(handler, cacheRequest{target: "/items"}); hit.Body.String() != `{"call":2}` {
+		t.Fatalf("no-store does not write: %q", hit.Body.String())
+	}
+	for _, method := range []string{http.MethodPost, http.MethodHead, http.MethodDelete} {
+		before := probe.calls
+		response := sendCached(handler, cacheRequest{method: method, target: "/items"})
+		if probe.calls != before+1 || response.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+			t.Fatalf("%s is never cached", method)
+		}
+	}
+}
+
+func TestResponseCacheIsolatesTenantsAndSubjects(t *testing.T) {
+	probe := &cacheProbe{}
+	handler := newMemoryCache().Middleware(time.Minute, "items")(probe)
+	tenantA := identity.New(uuid.New(), "alice")
+	tenantB := identity.New(uuid.New(), "alice")
+	colleague := identity.New(tenantA.TenantID, "bob")
+	bodies := map[string]string{}
+	for name, id := range map[string]identity.IdentityContext{"a": tenantA, "b": tenantB, "colleague": colleague} {
+		bodies[name] = sendCached(handler, cacheRequest{target: "/items", identity: &id}).Body.String()
+	}
+	if probe.calls != 3 {
+		t.Fatalf("each tenant and subject gets its own entry: %d calls", probe.calls)
+	}
+	if again := sendCached(handler, cacheRequest{target: "/items", identity: &tenantA}); again.Body.String() != bodies["a"] {
+		t.Fatalf("tenant A hit: %q want %q", again.Body.String(), bodies["a"])
+	}
+	anonymous := sendCached(handler, cacheRequest{target: "/items"})
+	if anonymous.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" ||
+		sendCached(handler, cacheRequest{target: "/items"}).Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" {
+		t.Fatal("requests without credentials share the anonymous entry")
+	}
+	withToken := map[string]string{"Authorization": "Bearer unverified"}
+	withCookie := map[string]string{"Cookie": "session=1"}
+	for _, header := range []map[string]string{withToken, withCookie} {
+		before := probe.calls
+		response := sendCached(handler, cacheRequest{target: "/items", header: header})
+		if probe.calls != before+1 || response.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+			t.Fatalf("credentials without a bound identity are never cached: %v", header)
+		}
+	}
+	language := sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Accept-Language": "ro"}})
+	if language.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" {
+		t.Fatal("Accept-Language is part of the key")
+	}
+}
+
+func TestResponseCacheStoresOnlyCacheableResponses(t *testing.T) {
+	cases := map[string]*cacheProbe{
+		"error status": {status: http.StatusNotFound},
+		"created":      {status: http.StatusCreated},
+		"set-cookie":   {header: map[string]string{"Set-Cookie": "a=b"}},
+		"no-store":     {header: map[string]string{"Cache-Control": "no-store"}},
+		"private":      {header: map[string]string{"Cache-Control": "private, max-age=10"}},
+		"vary origin":  {header: map[string]string{"Vary": "Accept, Origin"}},
+		"vary star":    {header: map[string]string{"Vary": "*"}},
+		"large body":   {body: strings.Repeat("x", 1<<20+1)},
+	}
+	for name, probe := range cases {
+		handler := newMemoryCache().Middleware(time.Minute, "")(probe)
+		first := sendCached(handler, cacheRequest{target: "/items"})
+		second := sendCached(handler, cacheRequest{target: "/items"})
+		if probe.calls != 2 || second.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+			t.Errorf("%s: calls=%d header=%v", name, probe.calls, second.Header())
+		}
+		if want := max(probe.status, http.StatusOK); first.Code != want || first.Body.Len() == 0 {
+			t.Errorf("%s: forwarded unchanged: %d (%d bytes)", name, first.Code, first.Body.Len())
+		}
+		for header, value := range probe.header {
+			if first.Header().Get(header) != value {
+				t.Errorf("%s: %s = %q", name, header, first.Header().Get(header))
+			}
+		}
+	}
+	vary := &cacheProbe{header: map[string]string{"Vary": "Accept, Accept-Language"}}
+	handler := newMemoryCache().Middleware(time.Minute, "")(vary)
+	sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Accept": "application/json"}})
+	if hit := sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Accept": "application/json"}}); hit.Header().Get("Vary") != "Accept, Accept-Language" || vary.calls != 1 {
+		t.Fatalf("Vary on keyed headers is cached and replayed: %v", hit.Header())
+	}
+	if sendCached(handler, cacheRequest{target: "/items", header: map[string]string{"Accept": "text/csv"}}); vary.calls != 2 {
+		t.Fatal("Accept is part of the key")
+	}
+	empty := newMemoryCache().Middleware(time.Minute, "")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	sendCached(empty, cacheRequest{target: "/empty"})
+	if hit := sendCached(empty, cacheRequest{target: "/empty"}); hit.Code != http.StatusOK || hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" {
+		t.Fatalf("an empty 200 is cacheable: %d %v", hit.Code, hit.Header())
+	}
+	informational := newMemoryCache().Middleware(time.Minute, "")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	if response := sendCached(informational, cacheRequest{target: "/hints"}); response.Code != http.StatusOK || response.Body.String() != "ok" {
+		t.Fatalf("the first final status wins: %d", response.Code)
+	}
+}
+
+func TestResponseCacheExpiresAndClearsNamespaces(t *testing.T) {
+	cache := newMemoryCache()
+	items, orders := &cacheProbe{}, &cacheProbe{}
+	itemsHandler := cache.Middleware(time.Minute, "items")(items)
+	ordersHandler := cache.Middleware(time.Minute, "orders")(orders)
+	shortLived := &cacheProbe{}
+	shortHandler := cache.Middleware(40*time.Millisecond, "short")(shortLived)
+	for range 2 {
+		sendCached(itemsHandler, cacheRequest{target: "/items"})
+		sendCached(ordersHandler, cacheRequest{target: "/orders"})
+		sendCached(shortHandler, cacheRequest{target: "/short"})
+	}
+	if items.calls != 1 || orders.calls != 1 || shortLived.calls != 1 {
+		t.Fatalf("warm: %d %d %d", items.calls, orders.calls, shortLived.calls)
+	}
+	time.Sleep(60 * time.Millisecond)
+	sendCached(shortHandler, cacheRequest{target: "/short"})
+	if shortLived.calls != 2 {
+		t.Fatal("expired entries miss")
+	}
+	if err := cache.Clear(context.Background(), "items"); err != nil {
+		t.Fatal(err)
+	}
+	sendCached(itemsHandler, cacheRequest{target: "/items"})
+	sendCached(ordersHandler, cacheRequest{target: "/orders"})
+	if items.calls != 2 || orders.calls != 1 {
+		t.Fatalf("clearing a namespace keeps the others: items=%d orders=%d", items.calls, orders.calls)
+	}
+	if err := cache.Clear(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	sendCached(ordersHandler, cacheRequest{target: "/orders"})
+	if orders.calls != 2 {
+		t.Fatal("an empty namespace clears everything")
+	}
+	defaulted := cache.Middleware(0, "default")(&cacheProbe{})
+	if response := sendCached(defaulted, cacheRequest{target: "/d"}); response.Header().Get("Cache-Control") != "max-age=60" {
+		t.Fatalf("a non-positive ttl defaults to 60s: %q", response.Header().Get("Cache-Control"))
+	}
+}
+
+func TestMemoryResponseCacheStoreEvictsLeastRecentlyUsed(t *testing.T) {
+	ctx := context.Background()
+	store := middleware.NewMemoryResponseCacheStore(10)
+	for _, key := range []string{"a", "b"} {
+		if err := store.Set(ctx, key, []byte("12345"), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ttl, found, _ := store.Get(ctx, "a"); !found || ttl <= 0 || ttl > time.Minute {
+		t.Fatalf("a: %v %v", found, ttl)
+	}
+	_ = store.Set(ctx, "c", []byte("123"), time.Minute)
+	if _, _, found, _ := store.Get(ctx, "b"); found {
+		t.Fatal("the least recently used entry is evicted first")
+	}
+	_ = store.Set(ctx, "a", []byte("1"), time.Minute)
+	if value, _, found, _ := store.Get(ctx, "a"); !found || string(value) != "1" {
+		t.Fatalf("set replaces: %q", value)
+	}
+	_ = store.Set(ctx, "huge", []byte("12345678901"), time.Minute)
+	if _, _, found, _ := store.Get(ctx, "huge"); found {
+		t.Fatal("entries over the bound are not stored")
+	}
+	if _, _, found, _ := store.Get(ctx, "c"); !found {
+		t.Fatal("an oversized write evicts nothing")
+	}
+}
+
+type fakeCacheStore struct {
+	mu      sync.Mutex
+	gets    int
+	entry   []byte
+	getErr  error
+	setErr  error
+	onGet   func(context.Context)
+	onSet   func(context.Context)
+	cleared error
+}
+
+func (s *fakeCacheStore) Get(ctx context.Context, _ string) ([]byte, time.Duration, bool, error) {
+	s.mu.Lock()
+	s.gets++
+	s.mu.Unlock()
+	if s.onGet != nil {
+		s.onGet(ctx)
+	}
+	return s.entry, time.Minute, s.entry != nil, s.getErr
+}
+
+func (s *fakeCacheStore) Set(ctx context.Context, _ string, _ []byte, _ time.Duration) error {
+	if s.onSet != nil {
+		s.onSet(ctx)
+	}
+	return s.setErr
+}
+
+func (s *fakeCacheStore) Clear(context.Context, string) error { return s.cleared }
+
+func captureCacheLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	var logs bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	return &logs
+}
+
+func TestResponseCacheServesThroughStoreFailures(t *testing.T) {
+	logs := captureCacheLogs(t)
+	unreachable := &fakeCacheStore{getErr: errors.New("redis down"), cleared: errors.New("redis down")}
+	probe := &cacheProbe{}
+	cache := middleware.NewResponseCache(unreachable, "forge:cache")
+	handler := cache.Middleware(time.Minute, "")(probe)
+	for range 3 {
+		if response := sendCached(handler, cacheRequest{target: "/items"}); response.Code != http.StatusOK ||
+			response.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+			t.Fatalf("a failing store serves the handler uncached: %d %v", response.Code, response.Header())
+		}
+	}
+	if probe.calls != 3 || unreachable.gets != 1 || !errors.Is(cache.Clear(context.Background(), "items"), unreachable.cleared) {
+		t.Fatalf("after a failure the store is bypassed: calls=%d gets=%d", probe.calls, unreachable.gets)
+	}
+	if count := strings.Count(logs.String(), "response cache read failed"); count != 1 {
+		t.Fatalf("one warning per outage, got %d: %s", count, logs.String())
+	}
+
+	corrupt := &fakeCacheStore{entry: []byte("not json")}
+	probe = &cacheProbe{}
+	handler = middleware.NewResponseCache(corrupt, "forge:cache").Middleware(time.Minute, "")(probe)
+	for range 2 {
+		if response := sendCached(handler, cacheRequest{target: "/items"}); response.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" {
+			t.Fatalf("a corrupt entry is a miss: %v", response.Header())
+		}
+	}
+
+	unwritable := &fakeCacheStore{setErr: errors.New("read only replica")}
+	probe = &cacheProbe{}
+	handler = middleware.NewResponseCache(unwritable, "forge:cache").Middleware(time.Minute, "")(probe)
+	first := sendCached(handler, cacheRequest{target: "/items"})
+	second := sendCached(handler, cacheRequest{target: "/items"})
+	if first.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" || first.Body.String() != `{"call":1}` ||
+		second.Header().Get(middleware.ResponseCacheStatusHeader) != "" || unwritable.gets != 1 ||
+		!strings.Contains(logs.String(), "response cache write failed") {
+		t.Fatalf("a failed write still answers, then bypasses: %v %v %s", first.Header(), second.Header(), logs.String())
+	}
+}
+
+func TestResponseCacheBoundsStoreCallsAndStoresAfterAnswering(t *testing.T) {
+	var recorder *httptest.ResponseRecorder
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var getDeadline, setDeadline time.Duration
+	var setErr error
+	var flushedBeforeSet bool
+	store := &fakeCacheStore{
+		onGet: func(ctx context.Context) {
+			deadline, _ := ctx.Deadline()
+			getDeadline = time.Until(deadline)
+		},
+		onSet: func(ctx context.Context) {
+			deadline, _ := ctx.Deadline()
+			setDeadline, setErr = time.Until(deadline), ctx.Err()
+			flushedBeforeSet = recorder.Flushed && recorder.Body.String() == `{"call":1}`
+		},
+	}
+	probe := &cacheProbe{}
+	handler := middleware.NewResponseCache(store, "svc").Middleware(time.Minute, "items")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probe.ServeHTTP(w, r)
+		cancel()
+	}))
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/items", nil).WithContext(ctx))
+	if getDeadline <= 0 || getDeadline > time.Second || setDeadline <= 0 || setDeadline > time.Second {
+		t.Fatalf("store calls get a short deadline: get=%v set=%v", getDeadline, setDeadline)
+	}
+	if setErr != nil || !flushedBeforeSet {
+		t.Fatalf("the entry is stored after the response is flushed, outliving the request: %v %v", setErr, flushedBeforeSet)
+	}
+}
+
+func TestResponseCacheFailsFastWhenRedisIsUnreachable(t *testing.T) {
+	logs := captureCacheLogs(t)
+	stalled, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stalled.Close()
+	for _, address := range []string{"127.0.0.1:1", stalled.Addr().String(), "10.255.255.1:6379"} {
+		store, err := middleware.NewRedisResponseCacheStore("redis://" + address + "/0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe := &cacheProbe{}
+		handler := middleware.NewResponseCache(store, "svc").Middleware(time.Minute, "items")(probe)
+		before := strings.Count(logs.String(), "response cache read failed")
+		for range 3 {
+			started := time.Now()
+			response := sendCached(handler, cacheRequest{target: "/items"})
+			if elapsed := time.Since(started); response.Code != http.StatusOK || elapsed > time.Second {
+				t.Fatalf("%s: %d after %v", address, response.Code, elapsed)
+			}
+		}
+		if probe.calls != 3 || strings.Count(logs.String(), "response cache read failed") != before+1 {
+			t.Fatalf("%s: calls=%d logs=%s", address, probe.calls, logs.String())
+		}
+		_ = store.Close()
+	}
+}
+
+func TestProcessWideResponseCache(t *testing.T) {
+	t.Cleanup(func() { middleware.SetResponseCache(nil) })
+	middleware.SetResponseCache(nil)
+	probe := &cacheProbe{}
+	handler := middleware.CacheResponse(time.Minute, "items")(probe)
+	sendCached(handler, cacheRequest{target: "/items"})
+	if response := sendCached(handler, cacheRequest{target: "/items"}); probe.calls != 2 ||
+		response.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+		t.Fatal("requests pass through before a cache is installed")
+	}
+	if err := middleware.ClearResponseCache(context.Background(), "items"); err != nil {
+		t.Fatal(err)
+	}
+	middleware.SetResponseCache(newMemoryCache())
+	sendCached(handler, cacheRequest{target: "/items"})
+	sendCached(handler, cacheRequest{target: "/items"})
+	if probe.calls != 3 {
+		t.Fatalf("the installed cache serves hits: %d", probe.calls)
+	}
+	if err := middleware.ClearResponseCache(context.Background(), "items"); err != nil {
+		t.Fatal(err)
+	}
+	sendCached(handler, cacheRequest{target: "/items"})
+	if probe.calls != 4 {
+		t.Fatal("ClearResponseCache invalidates the namespace")
+	}
+}
+
+func TestRedisResponseCacheStore(t *testing.T) {
+	logs := captureCacheLogs(t)
+	ctx := context.Background()
+	server := miniredis.RunT(t)
+	store, err := middleware.NewRedisResponseCacheStore("redis://:s3cret@" + server.Addr() + "/1?max_retries=-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if strings.Contains(store.String(), "s3cret") || !strings.Contains(store.String(), server.Addr()) {
+		t.Fatalf("redacted url: %s", store)
+	}
+	server.RequireAuth("s3cret")
+	server.Select(1)
+	cache := middleware.NewResponseCache(store, "svc")
+	probe := &cacheProbe{}
+	handler := cache.Middleware(30*time.Second, "it*ems")(probe)
+	sendCached(handler, cacheRequest{target: "/items"})
+	if hit := sendCached(handler, cacheRequest{target: "/items"}); probe.calls != 1 || hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" ||
+		hit.Header().Get("Cache-Control") != "max-age=30" {
+		t.Fatalf("redis hit: calls=%d %v", probe.calls, hit.Header())
+	}
+	keys := server.Keys()
+	if len(keys) != 1 || !strings.HasPrefix(keys[0], "svc:it*ems:") || server.TTL(keys[0]) != 30*time.Second {
+		t.Fatalf("stored keys: %v", keys)
+	}
+	if err := server.Set("svc:items:other", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ttl, found, err := store.Get(ctx, "svc:items:other"); err != nil || !found || ttl != 0 {
+		t.Fatalf("a key without expiry: %v %v %v", ttl, found, err)
+	}
+	if _, _, found, err := store.Get(ctx, "missing"); err != nil || found {
+		t.Fatalf("missing key: %v %v", found, err)
+	}
+	for i := range 600 {
+		if err := server.Set(fmt.Sprintf("svc:bulk:%d", i), "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cache.Clear(ctx, "it*ems"); err != nil {
+		t.Fatal(err)
+	}
+	if server.Exists(keys[0]) || !server.Exists("svc:items:other") {
+		t.Fatalf("clear matches the namespace literally: %v", server.Keys())
+	}
+	if err := cache.Clear(ctx, ""); err != nil || len(server.Keys()) != 0 {
+		t.Fatalf("clear everything: %v %d", err, len(server.Keys()))
+	}
+	if err := store.Set(ctx, "svc:short", []byte("v"), time.Microsecond); err != nil ||
+		!strings.Contains(logs.String(), `"component":"redis"`) || !strings.Contains(logs.String(), "truncating to 1ms") {
+		t.Fatalf("client logs go through slog: %v %s", err, logs.String())
+	}
+	server.Close()
+	if _, _, _, err := store.Get(ctx, "k"); err == nil {
+		t.Fatal("get reports transport errors")
+	}
+	if store.Set(ctx, "k", []byte("v"), time.Minute) == nil || store.Clear(ctx, "svc:") == nil {
+		t.Fatal("set and clear report transport errors")
+	}
+	for _, invalid := range []string{"redis://%zz", "http://not-redis"} {
+		if _, err := middleware.NewRedisResponseCacheStore(invalid); err == nil {
+			t.Fatalf("%s must be rejected", invalid)
+		}
+	}
+}
+
+func TestStartResponseCacheSelectsTheStore(t *testing.T) {
+	t.Cleanup(func() { middleware.SetResponseCache(nil) })
+	logs := captureCacheLogs(t)
+
+	server := miniredis.RunT(t)
+	server.Select(1)
+	t.Setenv("RESPONSE_CACHE_URL", "redis://"+server.Addr()+"/1")
+	for prefix, want := range map[string]string{"shop:cache": "shop:cache:items:", "": "{{ project_name }}:cache:items:"} {
+		server.FlushAll()
+		t.Setenv("RESPONSE_CACHE_PREFIX", prefix)
+		stop := app.StartResponseCache()
+		handler := middleware.CacheResponse(time.Minute, "items")(&cacheProbe{})
+		sendCached(handler, cacheRequest{target: "/items"})
+		if keys := server.Keys(); len(keys) != 1 || !strings.HasPrefix(keys[0], want) {
+			t.Fatalf("prefix %q: keys %v, want %s*", prefix, keys, want)
+		}
+		stop()
+	}
+
+	for _, url := range []string{"", "http://not-redis"} {
+		t.Setenv("RESPONSE_CACHE_URL", url)
+		t.Setenv("RESPONSE_CACHE_PREFIX", "")
+		probe := &cacheProbe{}
+		handler := middleware.CacheResponse(time.Minute, "items")(probe)
+		app.StartResponseCache()()
+		sendCached(handler, cacheRequest{target: "/items"})
+		sendCached(handler, cacheRequest{target: "/items"})
+		if probe.calls != 1 {
+			t.Fatalf("url %q falls back to the in-memory store", url)
+		}
+	}
+	for _, message := range []string{"response cache initialized (redis @ redis://", "redis cache init failed", "response cache initialized (in-memory)"} {
+		if !strings.Contains(logs.String(), message) {
+			t.Fatalf("missing log %q in %s", message, logs.String())
+		}
+	}
+}
+
+func TestResponseCacheKeysOnScopesRolesAndActor(t *testing.T) {
+	probe := &cacheProbe{}
+	handler := newMemoryCache().Middleware(time.Minute, "items")(probe)
+	tenant := uuid.New()
+	admin := identity.IdentityContext{TenantID: tenant, Subject: "u1", Scopes: []string{"items:write", "items:read"}, Roles: []string{"admin"}}
+	reordered := identity.IdentityContext{TenantID: tenant, Subject: "u1", Scopes: []string{"items:read", "items:write", "items:read"}, Roles: []string{"admin"}}
+	variants := []identity.IdentityContext{
+		{TenantID: tenant, Subject: "u1", Scopes: []string{"items:read"}, Roles: []string{"admin"}},
+		{TenantID: tenant, Subject: "u1", Scopes: admin.Scopes, Roles: []string{"viewer"}},
+		{TenantID: tenant, Subject: "u1", Scopes: admin.Scopes, Roles: admin.Roles, Actor: "agent-x"},
+	}
+	sendCached(handler, cacheRequest{target: "/items", identity: &admin})
+	if hit := sendCached(handler, cacheRequest{target: "/items", identity: &reordered}); hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" {
+		t.Fatal("scope and role order does not split the entry")
+	}
+	for _, variant := range variants {
+		if response := sendCached(handler, cacheRequest{target: "/items", identity: &variant}); response.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" {
+			t.Fatalf("%+v must not read the admin entry", variant)
+		}
+	}
+	if probe.calls != 4 {
+		t.Fatalf("calls=%d", probe.calls)
+	}
+}
+
+func TestResponseCacheKeysOnTheEscapedPath(t *testing.T) {
+	handler := newMemoryCache().Middleware(time.Minute, "files")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.URL.EscapedPath()))
+	}))
+	sendCached(handler, cacheRequest{target: "/files/a%2Fb"})
+	if response := sendCached(handler, cacheRequest{target: "/files/a/b"}); response.Body.String() != "/files/a/b" {
+		t.Fatalf("an escaped slash is a different path: %q", response.Body.String())
+	}
+}
+
+func TestResponseCacheKeepsHandlerHeadersAndDropsHopByHop(t *testing.T) {
+	id := identity.New(uuid.New(), "alice")
+	for _, test := range []struct {
+		handlerControl string
+		identity       *identity.IdentityContext
+		want           string
+	}{
+		{"", nil, "max-age=60"},
+		{"", &id, "max-age=60, private"},
+		{"no-cache, must-revalidate", nil, "no-cache, must-revalidate"},
+		{"no-cache, must-revalidate", &id, "no-cache, must-revalidate, private"},
+		{"public, max-age=300", &id, "public, max-age=300"},
+	} {
+		handler := newMemoryCache().Middleware(time.Minute, "")(&cacheProbe{header: map[string]string{
+			"Cache-Control": test.handlerControl, "Connection": "close, X-Hop", "X-Hop": "1", "Keep-Alive": "timeout=5",
+			"Proxy-Authenticate": "Basic", "Te": "trailers", "Trailer": "X-Sum", "Transfer-Encoding": "chunked",
+			"Upgrade": "h2c", "X-Kept": "yes",
+		}})
+		for _, status := range []string{"MISS", "HIT"} {
+			response := sendCached(handler, cacheRequest{target: "/items", identity: test.identity})
+			header := response.Header()
+			if header.Get(middleware.ResponseCacheStatusHeader) != status || header.Get("Cache-Control") != test.want || header.Get("X-Kept") != "yes" {
+				t.Fatalf("%s %q: %v", status, test.handlerControl, header)
+			}
+			for _, name := range []string{"Connection", "X-Hop", "Keep-Alive", "Proxy-Authenticate", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
+				if header.Get(name) != "" {
+					t.Fatalf("%s: hop-by-hop %s replayed", status, name)
+				}
+			}
+		}
+	}
+}
+
+type deadlineWriter struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestResponseCacheStreamsFlushedResponses(t *testing.T) {
+	calls := 0
+	handler := newMemoryCache().Middleware(time.Minute, "events")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Trailer", "X-Events")
+		_, _ = w.Write([]byte("data: 1\n\n"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush: %v", err)
+		}
+		_, _ = w.Write([]byte("data: 2\n\n"))
+		w.(http.Flusher).Flush()
+		w.Header().Set("X-Events", "2")
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Minute)); err != nil {
+			t.Errorf("the controller reaches the underlying writer: %v", err)
+		}
+	}))
+	for range 2 {
+		writer := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+		handler.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/events", nil))
+		if !writer.Flushed || writer.Body.String() != "data: 1\n\ndata: 2\n\n" || writer.deadline.IsZero() ||
+			writer.Result().Trailer.Get("X-Events") != "2" ||
+			writer.Header().Get(middleware.ResponseCacheStatusHeader) != "" || writer.Header().Get("Content-Type") != "text/event-stream" {
+			t.Fatalf("streamed through: flushed=%v %q %v", writer.Flushed, writer.Body.String(), writer.Header())
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("flushed responses are never cached: %d calls", calls)
+	}
+}
+
+func TestResponseCacheUnderConcurrency(t *testing.T) {
+	cache := newMemoryCache()
+	handler := cache.Middleware(time.Minute, "items")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := identity.FromContext(r.Context())
+		_, _ = fmt.Fprintf(w, "%s|%s", id.Subject, r.URL.RawQuery)
+	}))
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Go(func() {
+			for i := range 100 {
+				id := identity.New(uuid.Nil, fmt.Sprintf("s%d", worker%4))
+				query := fmt.Sprintf("q=%d", i%10)
+				if response := sendCached(handler, cacheRequest{target: "/items?" + query, identity: &id}); response.Body.String() != id.Subject+"|"+query {
+					t.Errorf("%s got %q", id.Subject, response.Body.String())
+				}
+				if i%25 == 0 {
+					_ = cache.Clear(context.Background(), "items")
+				}
+			}
+		})
+	}
+	wg.Wait()
+}

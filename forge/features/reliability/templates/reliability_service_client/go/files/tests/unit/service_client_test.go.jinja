@@ -1,0 +1,884 @@
+{%- set platform_auth = options.get('auth.mode') == 'generate' -%}
+{%- set breaker = options.get('reliability.circuit_breaker') -%}
+package unit_test
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+{%- if platform_auth %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
+
+	"github.com/google/uuid"
+{%- if breaker %}
+
+	"{{ project_name }}/internal/circuitbreaker"
+	"{{ project_name }}/internal/clients"
+{%- else %}
+
+	"{{ project_name }}/internal/clients"
+{%- endif %}
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+)
+
+func fastRetry(maxRetries int) *clients.RetryPolicy {
+	return &clients.RetryPolicy{MaxRetries: maxRetries, BaseDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond}
+}
+
+func newServiceClient(t *testing.T, server *httptest.Server, cfg clients.Config) *clients.ServiceClient {
+	t.Helper()
+	cfg.BaseURL = server.URL + "/"
+	cfg.ServiceName = "knowledge"
+	if cfg.Retry == nil {
+		cfg.Retry = fastRetry(2)
+	}
+	client, err := clients.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+// countingServer answers with respond and counts the requests it receives.
+func countingServer(t *testing.T, respond http.HandlerFunc) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	calls := &atomic.Int32{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		respond(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server, calls
+}
+
+func statusHandler(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+func asServiceCallError(t *testing.T, err error) *clients.ServiceCallError {
+	t.Helper()
+	var callErr *clients.ServiceCallError
+	if !errors.As(err, &callErr) {
+		t.Fatalf("want a *ServiceCallError, got %T: %v", err, err)
+	}
+	return callErr
+}
+
+func TestServiceClientPropagatesContextAndDecodes(t *testing.T) {
+	var seen http.Header
+	var seenBody string
+	server, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		raw, _ := io.ReadAll(r.Body)
+		seenBody = string(raw)
+		if r.URL.Path != "/api/v1/search" || r.URL.Query().Get("q") != "go" || r.URL.Query().Get("page") != "2" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"hits": []string{"a"}})
+	})
+	client := newServiceClient(t, server, clients.Config{IdentityHeaders: clients.IdentityHeaders{TenantSlug: "x-org"}})
+	tenant := uuid.New()
+	var result struct {
+		Hits []string `json:"hits"`
+	}
+	var callErr error
+	handler := middleware.Correlation(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		ctx := identity.WithContext(r.Context(), identity.IdentityContext{TenantID: tenant, Subject: "user-1", TenantSlug: "acme"})
+		callErr = client.Do(ctx, clients.Request{
+			Method: http.MethodPost,
+			Path:   "/api/v1/search?q=go",
+			Query:  url.Values{"page": {"2"}},
+			Header: http.Header{"X-User-Id": {"spoofed"}, "Idempotency-Key": {"k1"}},
+			Body:   map[string]string{"q": "go"},
+		}, &result)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(middleware.RequestIDHeader, "req-42")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	if callErr != nil || len(result.Hits) != 1 {
+		t.Fatalf("call: %v %+v", callErr, result)
+	}
+	want := map[string]string{
+		"X-Request-Id":    "req-42",
+		"X-Customer-Id":   tenant.String(),
+		"X-User-Id":       "user-1",
+		"X-Org":           "acme",
+		"Idempotency-Key": "k1",
+		"Content-Type":    "application/json",
+		"Authorization":   "",
+	}
+	for name, value := range want {
+		if seen.Get(name) != value {
+			t.Fatalf("header %s = %q, want %q", name, seen.Get(name), value)
+		}
+	}
+	if seenBody != `{"q":"go"}` || client.ServiceName() != "knowledge" {
+		t.Fatalf("body %q", seenBody)
+	}
+}
+
+func TestServiceClientVerbs(t *testing.T) {
+	var propagated atomic.Bool
+	server, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Customer-Id") != "" || r.Header.Get("X-Request-Id") != "" {
+			propagated.Store(true)
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"method": r.Method})
+	})
+	client := newServiceClient(t, server, clients.Config{Timeout: 5 * time.Second})
+	ctx := context.Background()
+	calls := map[string]func(out any) error{
+		http.MethodGet:   func(out any) error { return client.Get(ctx, "/things/1", out) },
+		http.MethodPost:  func(out any) error { return client.Post(ctx, "/things", map[string]int{"n": 1}, out) },
+		http.MethodPut:   func(out any) error { return client.Put(ctx, "/things/1", map[string]int{"n": 2}, out) },
+		http.MethodPatch: func(out any) error { return client.Patch(ctx, "/things/1", map[string]int{"n": 3}, out) },
+	}
+	for method, call := range calls {
+		var echoed struct {
+			Method string `json:"method"`
+		}
+		if err := call(&echoed); err != nil || echoed.Method != method {
+			t.Fatalf("%s: %v %q", method, err, echoed.Method)
+		}
+	}
+	untouched := map[string]string{"kept": "yes"}
+	if err := client.Delete(ctx, "/things/1", &untouched); err != nil || untouched["kept"] != "yes" {
+		t.Fatalf("204 decodes nothing: %v %v", err, untouched)
+	}
+	if err := client.Get(ctx, "/things/1", nil); err != nil {
+		t.Fatalf("a nil target skips decoding: %v", err)
+	}
+	if propagated.Load() {
+		t.Fatal("nothing is propagated without a bound identity or correlation id")
+	}
+}
+
+func TestServiceClientRetriesServerErrors(t *testing.T) {
+	var attempts atomic.Int32
+	server, calls := countingServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		if attempts.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := newServiceClient(t, server, clients.Config{}).Get(context.Background(), "/flaky", &result); err != nil || !result.OK {
+		t.Fatalf("recovers on the third attempt: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("attempts %d", calls.Load())
+	}
+}
+
+func TestServiceClientMapsExhaustedRetries(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusInternalServerError, "down"))
+	err := newServiceClient(t, server, clients.Config{}).Get(context.Background(), "/x", nil)
+	callErr := asServiceCallError(t, err)
+	if callErr.StatusCode != 500 || callErr.Body != "down" || callErr.Method != http.MethodGet ||
+		callErr.URL != server.URL+"/x" || callErr.Service != "knowledge" || calls.Load() != 3 {
+		t.Fatalf("one attempt plus two retries, then the 500 is reported: %+v calls=%d", callErr, calls.Load())
+	}
+	var status *clients.StatusError
+	if !errors.As(err, &status) || status.Error() != "HTTP 500" || !strings.HasSuffix(err.Error(), "GET "+server.URL+"/x -> 500") {
+		t.Fatalf("error text %q", err.Error())
+	}
+}
+
+func TestServiceClientDoesNotRetryClientErrors(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusNotFound, `{"error":"missing"}`))
+	err := newServiceClient(t, server, clients.Config{}).Get(context.Background(), "/missing", nil)
+	if callErr := asServiceCallError(t, err); callErr.StatusCode != 404 || calls.Load() != 1 {
+		t.Fatalf("4xx is final: %+v calls=%d", callErr, calls.Load())
+	}
+}
+
+func TestServiceClientRetriesTransportErrors(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	client, err := clients.New(clients.Config{BaseURL: server.URL, ServiceName: "knowledge", Retry: fastRetry(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.Get(context.Background(), "/x", nil)
+	var netErr net.Error
+	callErr := asServiceCallError(t, err)
+	if callErr.StatusCode != 0 || !errors.As(err, &netErr) || !strings.HasPrefix(err.Error(), "knowledge: GET ") {
+		t.Fatalf("connection failures surface as the cause: %v", err)
+	}
+}
+
+func TestServiceClientStopsRetryingWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, calls := countingServer(t, statusHandler(http.StatusServiceUnavailable, ""))
+	slow := &clients.RetryPolicy{MaxRetries: 3, BaseDelay: time.Hour, MaxDelay: time.Hour}
+	client := newServiceClient(t, server, clients.Config{Retry: slow})
+	time.AfterFunc(20*time.Millisecond, cancel)
+	started := time.Now()
+	err := client.Get(ctx, "/x", nil)
+	if asServiceCallError(t, err).StatusCode != 503 || !errors.Is(err, context.Canceled) || time.Since(started) > 10*time.Second {
+		t.Fatalf("a cancelled backoff reports the cancellation and keeps the last error: %v", err)
+	}
+	if err := client.Get(ctx, "/x", nil); err == nil || calls.Load() != 1 {
+		t.Fatalf("a cancelled context is never retried: %v calls=%d", err, calls.Load())
+	}
+}
+
+func TestServiceClientRejectsBadRequestsAndResponses(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusOK, "not json"))
+	client := newServiceClient(t, server, clients.Config{HTTPClient: server.Client()})
+	var out map[string]any
+	if err := client.Get(context.Background(), "/x", &out); asServiceCallError(t, err).StatusCode != 0 || calls.Load() != 1 {
+		t.Fatalf("an undecodable body is final: %v calls=%d", err, calls.Load())
+	}
+	var unsupported *json.UnsupportedTypeError
+	if err := client.Post(context.Background(), "/x", make(chan int), nil); !errors.As(err, &unsupported) {
+		t.Fatalf("an unencodable body never leaves: %v", err)
+	}
+	if err := client.Do(context.Background(), clients.Request{Method: "BAD METHOD", Path: "/x"}, nil); err == nil {
+		t.Fatal("an invalid method fails")
+	}
+	for _, cfg := range []clients.Config{
+		{BaseURL: "knowledge:5002", ServiceName: "knowledge"},
+		{BaseURL: "ftp://knowledge", ServiceName: "knowledge"},
+		{BaseURL: "http://knowledge:5002"},
+		{BaseURL: "http://knowledge:5002/api?v=1", ServiceName: "knowledge"},
+		{BaseURL: "http://knowledge:5002#top", ServiceName: "knowledge"},
+	} {
+		if _, err := clients.New(cfg); err == nil {
+			t.Fatalf("invalid config accepted: %+v", cfg)
+		}
+	}
+}
+
+func TestServiceClientBackoffAndRetryable(t *testing.T) {
+	policy := clients.RetryPolicy{BaseDelay: 100 * time.Millisecond, MaxDelay: 250 * time.Millisecond}
+	if policy.Backoff(0) != 100*time.Millisecond || policy.Backoff(1) != 200*time.Millisecond || policy.Backoff(5) != 250*time.Millisecond {
+		t.Fatalf("exponential and capped: %v %v %v", policy.Backoff(0), policy.Backoff(1), policy.Backoff(5))
+	}
+	policy.Jitter = true
+	for range 50 {
+		if delay := policy.Backoff(0); delay < 50*time.Millisecond || delay >= 150*time.Millisecond {
+			t.Fatalf("jitter scales by 0.5-1.5: %v", delay)
+		}
+	}
+	if defaults := clients.DefaultRetryPolicy(); defaults.MaxRetries != 3 || defaults.BaseDelay != 500*time.Millisecond ||
+		defaults.MaxDelay != 30*time.Second || !defaults.Jitter {
+		t.Fatalf("defaults %+v", defaults)
+	}
+	get := clients.Request{Method: http.MethodGet}
+	post := clients.Request{Method: http.MethodPost}
+	keyed := clients.Request{Method: http.MethodPost, Header: http.Header{clients.IdempotencyKeyHeader: {"k1"}}}
+	cases := []struct {
+		request clients.Request
+		err     error
+		want    bool
+	}{
+		{get, &clients.StatusError{StatusCode: 503}, true},
+		{get, &clients.StatusError{StatusCode: 429}, true},
+		{get, &clients.StatusError{StatusCode: 409}, false},
+		{get, context.Canceled, false},
+		{get, &net.OpError{Op: "dial", Err: errors.New("refused")}, true},
+		{get, &net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}, true},
+		{get, &net.OpError{Op: "read", Err: errors.New("connection reset by peer")}, false},
+		{get, &url.Error{Op: "Get", URL: "/", Err: &tls.CertificateVerificationError{Err: errors.New("unknown authority")}}, false},
+		{get, errors.New("decode failed"), false},
+		{clients.Request{Method: http.MethodHead}, &clients.StatusError{StatusCode: 502}, true},
+		{clients.Request{Method: http.MethodOptions}, &clients.StatusError{StatusCode: 502}, true},
+		{clients.Request{Method: http.MethodDelete}, &clients.StatusError{StatusCode: 502}, true},
+		{post, &clients.StatusError{StatusCode: 503}, false},
+		{post, &net.OpError{Op: "dial", Err: errors.New("refused")}, false},
+		{clients.Request{Method: http.MethodPatch}, &clients.StatusError{StatusCode: 503}, false},
+		{keyed, &clients.StatusError{StatusCode: 503}, true},
+	}
+	for _, tc := range cases {
+		if clients.DefaultRetryable(tc.request, tc.err) != tc.want {
+			t.Fatalf("DefaultRetryable(%s, %v) != %v", tc.request.Method, tc.err, tc.want)
+		}
+	}
+	server, calls := countingServer(t, statusHandler(http.StatusBadGateway, ""))
+	never := &clients.RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond, Retryable: func(clients.Request, error) bool { return false }}
+	if err := newServiceClient(t, server, clients.Config{Retry: never}).Get(context.Background(), "/x", nil); err == nil || calls.Load() != 1 {
+		t.Fatalf("a custom predicate decides: %v calls=%d", err, calls.Load())
+	}
+	posts := &clients.RetryPolicy{MaxRetries: 1, BaseDelay: time.Millisecond, Retryable: func(request clients.Request, _ error) bool {
+		return request.Method == http.MethodPost
+	}}
+	if err := newServiceClient(t, server, clients.Config{Retry: posts}).Post(context.Background(), "/x", nil, nil); err == nil || calls.Load() != 3 {
+		t.Fatalf("the predicate sees the request: %v calls=%d", err, calls.Load())
+	}
+}
+
+func TestServiceClientRetriesOnlyIdempotentRequests(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusServiceUnavailable, ""))
+	client := newServiceClient(t, server, clients.Config{})
+	cases := []struct {
+		request  clients.Request
+		attempts int32
+	}{
+		{clients.Request{Method: http.MethodPost, Path: "/x"}, 1},
+		{clients.Request{Method: http.MethodPatch, Path: "/x"}, 1},
+		{clients.Request{Method: http.MethodPost, Path: "/x", Header: http.Header{"Idempotency-Key": {"k1"}}}, 3},
+		{clients.Request{Path: "/x"}, 3},
+		{clients.Request{Method: http.MethodPut, Path: "/x"}, 3},
+	}
+	for _, tc := range cases {
+		before := calls.Load()
+		err := client.Do(context.Background(), tc.request, nil)
+		if asServiceCallError(t, err).StatusCode != 503 || calls.Load()-before != tc.attempts {
+			t.Fatalf("%s %v: %d attempts, want %d", tc.request.Method, tc.request.Header, calls.Load()-before, tc.attempts)
+		}
+	}
+}
+
+func TestServiceClientRetriesTimeoutsOfIdempotentRequests(t *testing.T) {
+	server, calls := countingServer(t, func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	})
+	client := newServiceClient(t, server, clients.Config{Timeout: 20 * time.Millisecond})
+	var netErr net.Error
+	if err := client.Get(context.Background(), "/slow", nil); !errors.As(err, &netErr) || !netErr.Timeout() || calls.Load() != 3 {
+		t.Fatalf("a timed-out GET is retried: %v calls=%d", err, calls.Load())
+	}
+	if err := client.Post(context.Background(), "/slow", map[string]int{"n": 1}, nil); err == nil || calls.Load() != 4 {
+		t.Fatalf("a timed-out POST runs once: %v calls=%d", err, calls.Load())
+	}
+}
+
+type countingTransport struct {
+	next  http.RoundTripper
+	calls atomic.Int32
+}
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	return c.next.RoundTrip(r)
+}
+
+func TestServiceClientDoesNotRetryBrokenConnections(t *testing.T) {
+	untrusted := httptest.NewTLSServer(http.NotFoundHandler())
+	defer untrusted.Close()
+	transport := &countingTransport{next: &http.Transport{}}
+	client, err := clients.New(clients.Config{BaseURL: untrusted.URL, ServiceName: "knowledge", Retry: fastRetry(2),
+		HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verification *tls.CertificateVerificationError
+	if err := client.Get(context.Background(), "/x", nil); !errors.As(err, &verification) || transport.calls.Load() != 1 {
+		t.Fatalf("a TLS verification failure is final: %v attempts=%d", err, transport.calls.Load())
+	}
+
+	hangUp, calls := countingServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+			_ = conn.Close()
+		}
+	})
+	if err := newServiceClient(t, hangUp, clients.Config{}).Get(context.Background(), "/x", nil); err == nil || calls.Load() != 1 {
+		t.Fatalf("a connection lost after the request was sent is final: %v calls=%d", err, calls.Load())
+	}
+}
+
+func TestServiceClientHonoursRetryAfter(t *testing.T) {
+	server, calls := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", r.URL.Query().Get("after"))
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	capped := &clients.RetryPolicy{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: 100 * time.Millisecond}
+	client := newServiceClient(t, server, clients.Config{Retry: capped})
+	inAnHour := time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)
+	for after, want := range map[string]time.Duration{"3600": time.Hour, inAnHour: time.Hour, "soon": 0, "-5": 0} {
+		started := time.Now()
+		err := client.Do(context.Background(), clients.Request{Path: "/x", Query: url.Values{"after": {after}}}, nil)
+		elapsed := time.Since(started)
+		var status *clients.StatusError
+		if !errors.As(err, &status) || status.StatusCode != 429 || status.RetryAfter > want || status.RetryAfter < want-time.Minute {
+			t.Fatalf("Retry-After %q parses to %v: %v", after, want, err)
+		}
+		if waited := elapsed >= 90*time.Millisecond; waited != (want > 0) || elapsed > 5*time.Second {
+			t.Fatalf("Retry-After %q waits up to MaxDelay: %v", after, elapsed)
+		}
+	}
+	if calls.Load() != 8 {
+		t.Fatalf("a 429 GET is retried: %d calls", calls.Load())
+	}
+	if err := client.Post(context.Background(), "/x?after=1", nil, nil); asServiceCallError(t, err).StatusCode != 429 || calls.Load() != 9 {
+		t.Fatalf("a 429 POST is final: %v calls=%d", err, calls.Load())
+	}
+}
+
+func TestServiceClientFillsPartialRetryPolicy(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusServiceUnavailable, ""))
+	client := newServiceClient(t, server, clients.Config{Retry: &clients.RetryPolicy{MaxRetries: 1}})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := client.Get(ctx, "/x", nil); !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 1 {
+		t.Fatalf("a zero BaseDelay waits the 0.5s default: %v calls=%d", err, calls.Load())
+	}
+}
+
+func TestServiceClientCapsDecodedResponses(t *testing.T) {
+	name := strings.Repeat("x", 64)
+	server, calls := countingServer(t, statusHandler(http.StatusOK, `{"name":"`+name+`"}`))
+	var out map[string]string
+	err := newServiceClient(t, server, clients.Config{MaxResponseBytes: 32}).Get(context.Background(), "/x", &out)
+	var tooLarge *http.MaxBytesError
+	if !errors.As(err, &tooLarge) || tooLarge.Limit != 32 || asServiceCallError(t, err).StatusCode != 0 || calls.Load() != 1 {
+		t.Fatalf("a body over MaxResponseBytes is final: %v calls=%d", err, calls.Load())
+	}
+	if err := newServiceClient(t, server, clients.Config{}).Get(context.Background(), "/x", &out); err != nil || out["name"] != name {
+		t.Fatalf("the default cap decodes ordinary bodies: %v", err)
+	}
+}
+
+func TestServiceClientDoesNotFollowRedirects(t *testing.T) {
+	elsewhere, leaked := countingServer(t, statusHandler(http.StatusNoContent, ""))
+	server, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/collect", http.StatusTemporaryRedirect)
+	})
+	ctx := identity.WithContext(context.Background(), identity.IdentityContext{TenantID: uuid.New(), Subject: "user-1"})
+	client := newServiceClient(t, server, clients.Config{Auth: staticToken{token: "secret"}})
+	err := client.Post(ctx, "/x", map[string]int{"n": 1}, nil)
+	if callErr := asServiceCallError(t, err); callErr.StatusCode != http.StatusTemporaryRedirect || leaked.Load() != 0 {
+		t.Fatalf("a redirect fails the call without leaving the host: %v leaked=%d", err, leaked.Load())
+	}
+	following := newServiceClient(t, server, clients.Config{HTTPClient: &http.Client{}})
+	if err := following.Get(ctx, "/x", nil); err != nil || leaked.Load() != 1 {
+		t.Fatalf("a caller-provided client keeps its redirect policy: %v leaked=%d", err, leaked.Load())
+	}
+}
+
+func TestServiceClientKeepsCallsOnTheBaseHost(t *testing.T) {
+	server, calls := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "knowledge" {
+			w.WriteHeader(http.StatusMisdirectedRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	var dialer net.Dialer
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+	}}
+	t.Cleanup(transport.CloseIdleConnections)
+	client, err := clients.New(clients.Config{BaseURL: "http://knowledge", ServiceName: "knowledge", Retry: fastRetry(0),
+		HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"@evil.example/x", ".evil.example/x", ":8080/x", "x", ""} {
+		err := client.Get(context.Background(), path, nil)
+		if callErr := asServiceCallError(t, err); callErr.StatusCode != 0 || !strings.Contains(err.Error(), "must start with /") {
+			t.Fatalf("path %q is rejected: %v", path, err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("rejected paths send nothing: %d calls", calls.Load())
+	}
+	for _, path := range []string{"//evil.example/x", "/@evil.example/x", "/x?next=http://evil.example/"} {
+		if err := client.Get(context.Background(), path, nil); err != nil {
+			t.Fatalf("path %q stays on the base host: %v", path, err)
+		}
+	}
+}
+
+type recordingBreaker struct {
+	failures  atomic.Int32
+	successes atomic.Int32
+}
+
+func (b *recordingBreaker) Call(op func() error) error {
+	err := op()
+	if err != nil {
+		b.failures.Add(1)
+	} else {
+		b.successes.Add(1)
+	}
+	return err
+}
+
+func TestServiceClientBreakerCountsOnlyServiceFailures(t *testing.T) {
+	server, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		status, _ := strconv.Atoi(r.URL.Query().Get("status"))
+		if status == 0 {
+			<-r.Context().Done()
+			return
+		}
+		w.WriteHeader(status)
+	})
+	breaker := &recordingBreaker{}
+	client := newServiceClient(t, server, clients.Config{Breaker: breaker, Retry: fastRetry(0)})
+	call := func(ctx context.Context, method string, status int) error {
+		return client.Do(ctx, clients.Request{Method: method, Path: "/x", Query: url.Values{"status": {strconv.Itoa(status)}}}, nil)
+	}
+	for _, status := range []int{404, 404, 404, 404, 404, 409, 429, 302} {
+		if err := call(context.Background(), http.MethodGet, status); asServiceCallError(t, err).StatusCode != status {
+			t.Fatalf("status %d: %v", status, err)
+		}
+	}
+	impatient, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := call(impatient, http.MethodGet, 0); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the caller gives up: %v", err)
+	}
+	if breaker.failures.Load() != 0 || breaker.successes.Load() != 9 {
+		t.Fatalf("4xx, 3xx and cancelled calls never count: failures=%d successes=%d", breaker.failures.Load(), breaker.successes.Load())
+	}
+	if err := call(context.Background(), http.MethodPost, 503); asServiceCallError(t, err).StatusCode != 503 || breaker.failures.Load() != 1 {
+		t.Fatalf("a 5xx counts whatever the method: %v failures=%d", err, breaker.failures.Load())
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	unreachable, err := clients.New(clients.Config{BaseURL: closed.URL, ServiceName: "knowledge", Breaker: breaker, Retry: fastRetry(0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unreachable.Get(context.Background(), "/x", nil); err == nil || breaker.failures.Load() != 2 {
+		t.Fatalf("a refused connection counts: %v failures=%d", err, breaker.failures.Load())
+	}
+}
+
+type rejectingBreaker struct{}
+
+func (rejectingBreaker) Call(func() error) error { return errors.New("breaker says no") }
+
+func TestServiceClientCircuitBreaker(t *testing.T) {
+	server, calls := countingServer(t, statusHandler(http.StatusInternalServerError, ""))
+	err := newServiceClient(t, server, clients.Config{Breaker: rejectingBreaker{}}).Get(context.Background(), "/x", nil)
+	callErr := asServiceCallError(t, err)
+	if !errors.Is(err, clients.ErrCircuitOpen) || callErr.Method != "*" || callErr.URL != "*" || calls.Load() != 0 {
+		t.Fatalf("a rejected call never reaches the service: %v calls=%d", err, calls.Load())
+	}
+
+{%- if breaker %}
+	t.Setenv("CIRCUIT_BREAKER_THRESHOLD", "2")
+	missing, lookups := countingServer(t, statusHandler(http.StatusNotFound, ""))
+	lookup := newServiceClient(t, missing, clients.Config{Retry: fastRetry(0)})
+	for range 3 {
+		if err := lookup.Get(context.Background(), "/x", nil); asServiceCallError(t, err).StatusCode != 404 {
+			t.Fatalf("4xx answers never open the breaker: %v", err)
+		}
+	}
+	if lookups.Load() != 3 {
+		t.Fatalf("every lookup reaches the service: %d", lookups.Load())
+	}
+	client := newServiceClient(t, server, clients.Config{Retry: fastRetry(0)})
+	for range 2 {
+		if err := client.Get(context.Background(), "/x", nil); asServiceCallError(t, err).StatusCode != 500 {
+			t.Fatalf("failures reach the service: %v", err)
+		}
+	}
+	err = client.Get(context.Background(), "/x", nil)
+	if !errors.Is(err, clients.ErrCircuitOpen) || !errors.Is(err, circuitbreaker.ErrOpen) || calls.Load() != 2 {
+		t.Fatalf("the generated breaker opens at CIRCUIT_BREAKER_THRESHOLD: %v calls=%d", err, calls.Load())
+	}
+{%- else %}
+	client := newServiceClient(t, server, clients.Config{Retry: fastRetry(0)})
+	for range 8 {
+		if err := client.Get(context.Background(), "/x", nil); asServiceCallError(t, err).StatusCode != 500 {
+			t.Fatalf("failures reach the service: %v", err)
+		}
+	}
+	if calls.Load() != 8 {
+		t.Fatalf("without reliability.circuit_breaker every call is sent: %d", calls.Load())
+	}
+{%- endif %}
+}
+
+type staticToken struct {
+	token string
+	err   error
+}
+
+func (s staticToken) Token(context.Context) (string, error) { return s.token, s.err }
+
+func TestServiceClientBearerTokens(t *testing.T) {
+	server, calls := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer static" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	err := newServiceClient(t, server, clients.Config{Auth: staticToken{token: "static"}}).Get(context.Background(), "/x", nil)
+	if asServiceCallError(t, err).StatusCode != 401 || calls.Load() != 1 {
+		t.Fatalf("a 401 is final for a source that cannot refresh: %v calls=%d", err, calls.Load())
+	}
+	failure := errors.New("vault sealed")
+	err = newServiceClient(t, server, clients.Config{Auth: staticToken{err: failure}}).Get(context.Background(), "/x", nil)
+	if !errors.Is(err, failure) || calls.Load() != 1 {
+		t.Fatalf("token errors fail the call before sending: %v", err)
+	}
+}
+
+func TestServiceClientClientCredentials(t *testing.T) {
+	var fetches atomic.Int32
+	issuer, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.URL.Path != "/realms/app/protocol/openid-connect/token" ||
+			r.PostForm.Get("grant_type") != "client_credentials" || r.PostForm.Get("client_id") != "svc-orders" ||
+			r.PostForm.Get("client_secret") != "s3cret" || r.PostForm.Get("scope") != "read write" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		n := fetches.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok-" + strconv.Itoa(int(n)), "expires_in": 300})
+	})
+	var revoked atomic.Bool
+	downstream, calls := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer tok-1" && !revoked.Swap(true) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	credentials := clients.KeycloakClientCredentials(issuer.URL+"/", "app", "svc-orders", "s3cret")
+	credentials.Scopes = []string{"read", "write"}
+	client := newServiceClient(t, downstream, clients.Config{Auth: credentials})
+	if err := client.Get(context.Background(), "/a", nil); err != nil {
+		t.Fatalf("a 401 refreshes the token once: %v", err)
+	}
+	if err := client.Get(context.Background(), "/b", nil); err != nil || fetches.Load() != 2 || calls.Load() != 3 {
+		t.Fatalf("the refreshed token is cached: %v fetches=%d calls=%d", err, fetches.Load(), calls.Load())
+	}
+}
+
+func TestClientCredentialsTokenEndpointFailures(t *testing.T) {
+	ctx := context.Background()
+	responses := map[string]http.HandlerFunc{
+		"unavailable": statusHandler(http.StatusServiceUnavailable, "maintenance"),
+		"invalid":     statusHandler(http.StatusOK, "<html>"),
+		"empty":       statusHandler(http.StatusOK, `{"expires_in":60}`),
+		"redirect": func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "http://127.0.0.1:1/token", http.StatusTemporaryRedirect)
+		},
+	}
+	for name, respond := range responses {
+		issuer, _ := countingServer(t, respond)
+		_, err := clients.NewClientCredentials(issuer.URL, "id", "secret").Token(ctx)
+		if err == nil {
+			t.Fatalf("%s: token accepted", name)
+		}
+		var status *clients.StatusError
+		if name == "unavailable" && (!errors.As(err, &status) || status.StatusCode != 503 ||
+			!clients.DefaultRetryable(clients.Request{Method: http.MethodGet}, err)) {
+			t.Fatalf("token endpoint 5xx is a retryable StatusError: %v", err)
+		}
+		if name == "redirect" && (!errors.As(err, &status) || status.StatusCode != http.StatusTemporaryRedirect) {
+			t.Fatalf("the token request does not follow redirects: %v", err)
+		}
+	}
+	if _, err := clients.NewClientCredentials("://bad", "id", "secret").Token(ctx); err == nil {
+		t.Fatal("an invalid token URL fails")
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	if _, err := clients.NewClientCredentials(closed.URL, "id", "secret").Token(ctx); err == nil {
+		t.Fatal("an unreachable token endpoint fails")
+	}
+
+	issuer, fetches := countingServer(t, statusHandler(http.StatusOK, `{"access_token":"short"}`))
+	credentials := clients.NewClientCredentials(issuer.URL, "id", "secret")
+	credentials.HTTPClient = issuer.Client()
+	for range 2 {
+		if token, err := credentials.Token(ctx); err != nil || token != "short" {
+			t.Fatalf("token %q %v", token, err)
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("expires_in defaults to 300s: %d fetches", fetches.Load())
+	}
+	credentials.RefreshMargin = time.Hour
+	credentials.Invalidate(ctx)
+	for range 2 {
+		_, _ = credentials.Token(ctx)
+	}
+	if fetches.Load() != 3 {
+		t.Fatalf("a token inside the refresh margin is refetched: %d fetches", fetches.Load())
+	}
+}
+
+func TestClientCredentialsShareOneFetch(t *testing.T) {
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	time.AfterFunc(5*time.Second, releaseOnce)
+	issuer, fetches := countingServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "shared", "expires_in": 300})
+	})
+	t.Cleanup(releaseOnce)
+	credentials := clients.NewClientCredentials(issuer.URL, "id", "secret")
+	tokens := make(chan string, 3)
+	for range 3 {
+		go func() {
+			token, _ := credentials.Token(context.Background())
+			tokens <- token
+		}()
+	}
+	for fetches.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	impatient, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := credentials.Token(impatient); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a waiting caller gives up with its context: %v", err)
+	}
+	releaseOnce()
+	for range 3 {
+		if token := <-tokens; token != "shared" {
+			t.Fatalf("token %q", token)
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("concurrent callers share one fetch: %d", fetches.Load())
+	}
+}
+
+func TestClientCredentialsShareFailures(t *testing.T) {
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	time.AfterFunc(5*time.Second, releaseOnce)
+	issuer, fetches := countingServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	t.Cleanup(releaseOnce)
+	credentials := clients.NewClientCredentials(issuer.URL, "id", "secret")
+	failures := make(chan error, 3)
+	for range 3 {
+		go func() {
+			_, err := credentials.Token(context.Background())
+			failures <- err
+		}()
+	}
+	for fetches.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	releaseOnce()
+	for range 3 {
+		var status *clients.StatusError
+		if err := <-failures; !errors.As(err, &status) || status.StatusCode != 503 {
+			t.Fatalf("waiters share the failure: %v", err)
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("a failed fetch is not repeated by its waiters: %d", fetches.Load())
+	}
+}
+
+func TestClientCredentialsWaitersOutliveACancelledFetch(t *testing.T) {
+	var requests atomic.Int32
+	issuer, fetches := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if requests.Add(1) == 1 {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "second", "expires_in": 300})
+	})
+	credentials := clients.NewClientCredentials(issuer.URL, "id", "secret")
+	leader, cancel := context.WithCancel(context.Background())
+	led := make(chan error, 1)
+	go func() {
+		_, err := credentials.Token(leader)
+		led <- err
+	}()
+	for fetches.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	waited := make(chan string, 1)
+	go func() {
+		token, _ := credentials.Token(context.Background())
+		waited <- token
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	if err := <-led; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancelled caller fails: %v", err)
+	}
+	if token := <-waited; token != "second" || fetches.Load() != 2 {
+		t.Fatalf("a waiter fetches again when the caller it waited on gave up: %q fetches=%d", token, fetches.Load())
+	}
+}
+{%- if platform_auth %}
+
+func TestServiceClientPlatformAuth(t *testing.T) {
+	tenant := uuid.New()
+	var fetches atomic.Int32
+	gatekeeper, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil || r.URL.Path != "/auth/token" ||
+			r.PostForm.Get("grant_type") != "client_credentials" || r.PostForm.Get("audience") != "knowledge" ||
+			r.PostForm.Get("tenant_id") != tenant.String() {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		n := fetches.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "gk-" + strconv.Itoa(int(n)), "expires_in": 300})
+	})
+	var revoked atomic.Bool
+	downstream, calls := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer gk-1" && !revoked.Swap(true) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	s2s, err := platformauth.NewS2SClient(platformauth.S2SClientConfig{
+		Audience:      "knowledge",
+		TokenEndpoint: gatekeeper.URL + "/auth/token",
+		ClientID:      "svc-orders",
+		ClientSecret:  "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newServiceClient(t, downstream, clients.Config{Auth: clients.PlatformAuth(s2s)})
+	ctx := identity.WithContext(context.Background(), identity.IdentityContext{TenantID: tenant, Subject: "user-1"})
+	for _, path := range []string{"/a", "/b"} {
+		if err := client.Get(ctx, path, nil); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+	}
+	if fetches.Load() != 2 || calls.Load() != 3 {
+		t.Fatalf("a 401 drops the cached tenant token once: fetches=%d calls=%d", fetches.Load(), calls.Load())
+	}
+	if err := client.Get(context.Background(), "/c", nil); err == nil || calls.Load() != 3 {
+		t.Fatalf("without a caller tenant Gatekeeper refuses client_credentials: %v", err)
+	}
+}
+{%- endif %}

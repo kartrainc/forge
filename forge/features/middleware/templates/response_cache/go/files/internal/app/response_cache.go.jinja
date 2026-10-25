@@ -1,0 +1,32 @@
+package app
+
+import (
+	"cmp"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"{{ project_name }}/internal/middleware"
+)
+
+// StartResponseCache installs the cache behind middleware.CacheResponse:
+// Redis at RESPONSE_CACHE_URL when set, otherwise an in-memory store per
+// process. Keys start with RESPONSE_CACHE_PREFIX (default
+// {{ project_name }}:cache, so services sharing a Redis never clear each
+// other's entries). The returned func releases the Redis pool.
+func StartResponseCache() func() {
+	prefix := cmp.Or(os.Getenv("RESPONSE_CACHE_PREFIX"), "{{ project_name }}:cache")
+	if raw := strings.TrimSpace(os.Getenv("RESPONSE_CACHE_URL")); raw != "" {
+		store, err := middleware.NewRedisResponseCacheStore(raw)
+		if err == nil {
+			middleware.SetResponseCache(middleware.NewResponseCache(store, prefix))
+			slog.Info(fmt.Sprintf("response cache initialized (redis @ %s)", store))
+			return func() { _ = store.Close() }
+		}
+		slog.Warn(fmt.Sprintf("redis cache init failed (%v); falling back to in-memory", err))
+	}
+	middleware.SetResponseCache(middleware.NewResponseCache(middleware.NewMemoryResponseCacheStore(0), prefix))
+	slog.Info("response cache initialized (in-memory)")
+	return func() {}
+}

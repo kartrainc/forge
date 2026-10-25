@@ -1,0 +1,453 @@
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+{%- if options['auth.mode'] == 'generate' %}
+
+	"forge.local/platform-auth-go/authtest"
+{%- endif %}
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/data/repositories"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/models"
+	"{{ project_name }}/internal/tenancy"
+	"{{ project_name }}/migrations"
+	"{{ project_name }}/tests/testutil"
+)
+
+const rlsMigrationVersion = 99
+
+// rlsSchema returns a migrated test schema.
+func rlsSchema(t *testing.T) testutil.TestSchema {
+	t.Helper()
+	schema := testutil.NewSchema(t)
+	if err := migrations.Up(context.Background(), schema.URL); err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+// rlsPool returns a single-connection pool, so every transaction reuses one
+// connection, logged in as a role RLS applies to: the DATABASE_URL role when it
+// is neither superuser nor BYPASSRLS (FORCE ROW LEVEL SECURITY binds the table
+// owner), else a fresh non-owner role.
+func rlsPool(t *testing.T, schema testutil.TestSchema) *pgxpool.Pool {
+	t.Helper()
+	ctx := context.Background()
+	var bypasses, canCreate bool
+	if err := schema.Admin.QueryRow(ctx,
+		"SELECT rolsuper OR rolbypassrls, rolsuper OR rolcreaterole FROM pg_roles WHERE rolname = current_user").Scan(&bypasses, &canCreate); err != nil {
+		t.Fatal(err)
+	}
+	probeURL := schema.URL
+	if bypasses {
+		if !canCreate {
+			t.Skip("the DATABASE_URL role bypasses RLS and cannot create a role that does not")
+		}
+		probeURL = probeRole(t, schema)
+	}
+	pool, err := db.NewPool(ctx, probeURL, 1, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := pool.QueryRow(ctx, "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user").Scan(&bypasses); err != nil || bypasses {
+		t.Fatalf("the probe role must not bypass RLS: %v %v", bypasses, err)
+	}
+	return pool
+}
+
+// probeRole creates a login role that neither owns the tables nor bypasses
+// RLS, grants it the items table and returns schema.URL logged in as it. The
+// role is dropped when the test ends.
+func probeRole(t *testing.T, schema testutil.TestSchema) string {
+	t.Helper()
+	ctx := context.Background()
+	role, password := "forge_rls_"+randomHex(t), randomHex(t)
+	ident := pgx.Identifier{role}.Sanitize()
+	statements := []string{
+		"CREATE ROLE " + ident + " LOGIN PASSWORD '" + password + "' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+		"GRANT USAGE ON SCHEMA " + schema.Name + " TO " + ident,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON " + schema.Name + ".items TO " + ident,
+	}
+	for _, statement := range statements {
+		if _, err := schema.Admin.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		// A CREATEROLE admin may not DROP OWNED BY the role, so revoke its grants first.
+		_, _ = schema.Admin.Exec(ctx, "REVOKE ALL ON "+schema.Name+".items FROM "+ident)
+		_, _ = schema.Admin.Exec(ctx, "REVOKE ALL ON SCHEMA "+schema.Name+" FROM "+ident)
+		_, _ = schema.Admin.Exec(ctx, "DROP OWNED BY "+ident)
+		if _, err := schema.Admin.Exec(ctx, "DROP ROLE "+ident); err != nil {
+			t.Errorf("drop role: %v", err)
+		}
+	})
+	parsed, err := url.Parse(schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(role, password)
+	return parsed.String()
+}
+
+// tenantHandler serves the application through pool with the tenant resolved
+// by resolution, as TENANT_RESOLUTION configures it.
+func tenantHandler(t *testing.T, cfg *config.Config, pool *pgxpool.Pool, resolution string) http.Handler {
+	t.Helper()
+	t.Cleanup(func() { _ = app.InitTenancy() })
+	t.Setenv("TENANT_RESOLUTION", resolution)
+	t.Setenv("TENANT_HEADER_NAME", tenancy.DefaultHeaderName)
+	if err := app.InitTenancy(); err != nil {
+		t.Fatal(err)
+	}
+	return app.New(cfg, pool)
+}
+
+// caller names a request's tenant with a header, a host or a bearer token.
+type caller struct{ tenant, host, token string }
+
+func (c caller) call(t *testing.T, handler http.Handler, method, path string, payload any) (int, map[string]any) {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&body).Encode(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(method, path, &body)
+	request.Header.Set("Content-Type", "application/json")
+	if c.tenant != "" {
+		request.Header.Set(tenancy.DefaultHeaderName, c.tenant)
+	}
+	if c.host != "" {
+		request.Host = c.host
+	}
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	decoded := map[string]any{}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+	return recorder.Code, decoded
+}
+
+func randomHex(t *testing.T) string {
+	t.Helper()
+	buf := make([]byte, 12)
+	if _, err := rand.Read(buf); err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(buf)
+}
+
+// rlsState reports whether items has RLS enabled and forced, and how many
+// tenant_isolation_items policies it carries.
+func rlsState(t *testing.T, schema testutil.TestSchema) (enabled, forced bool, policies int) {
+	t.Helper()
+	err := schema.Admin.QueryRow(context.Background(), `
+		SELECT c.relrowsecurity, c.relforcerowsecurity,
+		       (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation_items')
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = 'items'`, schema.Name).Scan(&enabled, &forced, &policies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return enabled, forced, policies
+}
+
+func TestRLSMigrationIsIdempotentAndReversible(t *testing.T) {
+	ctx := context.Background()
+	schema := rlsSchema(t)
+	if err := migrations.Up(ctx, schema.URL); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, forced, policies := rlsState(t, schema); !enabled || !forced || policies != 1 {
+		t.Fatalf("after up: enabled=%v forced=%v policies=%d", enabled, forced, policies)
+	}
+
+	source, err := os.ReadFile(filepath.Join(testutil.ServiceRoot(), "migrations", "00099_enable_rls.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, found := strings.Cut(string(source), "-- +goose Down")
+	if !found {
+		t.Fatal("the migration has a Down section")
+	}
+	pool, err := pgxpool.New(ctx, schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, up); err != nil {
+		t.Fatalf("re-running the Up section: %v", err)
+	}
+	if enabled, forced, policies := rlsState(t, schema); !enabled || !forced || policies != 1 {
+		t.Fatalf("after a re-run: enabled=%v forced=%v policies=%d", enabled, forced, policies)
+	}
+
+	provider, err := migrations.Open(schema.URL, migrations.Embedded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+	if _, err := provider.ApplyVersion(ctx, rlsMigrationVersion, false); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, forced, policies := rlsState(t, schema); enabled || forced || policies != 0 {
+		t.Fatalf("after down: enabled=%v forced=%v policies=%d", enabled, forced, policies)
+	}
+	if _, err := provider.ApplyVersion(ctx, rlsMigrationVersion, true); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, forced, policies := rlsState(t, schema); !enabled || !forced || policies != 1 {
+		t.Fatalf("after up again: enabled=%v forced=%v policies=%d", enabled, forced, policies)
+	}
+}
+
+func TestRLSIsolatesTenantsForTheProbeRole(t *testing.T) {
+	ctx := context.Background()
+	schema := rlsSchema(t)
+	pool := rlsPool(t, schema)
+	scope := tenancy.Scope(pool, tenancy.NewResolver(tenancy.DefaultSettings(), nil))
+	repo := repositories.NewPgItemRepository(pool).WithScope(scope)
+	tenantA := identity.New(uuid.New(), uuid.NewString())
+	tenantB := identity.New(uuid.New(), uuid.NewString())
+
+	if _, err := repositories.NewPgItemRepository(pool).Create(ctx, tenantA, models.CreateItem{Name: "unbound"}); err == nil {
+		t.Fatal("without a bound tenant the policy rejects the insert")
+	}
+	created, err := repo.Create(ctx, tenantA, models.CreateItem{Name: "a-secret"})
+	if err != nil || created.CustomerID != tenantA.TenantID {
+		t.Fatalf("create as tenant A: %+v %v", created, err)
+	}
+
+	count := func(ctx context.Context, ident identity.IdentityContext) int64 {
+		t.Helper()
+		var n int64
+		if err := scope(ctx, ident, func(q repositories.DBTX) error {
+			return q.QueryRow(ctx, "SELECT count(*) FROM items").Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(ctx, tenantA); n != 1 {
+		t.Fatalf("tenant A sees its own row: %d", n)
+	}
+	if n := count(ctx, tenantB); n != 0 {
+		t.Fatalf("tenant B must NOT see tenant A's row (RLS leak): %d", n)
+	}
+	if n := count(ctx, identity.IdentityContext{}); n != 0 {
+		t.Fatalf("no tenant fails closed: %d", n)
+	}
+	if n := count(tenancy.WithTenant(ctx, tenantA.TenantID.String()), identity.IdentityContext{}); n != 1 {
+		t.Fatalf("the request's tenant binds without an identity tenant: %d", n)
+	}
+	if n := count(tenancy.WithTenant(ctx, tenantA.TenantID.String()), tenantB); n != 0 {
+		t.Fatalf("the identity's tenant wins over the request's: %d", n)
+	}
+	var unscoped int64
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM items").Scan(&unscoped); err != nil || unscoped != 0 {
+		t.Fatalf("a recycled connection outside a tenant transaction sees nothing: %d %v", unscoped, err)
+	}
+
+	for _, statement := range []string{"UPDATE items SET name = 'pwned'", "DELETE FROM items"} {
+		var affected int64
+		if err := scope(ctx, tenantB, func(q repositories.DBTX) error {
+			tag, err := q.Exec(ctx, statement)
+			affected = tag.RowsAffected()
+			return err
+		}); err != nil || affected != 0 {
+			t.Fatalf("%s as tenant B: %d rows, %v", statement, affected, err)
+		}
+	}
+	err = scope(ctx, tenantB, func(q repositories.DBTX) error {
+		_, err := q.Exec(ctx, "INSERT INTO items (name, customer_id, user_id) VALUES ('forged', $1, $2)",
+			tenantA.TenantID, uuid.New())
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("writing another tenant's row violates the policy: %v", err)
+	}
+
+	if found, err := repo.GetByID(ctx, tenantA, created.ID); err != nil || found == nil || found.Name != "a-secret" {
+		t.Fatalf("tenant A's row is untouched: %+v %v", found, err)
+	}
+	if page, err := repo.List(ctx, tenantB, models.ListParams{Limit: 10}); err != nil || page.Total != 0 {
+		t.Fatalf("tenant B lists nothing: %+v %v", page, err)
+	}
+}
+{%- if options['auth.mode'] == 'generate' %}
+
+func TestRLSScopesRequestsToTheTokenTenant(t *testing.T) {
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+	})
+	issuer := authtest.NewIssuer()
+	defer issuer.Close()
+	t.Setenv("GATEKEEPER_ISSUER", issuer.URL())
+	t.Setenv("SERVICE_AUDIENCE", "svc-{{ project_name }}")
+	t.Setenv("TENANT_ID_CLAIM", "")
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = true
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	schema := rlsSchema(t)
+	pool := rlsPool(t, schema)
+	handler := app.New(&cfg, pool)
+	tenantA, tenantB := uuid.NewString(), uuid.NewString()
+	tokenA := issuer.Token(issuer.Options("svc-{{ project_name }}", uuid.NewString(), tenantA))
+	tokenB := issuer.Token(issuer.Options("svc-{{ project_name }}", uuid.NewString(), tenantB))
+	call := func(method, path, token string, payload any) (int, map[string]any) {
+		t.Helper()
+		return platformAuthRequest(t, handler, method, path, token, payload)
+	}
+
+	status, item := call(http.MethodPost, itemsPath, tokenA, map[string]any{"name": "owned"})
+	if status != http.StatusCreated || item["customer_id"] != tenantA {
+		t.Fatalf("tenant A creates through the bound transaction: %d %v", status, item)
+	}
+	if status, page := call(http.MethodGet, itemsPath, tokenA, nil); status != http.StatusOK || page["total"] != float64(1) {
+		t.Fatalf("tenant A lists its item: %d %v", status, page)
+	}
+	if status, page := call(http.MethodGet, itemsPath, tokenB, nil); status != http.StatusOK || page["total"] != float64(0) {
+		t.Fatalf("tenant B lists nothing: %d %v", status, page)
+	}
+	if status, _ := call(http.MethodGet, itemsPath+"/"+item["id"].(string), tokenB, nil); status != http.StatusNotFound {
+		t.Fatalf("tenant B cannot read tenant A's item: %d", status)
+	}
+}
+
+func TestRLSRequestTenantNeverOverridesAVerifiedToken(t *testing.T) {
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+	})
+	issuer := authtest.NewIssuer()
+	defer issuer.Close()
+	t.Setenv("GATEKEEPER_ISSUER", issuer.URL())
+	t.Setenv("SERVICE_AUDIENCE", "svc-{{ project_name }}")
+	t.Setenv("TENANT_ID_CLAIM", "")
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = false
+	if err := app.InitPlatformAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	schema := rlsSchema(t)
+	handler := tenantHandler(t, &cfg, rlsPool(t, schema), tenancy.ResolutionHeader)
+	tenantA, tenantB := uuid.NewString(), uuid.NewString()
+	tokenA := issuer.Token(issuer.Options("svc-{{ project_name }}", uuid.NewString(), tenantA))
+
+	status, item := caller{tenant: tenantB, token: tokenA}.call(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "owned"})
+	if status != http.StatusCreated || item["customer_id"] != tenantA {
+		t.Fatalf("the verified token's tenant wins over the header: %d %v", status, item)
+	}
+	if status, page := (caller{tenant: "acme", token: tokenA}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(1) {
+		t.Fatalf("a verified request ignores the header: %d %v", status, page)
+	}
+	if status, page := (caller{tenant: tenantB}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(0) {
+		t.Fatalf("a dev-mode request acts as the header's tenant: %d %v", status, page)
+	}
+	if status, body := (caller{tenant: "acme"}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusBadRequest || testutil.ErrorCode(body) != "INVALID_INPUT" {
+		t.Fatalf("a dev-mode header that is not a UUID: %d %v", status, body)
+	}
+}
+{%- else %}
+
+func TestRLSScopesRequestsToTheDevTenant(t *testing.T) {
+	schema := rlsSchema(t)
+	pool := rlsPool(t, schema)
+	cfg := config.Defaults()
+	handler := app.New(&cfg, pool)
+
+	status, item := caller{}.call(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "owned"})
+	if status != http.StatusCreated || item["customer_id"] != identity.Dev().TenantID.String() {
+		t.Fatalf("a request that names no tenant acts as the dev tenant: %d %v", status, item)
+	}
+	if status, page := (caller{}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(1) {
+		t.Fatalf("the dev tenant lists its item: %d %v", status, page)
+	}
+	other := uuid.NewString()
+	status, page := caller{tenant: other, host: other + ".example.com"}.call(t, handler, http.MethodGet, itemsPath, nil)
+{%- if options['database.tenant_resolution'] == 'token_claim' %}
+	if status != http.StatusOK || page["total"] != float64(1) {
+		t.Fatalf("token_claim resolution ignores the header and the host: %d %v", status, page)
+	}
+{%- else %}
+	if status != http.StatusOK || page["total"] != float64(0) {
+		t.Fatalf("a request that names another tenant acts as it: %d %v", status, page)
+	}
+{%- endif %}
+}
+
+func TestRLSIsolatesTheTenantsRequestsName(t *testing.T) {
+	schema := rlsSchema(t)
+	pool := rlsPool(t, schema)
+	cfg := config.Defaults()
+	for _, resolution := range []string{tenancy.ResolutionHeader, tenancy.ResolutionSubdomain} {
+		handler := tenantHandler(t, &cfg, pool, resolution)
+		as := func(tenant string) caller {
+			if resolution == tenancy.ResolutionHeader {
+				return caller{tenant: tenant}
+			}
+			return caller{host: tenant + ".example.com:8443"}
+		}
+		tenantA, tenantB := as(uuid.NewString()), as(uuid.NewString())
+
+		status, item := tenantA.call(t, handler, http.MethodPost, itemsPath, map[string]any{"name": "a-secret"})
+		if status != http.StatusCreated {
+			t.Fatalf("%s: tenant A creates: %d %v", resolution, status, item)
+		}
+		endpoint := itemsPath + "/" + item["id"].(string)
+		if status, page := tenantA.call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(1) {
+			t.Fatalf("%s: tenant A lists its item: %d %v", resolution, status, page)
+		}
+		if status, page := tenantB.call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(0) {
+			t.Fatalf("%s: tenant B must not list tenant A's item (RLS leak): %d %v", resolution, status, page)
+		}
+		for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+			if status, _ := tenantB.call(t, handler, method, endpoint, map[string]any{"name": "pwned"}); status != http.StatusNotFound {
+				t.Fatalf("%s: %s of tenant A's item as tenant B: %d", resolution, method, status)
+			}
+		}
+		if status, page := (caller{}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusOK || page["total"] != float64(0) {
+			t.Fatalf("%s: the dev tenant sees no request tenant's item: %d %v", resolution, status, page)
+		}
+		if status, body := tenantA.call(t, handler, http.MethodGet, endpoint, nil); status != http.StatusOK || body["name"] != "a-secret" {
+			t.Fatalf("%s: tenant A's item is untouched: %d %v", resolution, status, body)
+		}
+	}
+	handler := tenantHandler(t, &cfg, pool, tenancy.ResolutionHeader)
+	if status, body := (caller{tenant: "acme"}).call(t, handler, http.MethodGet, itemsPath, nil); status != http.StatusBadRequest || testutil.ErrorCode(body) != "INVALID_INPUT" {
+		t.Fatalf("a header tenant that is not a UUID: %d %v", status, body)
+	}
+}
+{%- endif %}

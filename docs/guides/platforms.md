@@ -120,6 +120,11 @@ The `multitenant-saas` preset sets `database.multitenancy=shared_rls` and
    current_setting('app.current_tenant')::uuid`) then filter every query to
    that tenant automatically — application code stays tenant-agnostic.
 
+The generated RLS migrations cover the tables forge generates. Tables a project
+adds need their own migration that enables and forces RLS with a tenant policy;
+a Go service's `OPERATIONS.md` gives the SQL and the rules for data migrations
+and rollbacks.
+
 The `tms` (tenant-management-service) control plane provisions tenants (Keycloak
 realm/user + the routing entries the Gatekeeper reads). It is **exempt** from
 the RLS policy (it's listed in the RLS fragment's `excluded_app_templates`): TMS

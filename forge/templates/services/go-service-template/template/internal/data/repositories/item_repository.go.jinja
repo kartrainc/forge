@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"{{ project_name }}/internal/apperrors"
@@ -35,51 +36,69 @@ type ItemRepository interface {
 
 const itemColumns = "id, name, description, tags, status, customer_id, user_id, created_at, updated_at"
 
+// DBTX is the query surface shared by *pgxpool.Pool and pgx.Tx.
+type DBTX interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// Scope runs fn with the connection a caller's queries use. NewPgItemRepository
+// runs fn on the pool; a scope may instead open a transaction bound to the
+// caller, as database.multitenancy=shared_rls does.
+type Scope func(ctx context.Context, ident identity.IdentityContext, fn func(DBTX) error) error
+
 // PgItemRepository is the PostgreSQL implementation.
 type PgItemRepository struct {
-	pool *pgxpool.Pool
+	scope Scope
 }
 
 func NewPgItemRepository(pool *pgxpool.Pool) *PgItemRepository {
-	return &PgItemRepository{pool: pool}
+	return &PgItemRepository{scope: func(_ context.Context, _ identity.IdentityContext, fn func(DBTX) error) error {
+		return fn(pool)
+	}}
+}
+
+// WithScope returns a copy whose queries run through scope.
+func (r *PgItemRepository) WithScope(scope Scope) *PgItemRepository {
+	scoped := *r
+	scoped.scope = scope
+	return &scoped
 }
 
 func (r *PgItemRepository) List(ctx context.Context, ident identity.IdentityContext, params models.ListParams) (models.Page[models.Item], error) {
 	where, args := filter(ident, params)
-	var total int64
-	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM items"+where, args...).Scan(&total); err != nil {
-		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
-	}
-	args = append(args, params.Limit, params.Skip)
 	query := fmt.Sprintf("SELECT %s FROM items%s ORDER BY created_at DESC LIMIT $%d OFFSET $%d",
-		itemColumns, where, len(args)-1, len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
+		itemColumns, where, len(args)+1, len(args)+2)
+	page := models.Page[models.Item]{Skip: params.Skip, Limit: params.Limit}
+	err := r.run(ctx, ident, func(db DBTX) error {
+		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM items"+where, args...).Scan(&page.Total); err != nil {
+			return err
+		}
+		rows, err := db.Query(ctx, query, append(args, params.Limit, params.Skip)...)
+		if err != nil {
+			return err
+		}
+		page.Items, err = pgx.CollectRows(rows, scanItem)
+		return err
+	})
 	if err != nil {
-		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
+		return models.Page[models.Item]{}, err
 	}
-	items, err := pgx.CollectRows(rows, scanItem)
-	if err != nil {
-		return models.Page[models.Item]{}, apperrors.FromDatabase(err)
-	}
-	return models.Page[models.Item]{
-		Items:   items,
-		Total:   total,
-		Skip:    params.Skip,
-		Limit:   params.Limit,
-		HasMore: params.Skip+params.Limit < total,
-	}, nil
+	page.HasMore = params.Skip+params.Limit < page.Total
+	return page, nil
 }
 
 func (r *PgItemRepository) GetByID(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) (*models.Item, error) {
-	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID)
+	return r.one(ctx, ident, "SELECT "+itemColumns+" FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID)
 }
 
 func (r *PgItemRepository) FindByName(ctx context.Context, ident identity.IdentityContext, name string) (*models.Item, error) {
-	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2", name, ident.TenantID)
+	return r.one(ctx, ident, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2", name, ident.TenantID)
 }
 
 func (r *PgItemRepository) FindByNameExcluding(ctx context.Context, ident identity.IdentityContext, name string, exclude uuid.UUID) (*models.Item, error) {
-	return r.one(ctx, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2 AND id <> $3", name, ident.TenantID, exclude)
+	return r.one(ctx, ident, "SELECT "+itemColumns+" FROM items WHERE name = $1 AND customer_id = $2 AND id <> $3", name, ident.TenantID, exclude)
 }
 
 func (r *PgItemRepository) Create(ctx context.Context, ident identity.IdentityContext, data models.CreateItem) (*models.Item, error) {
@@ -92,7 +111,7 @@ func (r *PgItemRepository) Create(ctx context.Context, ident identity.IdentityCo
 		status = *data.Status
 	}
 	userID, _ := uuid.Parse(ident.Subject)
-	return r.one(ctx, "INSERT INTO items (name, description, tags, status, customer_id, user_id) "+
+	return r.one(ctx, ident, "INSERT INTO items (name, description, tags, status, customer_id, user_id) "+
 		"VALUES ($1, $2, $3, $4, $5, $6) RETURNING "+itemColumns,
 		data.Name, data.Description, tags, status, ident.TenantID, userID)
 }
@@ -118,29 +137,46 @@ func (r *PgItemRepository) Update(ctx context.Context, ident identity.IdentityCo
 	args = append(args, itemID, ident.TenantID)
 	query := fmt.Sprintf("UPDATE items SET %s WHERE id = $%d AND customer_id = $%d RETURNING %s",
 		strings.Join(append(sets, "updated_at = NOW()"), ", "), len(args)-1, len(args), itemColumns)
-	return r.one(ctx, query, args...)
+	return r.one(ctx, ident, query, args...)
 }
 
 func (r *PgItemRepository) Delete(ctx context.Context, ident identity.IdentityContext, itemID uuid.UUID) error {
-	if _, err := r.pool.Exec(ctx, "DELETE FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID); err != nil {
+	return r.run(ctx, ident, func(db DBTX) error {
+		_, err := db.Exec(ctx, "DELETE FROM items WHERE id = $1 AND customer_id = $2", itemID, ident.TenantID)
+		return err
+	})
+}
+
+func (r *PgItemRepository) one(ctx context.Context, ident identity.IdentityContext, query string, args ...any) (*models.Item, error) {
+	var item *models.Item
+	err := r.run(ctx, ident, func(db DBTX) error {
+		rows, err := db.Query(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		found, err := pgx.CollectExactlyOneRow(rows, scanItem)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		item = &found
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// run executes fn through the scope and maps database errors to the RFC-007
+// contract.
+func (r *PgItemRepository) run(ctx context.Context, ident identity.IdentityContext, fn func(DBTX) error) error {
+	if err := r.scope(ctx, ident, fn); err != nil {
 		return apperrors.FromDatabase(err)
 	}
 	return nil
-}
-
-func (r *PgItemRepository) one(ctx context.Context, query string, args ...any) (*models.Item, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, apperrors.FromDatabase(err)
-	}
-	item, err := pgx.CollectExactlyOneRow(rows, scanItem)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, apperrors.FromDatabase(err)
-	}
-	return &item, nil
 }
 
 func scanItem(row pgx.CollectableRow) (models.Item, error) {
