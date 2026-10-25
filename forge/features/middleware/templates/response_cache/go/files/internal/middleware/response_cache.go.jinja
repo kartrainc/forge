@@ -134,7 +134,8 @@ func (c *ResponseCache) serve(w http.ResponseWriter, r *http.Request, next http.
 		ttl = DefaultResponseCacheTTL
 	}
 	directives := cacheControl(r.Header.Values("Cache-Control"))
-	if r.Method != http.MethodGet || directives["no-store"] || time.Now().UnixNano() < c.retryAt.Load() {
+	if r.Method != http.MethodGet || directives["no-store"] || restricted(w.Header()) ||
+		time.Now().UnixNano() < c.retryAt.Load() {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -158,7 +159,7 @@ func (c *ResponseCache) serve(w http.ResponseWriter, r *http.Request, next http.
 			return
 		}
 	}
-	recorder := &cacheRecorder{target: w, header: http.Header{}}
+	recorder := &cacheRecorder{target: w, outer: w.Header().Clone(), header: w.Header().Clone()}
 	next.ServeHTTP(recorder, r)
 	entry, ok := recorder.finish()
 	if !ok {
@@ -258,10 +259,20 @@ var hopByHopHeaders = []string{
 	"Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
+// restricted reports response headers an outer middleware already set that
+// forbid caching: a cookie, or Cache-Control no-store or private.
+func restricted(header http.Header) bool {
+	directives := cacheControl(header.Values("Cache-Control"))
+	return header.Get("Set-Cookie") != "" || directives["no-store"] || directives["private"]
+}
+
 // cacheRecorder buffers a 200 response so it can be stored. Any other status,
 // a body over maxCachedBodyBytes or a flush streams straight to the client.
+// It starts from the headers outer middleware set, as the real writer would,
+// but stores only the ones the handler added or changed.
 type cacheRecorder struct {
 	target    http.ResponseWriter
+	outer     http.Header
 	header    http.Header
 	status    int
 	body      bytes.Buffer
@@ -311,6 +322,11 @@ func (rec *cacheRecorder) Unwrap() http.ResponseWriter { return rec.target }
 func (rec *cacheRecorder) stream() {
 	rec.streaming = true
 	header := rec.target.Header()
+	for name := range header {
+		if _, kept := rec.header[name]; !kept {
+			delete(header, name)
+		}
+	}
 	for name, values := range rec.header {
 		header[name] = values
 	}
@@ -328,17 +344,20 @@ func (rec *cacheRecorder) finish() (cachedResponse, bool) {
 	if rec.streaming {
 		return cachedResponse{}, false
 	}
-	directives := cacheControl(rec.header.Values("Cache-Control"))
-	cacheable := rec.status == http.StatusOK && rec.header.Get("Set-Cookie") == "" &&
-		!directives["no-store"] && !directives["private"]
-	for _, name := range headerTokens(rec.header.Values("Vary")) {
+	header := http.Header{}
+	for name, values := range rec.header {
+		if !slices.Equal(values, rec.outer[name]) {
+			header[name] = slices.Clone(values)
+		}
+	}
+	cacheable := rec.status == http.StatusOK && !restricted(rec.header)
+	for _, name := range headerTokens(header.Values("Vary")) {
 		cacheable = cacheable && varyKeyed[name]
 	}
 	if !cacheable {
 		rec.stream()
 		return cachedResponse{}, false
 	}
-	header := rec.header.Clone()
 	for _, name := range headerTokens(header.Values("Connection")) {
 		header.Del(name)
 	}

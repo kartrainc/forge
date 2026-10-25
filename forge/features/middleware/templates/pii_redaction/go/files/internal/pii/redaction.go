@@ -21,8 +21,22 @@ var (
 	authorizationPattern = regexp.MustCompile(`(?i)(\bauthorization["']?\s*[:=]\s*["']?(?:(?:basic|bearer|digest|negotiate|token)\s+)?)[^\s'",;}]+`)
 	jwtPattern           = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
 	apiKeyPattern        = regexp.MustCompile(`\b(?:sk-(?:[A-Za-z0-9]+[-_])*[A-Za-z0-9]{16,}[A-Za-z0-9_-]*|AIza[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{16,})`)
-	secretPairPattern    = regexp.MustCompile(`(?i)((?:^|[^a-z0-9_.\-])["']?[a-z0-9_.\-]*?(?:password|passwd|passphrase|secret|token|credentials?|(?:api|access|private|secret)[_-]?key)["']?\s*[:=]\s*["']?)[^\s'",;}&]+`)
 )
+
+// secretKeyPrefix matches a secret-named key and its separator; the patterns
+// below redact the whole value after it, quoted values to their closing quote.
+const secretKeyPrefix = `(?i)((?:^|[^a-z0-9_.\-])["']?[a-z0-9_.\-]*?(?:password|passwd|passphrase|secret|token|credentials?|(?:api|access|private|secret)[_-]?key)["']?\s*[:=]\s*)`
+
+var secretPairPatterns = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(secretKeyPrefix + `"(?:[^"\\]|\\.)*"`), `${1}"[redacted]"`},
+	{regexp.MustCompile(secretKeyPrefix + `'(?:[^'\\]|\\.)*'`), `${1}'[redacted]'`},
+	{regexp.MustCompile(secretKeyPrefix + `"[^"]*$`), `${1}"[redacted]`},
+	{regexp.MustCompile(secretKeyPrefix + `'[^']*$`), `${1}'[redacted]`},
+	{regexp.MustCompile(secretKeyPrefix + `[^\s'",;}&]+`), `${1}[redacted]`},
+}
 
 // candidates are the lower-case fragments every pattern above needs; text
 // without any of them is returned as is.
@@ -56,7 +70,10 @@ func Redact(text string) string {
 	text = authorizationPattern.ReplaceAllString(text, "${1}[redacted]")
 	text = jwtPattern.ReplaceAllLiteralString(text, "[jwt]")
 	text = apiKeyPattern.ReplaceAllLiteralString(text, "[api-key]")
-	return secretPairPattern.ReplaceAllString(text, "${1}[redacted]")
+	for _, secret := range secretPairPatterns {
+		text = secret.pattern.ReplaceAllString(text, secret.replacement)
+	}
+	return text
 }
 
 func hasCandidate(text string) bool {

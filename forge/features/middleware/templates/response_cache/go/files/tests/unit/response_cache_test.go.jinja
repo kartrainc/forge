@@ -698,3 +698,73 @@ func TestResponseCacheUnderConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestResponseCacheRespectsOuterMiddlewareHeaders(t *testing.T) {
+	for name, outer := range map[string]map[string]string{
+		"no-store":   {"Cache-Control": "no-store"},
+		"private":    {"Cache-Control": "private, max-age=0"},
+		"set-cookie": {"Set-Cookie": "session=abc"},
+	} {
+		probe := &cacheProbe{}
+		cached := newMemoryCache().Middleware(30*time.Second, "items")(probe)
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for header, value := range outer {
+				w.Header().Set(header, value)
+			}
+			cached.ServeHTTP(w, r)
+		})
+		first := sendCached(handler, cacheRequest{target: "/api/v1/items"})
+		second := sendCached(handler, cacheRequest{target: "/api/v1/items"})
+		if probe.calls != 2 || second.Header().Get(middleware.ResponseCacheStatusHeader) != "" {
+			t.Fatalf("%s: an outer restriction bypasses the cache: calls=%d status=%q",
+				name, probe.calls, second.Header().Get(middleware.ResponseCacheStatusHeader))
+		}
+		for header, value := range outer {
+			if got := first.Header().Get(header); got != value {
+				t.Fatalf("%s: the outer %s is kept: %q", name, header, got)
+			}
+		}
+	}
+}
+
+func TestResponseCacheStoresOnlyTheHandlersHeaders(t *testing.T) {
+	calls, seen := 0, ""
+	cached := newMemoryCache().Middleware(30*time.Second, "items")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		seen = w.Header().Get("X-Request-Id")
+		w.Header().Set("X-Handler", "h")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	requests := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("X-Request-Id", "req-"+strconv.Itoa(requests))
+		cached.ServeHTTP(w, r)
+	})
+	sendCached(handler, cacheRequest{target: "/api/v1/items"})
+	if seen != "req-1" {
+		t.Fatalf("the handler sees the headers outer middleware set: %q", seen)
+	}
+	hit := sendCached(handler, cacheRequest{target: "/api/v1/items"})
+	if calls != 1 || hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" {
+		t.Fatalf("the second request is a hit: calls=%d", calls)
+	}
+	if hit.Header().Get("X-Request-Id") != "req-2" || hit.Header().Get("X-Handler") != "h" {
+		t.Fatalf("a hit replays the handler's headers and keeps this request's outer ones: %v", hit.Header())
+	}
+}
+
+func TestResponseCacheStreamsWithoutHeadersTheHandlerRemoved(t *testing.T) {
+	cached := newMemoryCache().Middleware(30*time.Second, "items")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Del("X-Outer")
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Outer", "1")
+		cached.ServeHTTP(w, r)
+	})
+	response := sendCached(handler, cacheRequest{target: "/api/v1/items"})
+	if response.Code != http.StatusAccepted || response.Header().Get("X-Outer") != "" {
+		t.Fatalf("an uncached response carries the handler's header changes: %d %v", response.Code, response.Header())
+	}
+}

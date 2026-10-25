@@ -780,6 +780,13 @@ def _bool_materialization_cases() -> list[tuple[str, tuple[str, ...]]]:
     return cases
 
 
+# Values a project with Go services rejects because Go has no implementation
+# (its services would run without tenant isolation); materialized without Go.
+_REJECTED_WITH_GO: frozenset[tuple[str, object]] = frozenset(
+    {("database.multitenancy", "schema_per_tenant")}
+)
+
+
 def _enum_materialization_cases() -> list[tuple[str, object, tuple[str, ...]]]:
     """(path, value, expected_fragments) for every ENUM value with fragments."""
     cases: list[tuple[str, object, tuple[str, ...]]] = []
@@ -818,7 +825,10 @@ class TestFragmentMaterialization:
     def test_enum_option_value_enables_expected_fragments(
         self, path: str, value: object, expected: tuple[str, ...]
     ) -> None:
-        plan = resolve(_multi_backend_project({path: value}))
+        config = _multi_backend_project({path: value})
+        if (path, value) in _REJECTED_WITH_GO:
+            config.backends = [b for b in config.backends if b.language is not BackendLanguage.GO]
+        plan = resolve(config)
         names = {rf.fragment.name for rf in plan.ordered}
         missing = [f for f in expected if f not in names]
         assert not missing, f"Setting {path}={value!r} should enable {expected}; missing: {missing}"

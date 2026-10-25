@@ -605,6 +605,35 @@ def _check_multitenancy_deferred(config: ProjectConfig) -> None:
     )
 
 
+# Tenant-isolation strategies each Go service implements. A Go service the
+# selected strategy does not reach would run without tenant isolation, so a
+# project with Go services must pick one Go implements.
+_GO_MULTITENANCY: frozenset[str] = frozenset({"none", "shared_rls"})
+
+
+def _check_go_multitenancy(
+    config: ProjectConfig, project_backends: tuple[BackendLanguage, ...]
+) -> None:
+    """Reject a tenant-isolation strategy that would leave Go services unisolated."""
+    path = "database.multitenancy"
+    value = config.options.get(path, "none")
+    if BackendLanguage.GO not in project_backends or value in _GO_MULTITENANCY:
+        return
+    raise OptionsError(
+        f"database.multitenancy={value!r} has no Go implementation, so this "
+        f"project's Go services would run without tenant isolation. Use "
+        f"database.multitenancy='shared_rls' (Python and Go), or move the Go "
+        f"services to a separate configuration.",
+        code=OPTIONS_INVALID_VALUE,
+        context={
+            "option": path,
+            "value": value,
+            "go_implements": sorted(_GO_MULTITENANCY - {"none"}),
+            "project_backends": [b.value for b in project_backends],
+        },
+    )
+
+
 def _check_security_constraints(option_values: dict[str, object], fragment_set: set[str]) -> None:
     """Cross-option safety rules enforced at config time.
 
@@ -740,6 +769,7 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
     _check_option_allowed_backends(config, project_backends)
     _check_app_template_exclusions(config)
     _check_multitenancy_deferred(config)
+    _check_go_multitenancy(config, project_backends)
 
     option_values = _apply_option_defaults(config.options)
     # The platform-auth gatekeeper stack depends on the keycloak + redis

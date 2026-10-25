@@ -53,9 +53,12 @@ applied before it stay applied.
 | 1 | `migration failed` | The database is unreachable or the command failed; `error` says why, e.g. a migration's SQL error, `no applied migration` or `no migration file for applied versions …` from `down` |
 | 2 | `invalid migrate command` | An unknown command or an extra argument; checked before the configuration loads |
 
-`invalid migrate command` and `configuration error` are plain-text lines on
-stderr, written before the service logger exists. The other messages go
-through the service logger (JSON on stdout, or text with `logging.pretty`).
+Every message goes through the service logger as a JSON line on stdout,
+including `invalid migrate command` and `configuration error`, which are
+logged at `info` level before the configuration loads; afterwards
+`logging.level` and `logging.pretty` (text instead of JSON) apply. Nothing is
+written to stderr, so read stdout or the container log, and expect secrets to
+be redacted when `middleware.pii_redaction` is on.
 
 ### Migration numbering
 

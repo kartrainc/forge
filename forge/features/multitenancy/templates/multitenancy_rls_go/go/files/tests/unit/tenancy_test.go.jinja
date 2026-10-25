@@ -142,26 +142,31 @@ func TestTenantResolverReadsTokenClaims(t *testing.T) {
 	}
 }
 
-func TestTenantPrefersTheIdentityThenTheRequest(t *testing.T) {
+func TestTenantBindsTheIdentityOrAVerifiedClaimOnly(t *testing.T) {
 	settings := tenancy.DefaultSettings()
 	settings.Resolution = tenancy.ResolutionTokenClaim
+	claimed := uuid.New()
+	claim := claimed.String()
 	resolver := tenancy.NewResolver(settings, func(context.Context) map[string]any {
-		return map[string]any{settings.ClaimPath: "from-claim"}
+		return map[string]any{settings.ClaimPath: claim}
 	})
 	account := identity.New(uuid.New(), "user")
-	edge := tenancy.WithTenant(context.Background(), "from-edge")
+	edge := tenancy.WithTenant(context.Background(), uuid.NewString())
 	if got := resolver.Tenant(edge, account); got != account.TenantID.String() {
 		t.Fatalf("the identity's tenant wins: %q", got)
 	}
-	if got := resolver.Tenant(edge, identity.IdentityContext{}); got != "from-edge" {
-		t.Fatalf("the request's tenant: %q", got)
+	if got := resolver.Tenant(context.Background(), identity.IdentityContext{}); got != claimed.String() {
+		t.Fatalf("a verified claim resolves late: %q", got)
 	}
-	if got := resolver.Tenant(context.Background(), identity.IdentityContext{}); got != "from-claim" {
-		t.Fatalf("token claims resolve late: %q", got)
+	claim = "acme"
+	if got := resolver.Tenant(context.Background(), identity.IdentityContext{}); got != "" {
+		t.Fatalf("a claim that is not a UUID binds nothing: %q", got)
 	}
-	settings.Resolution = tenancy.ResolutionHeader
-	if got := tenancy.NewResolver(settings, nil).Tenant(context.Background(), identity.IdentityContext{}); got != "" {
-		t.Fatalf("nothing to bind: %q", got)
+	for _, resolution := range []string{tenancy.ResolutionHeader, tenancy.ResolutionSubdomain} {
+		settings.Resolution = resolution
+		if got := tenancy.NewResolver(settings, nil).Tenant(edge, identity.IdentityContext{}); got != "" {
+			t.Fatalf("%s: a verified identity without a tenant cannot pick one from the request: %q", resolution, got)
+		}
 	}
 	if _, ok := tenancy.FromContext(context.Background()); ok {
 		t.Fatal("an empty context carries no tenant")

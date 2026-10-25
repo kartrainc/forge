@@ -94,6 +94,27 @@ def test_schema_per_tenant_stays_python_only() -> None:
     assert "database.multitenancy" in str(exc.value) and "python" in str(exc.value)
 
 
+def test_mixed_project_rejects_a_strategy_go_does_not_implement() -> None:
+    cfg = _config(BackendLanguage.PYTHON, BackendLanguage.GO)
+    cfg.options["database.multitenancy"] = "schema_per_tenant"
+    cfg.option_origins = {"database.multitenancy": "user"}
+    with pytest.raises(OptionsError, match="no Go implementation"):
+        resolve(cfg)
+
+
+def test_mixed_project_isolates_every_service_with_shared_rls() -> None:
+    plan = resolve(_config(BackendLanguage.PYTHON, BackendLanguage.GO))
+    assert _targets(plan, PY_FRAGMENT) == [BackendLanguage.PYTHON]
+    assert _targets(plan, GO_FRAGMENT) == [BackendLanguage.GO]
+
+
+def test_schema_per_tenant_without_go_is_unchanged() -> None:
+    cfg = _config(BackendLanguage.PYTHON, BackendLanguage.NODE)
+    cfg.options["database.multitenancy"] = "schema_per_tenant"
+    plan = resolve(cfg)
+    assert "multitenancy_schema_per_tenant_python" in {rf.fragment.name for rf in plan.ordered}
+
+
 def test_db_per_tenant_message_names_go() -> None:
     cfg = _config(BackendLanguage.GO)
     cfg.options["database.multitenancy"] = "db_per_tenant"

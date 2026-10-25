@@ -265,8 +265,8 @@ func TestRLSIsolatesTenantsForTheProbeRole(t *testing.T) {
 	if n := count(ctx, identity.IdentityContext{}); n != 0 {
 		t.Fatalf("no tenant fails closed: %d", n)
 	}
-	if n := count(tenancy.WithTenant(ctx, tenantA.TenantID.String()), identity.IdentityContext{}); n != 1 {
-		t.Fatalf("the request's tenant binds without an identity tenant: %d", n)
+	if n := count(tenancy.WithTenant(ctx, tenantA.TenantID.String()), identity.IdentityContext{}); n != 0 {
+		t.Fatalf("a request tenant never binds for an identity without one: %d", n)
 	}
 	if n := count(tenancy.WithTenant(ctx, tenantA.TenantID.String()), tenantB); n != 0 {
 		t.Fatalf("the identity's tenant wins over the request's: %d", n)

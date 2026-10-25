@@ -117,7 +117,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `*url.URL`, Stringers, `[]byte`), masks secret-named keys of any value kind
   (`password`, `token`, `apikey`, `secretkey`, `authorization`, `cookie`, …,
   case- and separator-insensitive), and catches URL credentials, raw JWTs,
-  `Authorization` values and quoted or prefixed secret pairs. Records with
+  `Authorization` values and quoted or prefixed secret pairs, redacting a
+  quoted value whole (spaces and escaped quotes included). Records with
   nothing to redact pass through without extra allocations.
 - `response_cache` now covers Go: an in-memory LRU store, or Redis when
   `RESPONSE_CACHE_URL` is set. Entries are keyed by tenant, subject, actor,
@@ -128,7 +129,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   replicas. An unreachable Redis costs at most ~300 ms once and then a 5 s
   bypass, never a hung request (250 ms client limits, no retries, the entry is
   stored after the response is sent). The default key prefix is
-  `<service>:cache`.
+  `<service>:cache`. A `Set-Cookie` or `no-store`/`private` set by outer
+  middleware bypasses the cache, the handler sees the headers outer middleware
+  set, and only the handler's own headers are stored.
 - `observability.otel` on Go also pushes RED metrics over OTLP with Python's
   names, labels and buckets (`http.server.request.count`,
   `http.server.request.duration`, `http.server.active_requests`, labelled by
@@ -151,10 +154,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   same `TENANT_*` settings as Python. Without a verified token, the header or
   subdomain tenant becomes the request identity's tenant (a header tenant that
   is not a UUID gets 400 `INVALID_INPUT`; subdomains count only when the
-  leftmost label is a UUID); a verified token's tenant always wins.
+  leftmost label is a UUID); a verified token's tenant always wins, and a
+  verified identity without a tenant binds none (a header or host cannot pick
+  one; a non-UUID claim binds none).
   `TENANT_RLS_GUC` must stay `app.current_tenant`. The RLS integration tests run
   as the `DATABASE_URL` role when it does not bypass RLS. `schema_per_tenant`
-  stays Python-only and is rejected for Go with a clear error.
+  stays Python-only and is rejected for any project with Go services, which
+  would otherwise run without tenant isolation.
 - `forge --update` runs `go mod tidy` on the regenerated Go services before
   comparing them with the project, as generation does. It no longer rewrites a
   tidied `go.mod` into an untidy one, which made `go build`, the generated CI,

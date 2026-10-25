@@ -74,18 +74,20 @@ func (r *Resolver) Attach(req *http.Request) (context.Context, error) {
 }
 
 // Tenant returns the tenant a transaction for ident binds: the identity's
-// tenant when it has one (a verified token's, or the one Attach chose), else
-// the tenant resolved for the request. "" binds nothing, so the RLS policies
-// match no rows.
+// tenant when it has one (a verified token's, or the one Attach chose), else,
+// under token_claim, a UUID at the claim path of the verified token. A
+// client-supplied header or host never reaches the binding on its own, so a
+// verified identity without a tenant cannot pick one. "" binds nothing, so the
+// RLS policies match no rows.
 func (r *Resolver) Tenant(ctx context.Context, ident identity.IdentityContext) string {
 	if ident.TenantID != uuid.Nil {
 		return ident.TenantID.String()
 	}
-	if tenant, ok := FromContext(ctx); ok {
-		return tenant
+	if r.settings.Resolution != ResolutionTokenClaim {
+		return ""
 	}
-	if r.settings.Resolution == ResolutionTokenClaim {
-		return r.fromClaims(ctx)
+	if id, err := uuid.Parse(r.fromClaims(ctx)); err == nil && id != uuid.Nil {
+		return id.String()
 	}
 	return ""
 }
