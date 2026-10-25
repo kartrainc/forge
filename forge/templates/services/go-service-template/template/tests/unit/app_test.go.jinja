@@ -3,10 +3,12 @@ package unit_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,6 +158,19 @@ func TestLoggerLevels(t *testing.T) {
 	}
 	if app.Logger("bogus", true).Enabled(context.Background(), -4) {
 		t.Fatal("unknown levels fall back to info")
+	}
+}
+
+func TestLoggerAppliesRegisteredHandlerWrappers(t *testing.T) {
+	var wrapped atomic.Int32
+	app.WrapLogHandler(func(handler slog.Handler) slog.Handler {
+		wrapped.Add(1)
+		return handler
+	})
+	app.Logger("info", false)
+	app.Logger("info", true)
+	if wrapped.Load() != 2 {
+		t.Fatalf("every logger is wrapped once: %d", wrapped.Load())
 	}
 }
 

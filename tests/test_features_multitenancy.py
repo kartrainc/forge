@@ -6,7 +6,8 @@ layer:
 - ``none`` (default): INERT — enables no fragments, changes no output. The
   golden-snapshot gate (``tests/test_golden_snapshots.py``) is the byte-exact
   guard; this file asserts the registry-level invariant.
-- ``shared_rls``: Postgres Row-Level Security (Python tier-1). Ships the
+- ``shared_rls``: Postgres Row-Level Security (Python and Go; the Go fragment
+  is covered by ``tests/test_features_multitenancy_go.py``). Ships the
   TenantResolver + GUC hook (RLS engine listener) + request middleware + an
   idempotent Alembic RLS migration.
 - ``schema_per_tenant`` / ``db_per_tenant``: KNOWN-but-DEFERRED. Validation
@@ -109,7 +110,7 @@ def test_multitenancy_option_registered() -> None:
     assert opt.default == "none"
     assert opt.options == ("none", "shared_rls", "schema_per_tenant", "db_per_tenant")
     assert opt.requires_database is True
-    assert opt.allowed_backends == (BackendLanguage.PYTHON,)
+    assert opt.allowed_backends == (BackendLanguage.PYTHON, BackendLanguage.GO)
 
 
 def test_multitenancy_enables_per_strategy() -> None:
@@ -117,7 +118,7 @@ def test_multitenancy_enables_per_strategy() -> None:
     # shared_rls + schema_per_tenant each map to their fragment; none + the
     # still-deferred db_per_tenant map to nothing.
     assert opt.enables == {
-        "shared_rls": (FRAGMENT_NAME,),
+        "shared_rls": (FRAGMENT_NAME, "multitenancy_rls_go"),
         "schema_per_tenant": (SCHEMA_FRAGMENT_NAME,),
     }
     assert "none" not in opt.enables
@@ -159,10 +160,12 @@ def test_none_is_inactive_value() -> None:
 def test_none_enables_nothing() -> None:
     from forge.capability_resolver import resolve
 
-    for lang in (BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST):
+    for lang in BackendLanguage:
         plan = resolve(_cfg_lang(lang, "none"))
         names = {rf.fragment.name for rf in plan.ordered}
-        assert FRAGMENT_NAME not in names, f"none must enable no fragment on {lang.value}"
+        assert not {n for n in names if n.startswith("multitenancy_")}, (
+            f"none must enable no fragment on {lang.value}"
+        )
 
 
 def test_shared_rls_on_python_resolves_fragment() -> None:

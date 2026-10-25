@@ -136,6 +136,9 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("pii_redaction", "python"),
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("pii_redaction", "go"),
+                ),
             },
         )
     )
@@ -157,6 +160,20 @@ def register_all(api: ForgeAPI) -> None:
                     fragment_dir=_impl("response_cache", "node"),
                     dependencies=("@fastify/caching@9.0.4",),
                     env_vars=(("RESPONSE_CACHE_URL", "redis://redis:6379/1"),),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("response_cache", "go"),
+                    # miniredis backs the generated unit tests.
+                    dependencies=(
+                        "github.com/redis/go-redis/v9@v9.23.0",
+                        "github.com/alicebob/miniredis/v2@v2.40.0",
+                    ),
+                    # An empty prefix keeps the per-service default
+                    # "<service>:cache".
+                    env_vars=(
+                        ("RESPONSE_CACHE_URL", "redis://redis:6379/1"),
+                        ("RESPONSE_CACHE_PREFIX", ""),
+                    ),
                 ),
             },
         )

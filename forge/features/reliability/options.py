@@ -75,8 +75,22 @@ Self-contained (bundles its own lightweight breaker, no extra dependency) and
 distinct from ``reliability.circuit_breaker`` (a purgatory registry for
 wrapping arbitrary calls).
 
-BACKENDS: python
-DEPENDENCY: none (httpx already present).""",
+Go emits ``internal/clients`` (``clients.New(clients.Config{...})``): the same
+backoff, error type, client-credentials token source and propagated headers
+(``X-Request-Id``, ``x-customer-id``, ``x-user-id``, ``x-tenant-slug``), with
+stricter defaults: it retries only idempotent requests (GET, HEAD, OPTIONS,
+PUT, DELETE, or any request with an ``Idempotency-Key`` header) after a 5xx,
+a 429 (honouring ``Retry-After``), a failed connection or a timeout; it
+follows no redirects, requires paths starting with ``/`` and caps decoded
+responses at 16 MiB. Instead of bundling a breaker it uses the generated
+``internal/circuitbreaker`` when ``reliability.circuit_breaker`` is on (no
+breaker otherwise, or pass your own), counting only 5xx responses, failed
+connections and timeouts; with ``auth.mode=generate`` it adds
+``clients.PlatformAuth(s2s)``, a tenant-scoped token source over the
+platform-auth-go ``S2SClient``.
+
+BACKENDS: python, go
+DEPENDENCY: none (httpx already present; Go uses the standard library).""",
             category=FeatureCategory.RELIABILITY,
             enables={True: ("reliability_service_client",)},
         )

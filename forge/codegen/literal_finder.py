@@ -21,6 +21,10 @@ same in-order positions), and only literal-leaf differences are
 collected as :class:`LiteralEdit` records. Unblocks option-promotion
 suggestions for Axum (and any other tree-sitter-rust target).
 
+For Go: the same walk over :mod:`tree_sitter_go`. Snippets that aren't a
+whole source file (composite-literal entries, function-body statements,
+import specs) are parsed inside a minimal wrapper.
+
 Used downstream by the harvester to:
 
 1. Emit a ``safe-apply`` candidate for the underlying block (instead of
@@ -32,7 +36,7 @@ Used downstream by the harvester to:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 import libcst as cst
@@ -40,6 +44,8 @@ from libcst.metadata import PositionProvider
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+
+    import tree_sitter
 
 LiteralKind = Literal["int", "float", "str", "bool"]
 """Bounded vocabulary of literal kinds the finder understands.
@@ -51,8 +57,6 @@ into an :class:`forge.options.Option` declaration. ``list`` / ``dict`` /
 shape we can't safely promote without more user intent.
 """
 
-# Go has no literal-level walker: its snippets fall back to the
-# needs-review rule.
 SupportedLanguage = Literal["python", "typescript", "rust", "go"]
 
 
@@ -110,6 +114,8 @@ def find_literal_edits(
         return _find_typescript_literal_edits(upstream_body, current_body)
     if language == "rust":
         return _find_rust_literal_edits(upstream_body, current_body)
+    if language == "go":
+        return _find_go_literal_edits(upstream_body, current_body)
     return ()
 
 
@@ -337,17 +343,6 @@ def _find_typescript_literal_edits(
 #     carry a dedicated ``char`` variant, and an Option promoted from a
 #     ``char`` literal sensibly maps to a single-character string in the
 #     cross-language Option declaration.
-_RUST_LITERAL_KINDS: frozenset[str] = frozenset(
-    {
-        "integer_literal",
-        "float_literal",
-        "boolean_literal",
-        "string_literal",
-        "raw_string_literal",
-        "char_literal",
-    }
-)
-
 _RUST_LITERAL_KIND_MAP: dict[str, LiteralKind] = {
     "integer_literal": "int",
     "float_literal": "float",
@@ -357,28 +352,58 @@ _RUST_LITERAL_KIND_MAP: dict[str, LiteralKind] = {
     "char_literal": "str",
 }
 
+# tree-sitter-go literal node kinds. ``true`` / ``false`` are separate node
+# types in the Go grammar (Rust wraps both in ``boolean_literal``), so the
+# walk compares them through :data:`_GO_NODE_CLASS`. Interpreted vs raw
+# strings stay distinct node types, so swapping one for the other is
+# structural, as in Rust. ``imaginary_literal`` has no Option mapping.
+_GO_LITERAL_KIND_MAP: dict[str, LiteralKind] = {
+    "int_literal": "int",
+    "float_literal": "float",
+    "true": "bool",
+    "false": "bool",
+    "interpreted_string_literal": "str",
+    "raw_string_literal": "str",
+    "rune_literal": "str",
+}
 
-def _rust_parser():  # type: ignore[no-untyped-def]
-    """Return a cached :class:`tree_sitter.Parser` configured for Rust.
+_GO_NODE_CLASS: dict[str, str] = {"true": "bool", "false": "bool"}
+
+# Injected Go snippets are rarely a whole source file: most are entries of
+# a composite literal (``middleware.X,``), statements of a function body or
+# import specs. Both bodies are parsed in the first context where both
+# parse cleanly; the prefix line count is subtracted from reported lines.
+_GO_PARSE_CONTEXTS: tuple[tuple[str, str], ...] = (
+    ("", "\n"),
+    ("func _() {\n", "\n}\n"),
+    ("var _ = []any{\n", "\n}\n"),
+    ("import (\n", "\n)\n"),
+)
+
+_PARSER_CACHE: dict[str, tree_sitter.Parser] = {}
+
+
+def _tree_sitter_parser(grammar: Literal["rust", "go"]) -> tree_sitter.Parser:
+    """Return a cached :class:`tree_sitter.Parser` for ``grammar``.
 
     Built lazily so the cost of loading the C extension is paid once per
-    process — and only when a Rust block actually shows up. The parser
-    object is thread-safe for ``parse()`` calls in tree-sitter ≥0.21.
+    process — and only when a block of that language actually shows up.
+    The parser object is thread-safe for ``parse()`` calls in
+    tree-sitter ≥0.21.
     """
-    global _RUST_PARSER_CACHE  # noqa: PLW0603 — module-level memo
-    cached = _RUST_PARSER_CACHE
+    cached = _PARSER_CACHE.get(grammar)
     if cached is not None:
         return cached
     import tree_sitter  # noqa: PLC0415 — lazy import (heavy C extension)
-    import tree_sitter_rust  # noqa: PLC0415
 
-    language = tree_sitter.Language(tree_sitter_rust.language())
-    parser = tree_sitter.Parser(language)
-    _RUST_PARSER_CACHE = parser
+    if grammar == "rust":
+        import tree_sitter_rust as grammar_module  # noqa: PLC0415
+    else:
+        import tree_sitter_go as grammar_module  # noqa: PLC0415
+
+    parser = tree_sitter.Parser(tree_sitter.Language(grammar_module.language()))
+    _PARSER_CACHE[grammar] = parser
     return parser
-
-
-_RUST_PARSER_CACHE = None  # type: ignore[var-annotated]
 
 
 def _find_rust_literal_edits(
@@ -401,12 +426,70 @@ def _find_rust_literal_edits(
     bytes since that's the position surfaced to the maintainer.
     """
     try:
-        parser = _rust_parser()
+        parser = _tree_sitter_parser("rust")
     except Exception:  # noqa: BLE001 — tree-sitter import / load failure.
         return ()
+    return _tree_sitter_literal_edits(
+        parser,
+        upstream_body.encode("utf-8"),
+        current_body.encode("utf-8"),
+        literal_kinds=_RUST_LITERAL_KIND_MAP,
+    )
 
-    upstream_bytes = upstream_body.encode("utf-8")
-    current_bytes = current_body.encode("utf-8")
+
+def _find_go_literal_edits(
+    upstream_body: str,
+    current_body: str,
+) -> tuple[LiteralEdit, ...]:
+    """Go implementation of :func:`find_literal_edits`.
+
+    Same protocol as the Rust finder over tree-sitter-go: both bodies must
+    parse cleanly and agree on structure; literal-leaf differences
+    (``int_literal`` / ``float_literal`` / ``true`` / ``false`` /
+    ``interpreted_string_literal`` / ``raw_string_literal`` /
+    ``rune_literal``) become :class:`LiteralEdit` records. Bodies that
+    aren't a whole source file are retried in the
+    :data:`_GO_PARSE_CONTEXTS` wrappers; line numbers stay relative to
+    the body.
+    """
+    try:
+        parser = _tree_sitter_parser("go")
+    except Exception:  # noqa: BLE001 — tree-sitter import / load failure.
+        return ()
+    for prefix, suffix in _GO_PARSE_CONTEXTS:
+        upstream_bytes = f"{prefix}{upstream_body}{suffix}".encode()
+        current_bytes = f"{prefix}{current_body}{suffix}".encode()
+        try:
+            upstream_tree = parser.parse(upstream_bytes)
+            current_tree = parser.parse(current_bytes)
+        except Exception:  # noqa: BLE001 — defensive: parser shouldn't raise, but…
+            return ()
+        if upstream_tree.root_node.has_error or current_tree.root_node.has_error:
+            continue
+        edits: list[LiteralEdit] = []
+        if not _walk_parallel_tree_sitter(
+            upstream_tree.root_node,
+            current_tree.root_node,
+            upstream_bytes=upstream_bytes,
+            current_bytes=current_bytes,
+            literal_kinds=_GO_LITERAL_KIND_MAP,
+            node_class=_GO_NODE_CLASS,
+            edits=edits,
+        ):
+            return ()
+        line_offset = prefix.count("\n")
+        return tuple(replace(edit, line=edit.line - line_offset) for edit in edits)
+    return ()
+
+
+def _tree_sitter_literal_edits(
+    parser: tree_sitter.Parser,
+    upstream_bytes: bytes,
+    current_bytes: bytes,
+    *,
+    literal_kinds: Mapping[str, LiteralKind],
+) -> tuple[LiteralEdit, ...]:
+    """Parse both bodies and run :func:`_walk_parallel_tree_sitter`."""
     try:
         upstream_tree = parser.parse(upstream_bytes)
         current_tree = parser.parse(current_bytes)
@@ -417,11 +500,12 @@ def _find_rust_literal_edits(
         return ()
 
     edits: list[LiteralEdit] = []
-    structural_ok = _walk_parallel_rust(
+    structural_ok = _walk_parallel_tree_sitter(
         upstream_tree.root_node,
         current_tree.root_node,
         upstream_bytes=upstream_bytes,
         current_bytes=current_bytes,
+        literal_kinds=literal_kinds,
         edits=edits,
     )
     if not structural_ok:
@@ -429,20 +513,23 @@ def _find_rust_literal_edits(
     return tuple(edits)
 
 
-def _walk_parallel_rust(
+def _walk_parallel_tree_sitter(
     upstream,  # type: ignore[no-untyped-def] — tree_sitter.Node
     current,  # type: ignore[no-untyped-def]
     *,
     upstream_bytes: bytes,
     current_bytes: bytes,
+    literal_kinds: Mapping[str, LiteralKind],
+    node_class: Mapping[str, str] | None = None,
     edits: list[LiteralEdit],
 ) -> bool:
-    """Parallel walk over two tree-sitter Rust nodes.
+    """Parallel walk over two tree-sitter nodes (Rust or Go grammar).
 
     Mirrors :func:`_walk_parallel` for libcst. The key shape differences:
 
     * tree-sitter exposes ``type`` (the grammar rule name) instead of
-      Python ``type()``; equality is by string match.
+      Python ``type()``; equality is by string match, after mapping
+      through ``node_class`` (Go's ``true`` / ``false`` share a class).
     * Children come from :attr:`Node.children` (named + anonymous).
       Anonymous children are tokens like ``"{"`` / ``"="`` — they carry
       structural meaning and must agree, but they have no sub-children.
@@ -450,15 +537,16 @@ def _walk_parallel_rust(
       tree-sitter's bytes-only model means the caller passed the
       utf-8-encoded bodies down.
     """
-    if upstream.type != current.type:
+    classes = node_class or {}
+    if classes.get(upstream.type, upstream.type) != classes.get(current.type, current.type):
         return False
 
     # Literal-leaf comparison — recognised kinds short-circuit the
     # recursion (the parent literal node owns the value text; descending
-    # into ``string_literal`` children would re-fire on the inner
-    # ``string_content`` and double-count).
-    if upstream.type in _RUST_LITERAL_KINDS:
-        kind = _RUST_LITERAL_KIND_MAP[upstream.type]
+    # into string literal children would re-fire on the inner content
+    # node and double-count).
+    kind = literal_kinds.get(upstream.type)
+    if kind is not None:
         upstream_value = upstream_bytes[upstream.start_byte : upstream.end_byte].decode(
             "utf-8", errors="replace"
         )
@@ -499,11 +587,13 @@ def _walk_parallel_rust(
     if len(upstream_children) != len(current_children):
         return False
     for u_child, c_child in zip(upstream_children, current_children, strict=True):
-        if not _walk_parallel_rust(
+        if not _walk_parallel_tree_sitter(
             u_child,
             c_child,
             upstream_bytes=upstream_bytes,
             current_bytes=current_bytes,
+            literal_kinds=literal_kinds,
+            node_class=node_class,
             edits=edits,
         ):
             return False

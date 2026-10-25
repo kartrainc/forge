@@ -1,7 +1,9 @@
+//go:build ignore
+
 // TODO: implement {{ name }}_impl for the go backend.
 //
-// Files in this tree are copied verbatim into the generated backend.
-// This file lands at <backend>/doc.go — adjust the path under go/files/
-// to land where you actually need it (e.g.
-// go/files/internal/{{ name }}/{{ name }}.go → <backend>/internal/{{ name }}/{{ name }}.go).
+// Files in this tree are copied verbatim into the generated backend. This
+// placeholder lands at <backend>/doc.go and is excluded from builds; replace it
+// with real files under go/files/ (e.g. go/files/internal/{{ name }}/{{ name }}.go
+// → <backend>/internal/{{ name }}/{{ name }}.go).
 package main

@@ -6,6 +6,7 @@ from forge.config import BackendLanguage
 from forge.middleware_spec import (
     MiddlewareSpec,
     render_axum_layer,
+    render_chi_middleware,
     render_fastapi_middleware,
     render_fastify_plugin,
     render_middleware_injections,
@@ -90,6 +91,87 @@ class TestRenderAxum:
         assert injs[2].marker == "FORGE:MIDDLEWARE_REGISTRATION"
 
 
+class TestRenderChi:
+    def _go_spec(self, name: str, order: int = 50, import_snippet: str = "") -> MiddlewareSpec:
+        return MiddlewareSpec(
+            name=name,
+            backend=BackendLanguage.GO,
+            order=order,
+            import_snippet=import_snippet,
+            register_snippet=f"middleware.{name.title()},",
+        )
+
+    def test_emits_only_registration_without_import_snippet(self) -> None:
+        injs = render_chi_middleware(self._go_spec("timing"), feature_key="timing")
+
+        assert len(injs) == 1
+        assert injs[0].target == "internal/app/app.go"
+        assert injs[0].marker == "FORGE:MIDDLEWARE_REGISTRATION"
+        assert injs[0].position == "after"
+        assert injs[0].snippet == "middleware.Timing,"
+
+    def test_emits_import_inside_import_block_when_set(self) -> None:
+        spec = self._go_spec("timing", import_snippet='"time"')
+        injs = render_chi_middleware(spec, feature_key="timing")
+
+        assert [i.marker for i in injs] == [
+            "FORGE:MIDDLEWARE_IMPORTS",
+            "FORGE:MIDDLEWARE_REGISTRATION",
+        ]
+        assert injs[0].target == "internal/app/app.go"
+        assert injs[0].position == "before"
+        assert injs[0].snippet == '"time"'
+
+    def test_go_template_carries_both_markers(self) -> None:
+        from forge.config import BACKEND_REGISTRY
+        from forge.generator import TEMPLATES_DIR
+
+        template = (
+            TEMPLATES_DIR
+            / BACKEND_REGISTRY[BackendLanguage.GO].template_dir
+            / "template"
+            / "internal"
+            / "app"
+            / "app.go.jinja"
+        )
+        text = template.read_text(encoding="utf-8")
+        assert "// FORGE:MIDDLEWARE_IMPORTS" in text
+        assert "// FORGE:MIDDLEWARE_REGISTRATION" in text
+
+    def test_higher_order_is_outermost_in_the_middleware_list(self, tmp_path) -> None:
+        from forge.appliers.injection import _apply_zoned_injection
+
+        app_go = tmp_path / "app.go"
+        app_go.write_text(
+            "package app\n\n"
+            "import (\n"
+            '\t"net/http"\n'
+            "\t// FORGE:MIDDLEWARE_IMPORTS\n"
+            ")\n\n"
+            "var middlewares = []func(http.Handler) http.Handler{\n"
+            "\tmiddleware.Correlation,\n"
+            "\t// FORGE:MIDDLEWARE_REGISTRATION\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        specs = (
+            self._go_spec("inner", order=50),
+            self._go_spec("outer", order=80, import_snippet='"time"'),
+        )
+        for spec in specs:
+            injs = render_middleware_injections((spec,), BackendLanguage.GO, spec.name)
+            for inj in injs:
+                _apply_zoned_injection(app_go, inj)
+
+        lines = [line.strip() for line in app_go.read_text(encoding="utf-8").splitlines()]
+        assert lines.index('"time"') < lines.index(")")
+        assert (
+            lines.index("middleware.Correlation,")
+            < lines.index("middleware.Outer,")
+            < lines.index("middleware.Inner,")
+        )
+
+
 # ---------------------------------------------------------------------------
 # Dispatch + filtering
 # ---------------------------------------------------------------------------
@@ -120,7 +202,11 @@ class TestRenderMiddlewareInjections:
         # z_high_order (80, z). Each spec produces 2 injections, so the
         # resulting import snippets should match that order.
         import_snippets = [i.snippet for i in injs if i.marker == "FORGE:MIDDLEWARE_IMPORTS"]
-        assert import_snippets == ["import a_low_order", "import m_low_order", "import z_high_order"]
+        assert import_snippets == [
+            "import a_low_order",
+            "import m_low_order",
+            "import z_high_order",
+        ]
 
     def test_empty_specs_produce_no_injections(self) -> None:
         injs = render_middleware_injections((), BackendLanguage.PYTHON, "f")

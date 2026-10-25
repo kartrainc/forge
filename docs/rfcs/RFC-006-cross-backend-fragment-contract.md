@@ -41,14 +41,14 @@ Python today, say).
 
 ### Tier 1 — mandatory cross-backend parity
 
-**Contract**: every built-in backend (Python, Node, Rust) ships an
+**Contract**: every built-in backend (Python, Node, Rust, Go) ships an
 implementation. A PR that adds a tier-1 fragment without a matching
 impl for each built-in fails CI via the matrix lane-B job.
 
 **Examples**: `rate_limit`, `security_headers`, `observability`,
-`observability_otel`, `enhanced_health`, `correlation_id`,
-`background_tasks`, `reliability_connection_pool`,
-`reliability_circuit_breaker`.
+`observability_otel`, `enhanced_health`, `background_tasks`,
+`reliability_connection_pool`, `reliability_circuit_breaker`,
+`queue_port`, `llm_port`, `llm_openai`.
 
 **Why**: these are the infrastructure primitives every production
 service needs. Divergence here breaks the "choose any backend"
@@ -61,9 +61,9 @@ documented plan to reach tier 1 or an explicit statement that it
 never will. Adding a backend is welcome; dropping one requires a
 CHANGELOG note.
 
-**Examples**: `response_cache` (Python + Node today, Rust pending),
-`queue_port` + `queue_redis` + `queue_sqs` (Python today, Rust
-pending — see "Rust queue adapters" below).
+**Examples**: `response_cache` (Python + Node + Go today, Rust
+pending), `pii_redaction` (Python + Go today, Node and Rust pending),
+`queue_redis` (Python today — see "Rust queue adapters" below).
 
 **Why**: not every capability maps cleanly onto every language
 runtime, and some have language-specific idioms that take time to
@@ -77,12 +77,12 @@ surfaces this in `forge describe` and `forge --list` so users picking
 a non-Python backend know upfront that the feature won't reach them.
 
 **Examples**: `agent`, `agent_tools`, `agent_streaming`,
-`conversation_persistence`, `llm_openai`, `llm_anthropic`,
-`llm_bedrock`, `llm_ollama`, `llm_port`, `rag_pipeline`,
+`conversation_persistence`, `llm_anthropic`, `llm_bedrock`,
+`llm_ollama`, `correlation_id`, `queue_sqs`, `rag_pipeline`,
 `rag_chroma`, `rag_qdrant`, `rag_weaviate`, `rag_pinecone`,
 `rag_milvus`, `rag_postgresql`, `rag_embeddings_voyage`,
 `rag_reranking`, `rag_sync_tasks`, `vector_store_*`, `admin_panel`,
-`file_upload`, `mcp_server`, `cli_commands`, `pii_redaction`.
+`file_upload`, `mcp_server`, `cli_commands`.
 
 **Why**: Python has the SDK coverage — the Anthropic / OpenAI /
 Bedrock / embedding / vector / RAG / MCP ecosystems are Python-first.
@@ -127,8 +127,12 @@ pointer to this RFC, and lists the backends the feature won't reach.
 
 ## Rust queue adapters (the motivating tier-2 promotion)
 
-`queue_port`, `queue_redis`, and `queue_sqs` are Python-only today.
-Promotion to tier 1 is staged:
+Status: `queue_port` reached tier 1 (Python, Node, Rust and Go adapters
+behind one port); `queue_redis` is still Python-only (tier 2) and `queue_sqs`
+is tier 3. The plan below is kept as written.
+
+`queue_port`, `queue_redis`, and `queue_sqs` were Python-only when this RFC
+landed. Promotion to tier 1 is staged:
 
 1. **Now (Epic S)**: RFC-006 lands, fragments auto-derive as tier 2
    (they cover only Python but there's an active intent to add Rust).

@@ -202,11 +202,12 @@ class Fragment:
     # guaranteed non-None so callers can treat it as a concrete tier.
     parity_tier: ParityTier | None = None
     # Epic K (1.1.0-alpha.1) — declarative middleware registrations. Each
-    # spec targets one backend; a fragment that supports all three backends
-    # ships three specs. At apply time, the applier expands every spec
-    # targeting the current backend into ``_Injection`` records using the
-    # per-backend renderer (``render_fastapi_middleware``,
-    # ``render_fastify_plugin``, ``render_axum_layer``). Fragments that
+    # spec targets one backend; a fragment that supports every built-in
+    # backend ships one spec per backend. At apply time, the applier expands
+    # every spec targeting the current backend into ``_Injection`` records
+    # using the per-backend renderer (``render_fastapi_middleware``,
+    # ``render_fastify_plugin``, ``render_axum_layer``,
+    # ``render_chi_middleware``). Fragments that
     # don't register middleware leave this empty and behave as before.
     middlewares: tuple[MiddlewareSpec, ...] = ()
     # Frontend-framework gating for project-scoped fragments that emit

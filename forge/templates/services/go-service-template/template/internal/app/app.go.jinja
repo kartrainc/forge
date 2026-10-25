@@ -42,18 +42,21 @@ func New(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 		// FORGE:MIDDLEWARE_REGISTRATION
 {%- if not (include_platform_auth | default(false)) %}
 		// Dev-mode identity (auth.mode=none): bind the fixed local identity
-		// so tenant-scoped handlers have an identity to scope on. Never added
-		// when the platform-auth middleware owns identity.
+		// so tenant-scoped handlers have an identity to scope on, unless an
+		// outer middleware bound one. Never added when the platform-auth
+		// middleware owns identity.
 		devIdentity,
 {%- endif %}
 	}
 	for _, m := range middlewares {
 		router.Use(m)
 	}
+	items := repositories.NewPgItemRepository(pool)
+	// FORGE:REPOSITORY_SCOPE
 	routes.Register(router, routes.Deps{
 		Pool:  pool,
 		DB:    pool,
-		Items: services.NewItemService(repositories.NewPgItemRepository(pool)),
+		Items: services.NewItemService(items),
 		Info:  routes.Info{Title: cfg.App.Name, Version: cfg.App.Version, Description: Description},
 	})
 	return router
@@ -62,7 +65,10 @@ func New(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 
 func devIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), identity.Dev())))
+		if _, ok := identity.FromContext(r.Context()); !ok {
+			r = r.WithContext(identity.WithContext(r.Context(), identity.Dev()))
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 {%- endif %}

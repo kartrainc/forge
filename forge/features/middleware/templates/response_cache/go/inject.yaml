@@ -1,0 +1,10 @@
+# response_cache for Go: install the process-wide cache store at startup so
+# routes wrapped with middleware.CacheResponse(ttl, namespace) resolve it. No
+# route is cached by default; handlers opt in per endpoint.
+
+- target: cmd/server/main.go
+  marker: FORGE:STARTUP_INIT
+  position: before
+  snippet: |-
+    stopResponseCache := app.StartResponseCache()
+    defer stopResponseCache()

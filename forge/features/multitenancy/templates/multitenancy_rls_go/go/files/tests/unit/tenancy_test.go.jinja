@@ -1,0 +1,401 @@
+package unit_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+{%- if options['auth.mode'] == 'generate' %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/data/repositories"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/identity"
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/internal/tenancy"
+	"{{ project_name }}/tests/testutil"
+)
+
+func tenancyEnv(values map[string]string) func(string) string {
+	return func(name string) string { return values[name] }
+}
+
+func TestTenancySettingsDefaultsAndEnvironment(t *testing.T) {
+	defaults := tenancy.DefaultSettings()
+	want := tenancy.Settings{
+		Resolution: {{ options['database.tenant_resolution'] | tojson }},
+		ClaimPath:  {{ options['database.tenant_claim_path'] | tojson }},
+		HeaderName: {{ options['database.tenant_header_name'] | tojson }},
+		GUC:        "app.current_tenant",
+	}
+	if defaults != want || defaults.Validate() != nil {
+		t.Fatalf("defaults: %+v", defaults)
+	}
+	if loaded, err := tenancy.LoadSettings(tenancyEnv(nil)); err != nil || loaded != defaults {
+		t.Fatalf("unset environment keeps the defaults: %+v %v", loaded, err)
+	}
+	loaded, err := tenancy.LoadSettings(tenancyEnv(map[string]string{
+		"TENANT_RESOLUTION":  " header ",
+		"TENANT_CLAIM_PATH":  "org.id",
+		"TENANT_HEADER_NAME": "X-Org",
+		"TENANT_RLS_GUC":     " app.current_tenant ",
+	}))
+	if err != nil || loaded != (tenancy.Settings{Resolution: "header", ClaimPath: "org.id", HeaderName: "X-Org", GUC: "app.current_tenant"}) {
+		t.Fatalf("environment overrides: %+v %v", loaded, err)
+	}
+	for _, invalid := range []struct{ name, value, message string }{
+		{"TENANT_RESOLUTION", "nope", `TENANT_RESOLUTION="nope" is invalid`},
+		{"TENANT_CLAIM_PATH", "  ", "TENANT_CLAIM_PATH must be non-empty"},
+		{"TENANT_HEADER_NAME", "  ", "TENANT_HEADER_NAME must be non-empty"},
+		{"TENANT_RLS_GUC", "  ", `TENANT_RLS_GUC="" is unsupported`},
+		{"TENANT_RLS_GUC", "app.tenant", `TENANT_RLS_GUC="app.tenant" is unsupported; the RLS policies in migrations/00099_enable_rls.sql read app.current_tenant`},
+	} {
+		if _, err := tenancy.LoadSettings(tenancyEnv(map[string]string{invalid.name: invalid.value})); err == nil || !strings.Contains(err.Error(), invalid.message) {
+			t.Fatalf("%s=%q: %v", invalid.name, invalid.value, err)
+		}
+	}
+}
+
+func TestTenantResolverStrategies(t *testing.T) {
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionHeader
+	settings.HeaderName = "X-Org"
+	header := tenancy.NewResolver(settings, nil)
+	if header.Settings() != settings {
+		t.Fatalf("settings: %+v", header.Settings())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	if header.Resolve(request) != "" {
+		t.Fatal("a missing header resolves no tenant")
+	}
+	request.Header.Set("X-Org", "acme")
+	if got := header.Resolve(request); got != "acme" {
+		t.Fatalf("header: %q", got)
+	}
+
+	settings.Resolution = tenancy.ResolutionSubdomain
+	subdomain := tenancy.NewResolver(settings, nil)
+	tenant := uuid.NewString()
+	for host, want := range map[string]string{
+		tenant + ".example.com": tenant, tenant + ".example.com:8443": tenant, tenant: "",
+		"acme.example.com": "", "example.com": "", "localhost": "", "localhost:5000": "",
+		"127.0.0.1:8080": "", "[::1]:8080": "", ".example.com": "",
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		if got := subdomain.Resolve(request); got != want {
+			t.Fatalf("subdomain %q: %q, want %q", host, got, want)
+		}
+	}
+}
+
+func TestTenantResolverReadsTokenClaims(t *testing.T) {
+	claims := map[string]any{
+		"tenant_id":               "t-1",
+		"https://forge/tenant_id": "t-url",
+		"organization":            map[string]any{"id": "org-9", "size": 42},
+		"absent":                  nil,
+		"flat":                    "x",
+	}
+	fromClaims := func(context.Context) map[string]any { return claims }
+	bound := uuid.New()
+	withIdentity := identity.WithContext(context.Background(), identity.New(bound, "user"))
+	for path, want := range map[string]string{
+		"tenant_id":               "t-1",
+		"https://forge/tenant_id": "t-url",
+		"organization.id":         "org-9",
+		"organization.size":       "42",
+		"absent":                  bound.String(),
+		"organization.missing":    bound.String(),
+		"flat.deeper":             bound.String(),
+	} {
+		settings := tenancy.DefaultSettings()
+		settings.Resolution = tenancy.ResolutionTokenClaim
+		settings.ClaimPath = path
+		resolver := tenancy.NewResolver(settings, fromClaims)
+		request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withIdentity)
+		if got := resolver.Resolve(request); got != want {
+			t.Fatalf("claim %q: %q, want %q", path, got, want)
+		}
+	}
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionTokenClaim
+	bare := tenancy.NewResolver(settings, nil)
+	if got := bare.Resolve(httptest.NewRequest(http.MethodGet, "/", nil)); got != "" {
+		t.Fatalf("no claims and no identity: %q", got)
+	}
+	nilTenant := identity.WithContext(context.Background(), identity.IdentityContext{Subject: "user"})
+	if got := bare.Resolve(httptest.NewRequest(http.MethodGet, "/", nil).WithContext(nilTenant)); got != "" {
+		t.Fatalf("an identity without a tenant: %q", got)
+	}
+}
+
+func TestTenantBindsTheIdentityOrAVerifiedClaimOnly(t *testing.T) {
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionTokenClaim
+	claimed := uuid.New()
+	claim := claimed.String()
+	resolver := tenancy.NewResolver(settings, func(context.Context) map[string]any {
+		return map[string]any{settings.ClaimPath: claim}
+	})
+	account := identity.New(uuid.New(), "user")
+	edge := tenancy.WithTenant(context.Background(), uuid.NewString())
+	if got := resolver.Tenant(edge, account); got != account.TenantID.String() {
+		t.Fatalf("the identity's tenant wins: %q", got)
+	}
+	if got := resolver.Tenant(context.Background(), identity.IdentityContext{}); got != claimed.String() {
+		t.Fatalf("a verified claim resolves late: %q", got)
+	}
+	claim = "acme"
+	if got := resolver.Tenant(context.Background(), identity.IdentityContext{}); got != "" {
+		t.Fatalf("a claim that is not a UUID binds nothing: %q", got)
+	}
+	for _, resolution := range []string{tenancy.ResolutionHeader, tenancy.ResolutionSubdomain} {
+		settings.Resolution = resolution
+		if got := tenancy.NewResolver(settings, nil).Tenant(edge, identity.IdentityContext{}); got != "" {
+			t.Fatalf("%s: a verified identity without a tenant cannot pick one from the request: %q", resolution, got)
+		}
+	}
+	if _, ok := tenancy.FromContext(context.Background()); ok {
+		t.Fatal("an empty context carries no tenant")
+	}
+}
+
+func TestAttachGivesTheRequestTenantToAnUnverifiedIdentity(t *testing.T) {
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionHeader
+	resolver := tenancy.NewResolver(settings, tenancy.VerifiedClaims)
+	attach := func(ctx context.Context, tenant string) (context.Context, error) {
+		request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+		if tenant != "" {
+			request.Header.Set(settings.HeaderName, tenant)
+		}
+		return resolver.Attach(request)
+	}
+	chosen := uuid.New()
+	unverified := identity.WithContext(context.Background(), identity.New(uuid.New(), "user"))
+	ctx, err := attach(unverified, chosen.String())
+	ident, _ := identity.FromContext(ctx)
+	stored, _ := tenancy.FromContext(ctx)
+	if err != nil || ident.TenantID != chosen || ident.Subject != "user" || stored != chosen.String() {
+		t.Fatalf("an unverified identity takes the request's tenant: %+v %q %v", ident, stored, err)
+	}
+	if ctx, err := attach(unverified, ""); err != nil || ctx != unverified {
+		t.Fatalf("no tenant leaves the context: %v", err)
+	}
+	for _, invalid := range []string{"acme", uuid.Nil.String()} {
+		if _, err := attach(unverified, invalid); !errors.Is(err, tenancy.ErrTenantNotUUID) {
+			t.Fatalf("%q: %v", invalid, err)
+		}
+	}
+{%- if options['auth.mode'] == 'generate' %}
+	account := identity.New(uuid.New(), "account")
+	verified := platformauth.WithIdentity(identity.WithContext(context.Background(), account),
+		platformauth.IdentityContext{TenantID: account.TenantID, Subject: account.Subject})
+	for _, tenant := range []string{chosen.String(), "acme"} {
+		ctx, err := attach(verified, tenant)
+		if ident, _ := identity.FromContext(ctx); err != nil || ident.TenantID != account.TenantID {
+			t.Fatalf("the verified token's tenant wins over %q: %+v %v", tenant, ident, err)
+		}
+	}
+	ctx, err = attach(context.Background(), chosen.String())
+	if _, bound := identity.FromContext(ctx); err != nil || bound {
+		t.Fatalf("a request without an identity gets none: %v", err)
+	}
+{%- else %}
+	ctx, err = attach(context.Background(), chosen.String())
+	if ident, _ := identity.FromContext(ctx); err != nil || ident.TenantID != chosen || ident.Subject != identity.DevSubject {
+		t.Fatalf("the dev identity takes the request's tenant: %+v %v", ident, err)
+	}
+{%- endif %}
+}
+
+func TestTenantRLSMiddlewareRejectsATenantThatIsNotAUUID(t *testing.T) {
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionHeader
+	var seen []string
+	tenantRLS := middleware.TenantRLS(tenancy.NewResolver(settings, nil))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ident, _ := identity.FromContext(r.Context())
+		seen = append(seen, ident.TenantID.String())
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler := middleware.Correlation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenantRLS.ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), identity.Dev())))
+	}))
+	serve := func(tenant string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		if tenant != "" {
+			request.Header.Set(settings.HeaderName, tenant)
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+	chosen := uuid.NewString()
+	if serve("").Code != http.StatusNoContent || serve(chosen).Code != http.StatusNoContent {
+		t.Fatal("requests without a tenant or with a UUID tenant pass")
+	}
+	if strings.Join(seen, ",") != identity.DevSubject+","+chosen {
+		t.Fatalf("identity tenants: %v", seen)
+	}
+	rejected := serve("acme")
+	var envelope testutil.Envelope
+	if err := json.Unmarshal(rejected.Body.Bytes(), &envelope); err != nil || rejected.Code != http.StatusBadRequest ||
+		envelope.Error.Code != "INVALID_INPUT" || envelope.Error.Message != tenancy.ErrTenantNotUUID.Error() ||
+		envelope.Error.CorrelationID == "" || len(seen) != 2 {
+		t.Fatalf("a tenant that is not a UUID: %d %s", rejected.Code, rejected.Body.String())
+	}
+}
+
+type recordingTx struct {
+	pgx.Tx
+	execErr    error
+	statements []string
+	arguments  [][]any
+	committed  bool
+	rolledBack bool
+}
+
+func (tx *recordingTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx.statements = append(tx.statements, sql)
+	tx.arguments = append(tx.arguments, args)
+	return pgconn.CommandTag{}, tx.execErr
+}
+
+func (tx *recordingTx) Commit(context.Context) error {
+	tx.committed = true
+	return nil
+}
+
+func (tx *recordingTx) Rollback(context.Context) error {
+	if tx.committed {
+		return pgx.ErrTxClosed
+	}
+	tx.rolledBack = true
+	return nil
+}
+
+type txStarter struct {
+	tx  *recordingTx
+	err error
+}
+
+func (s txStarter) Begin(context.Context) (pgx.Tx, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.tx, nil
+}
+
+func TestInTxBindsTheTenantForOneTransaction(t *testing.T) {
+	ctx := context.Background()
+	tx := &recordingTx{}
+	called := false
+	err := tenancy.InTx(ctx, txStarter{tx: tx}, "app.current_tenant", "t-1", func(got pgx.Tx) error {
+		called = got == pgx.Tx(tx)
+		return nil
+	})
+	if err != nil || !called || !tx.committed {
+		t.Fatalf("commit: %v called=%v committed=%v", err, called, tx.committed)
+	}
+	if len(tx.statements) != 1 || tx.statements[0] != "SELECT set_config($1, $2, true)" ||
+		tx.arguments[0][0] != "app.current_tenant" || tx.arguments[0][1] != "t-1" {
+		t.Fatalf("binding: %v %v", tx.statements, tx.arguments)
+	}
+
+	unbound := &recordingTx{}
+	if err := tenancy.InTx(ctx, txStarter{tx: unbound}, "app.current_tenant", "", func(pgx.Tx) error { return nil }); err != nil || len(unbound.statements) != 0 {
+		t.Fatalf("an empty tenant binds nothing: %v %v", err, unbound.statements)
+	}
+
+	boom := errors.New("boom")
+	failing := &recordingTx{execErr: boom}
+	ran := false
+	if err := tenancy.InTx(ctx, txStarter{tx: failing}, "app.current_tenant", "t-1", func(pgx.Tx) error { ran = true; return nil }); !errors.Is(err, boom) || ran || !failing.rolledBack {
+		t.Fatalf("a failed binding rolls back before fn: %v ran=%v", err, ran)
+	}
+	rejected := &recordingTx{}
+	if err := tenancy.InTx(ctx, txStarter{tx: rejected}, "app.current_tenant", "t-1", func(pgx.Tx) error { return boom }); !errors.Is(err, boom) || rejected.committed || !rejected.rolledBack {
+		t.Fatalf("fn errors roll back: %v", err)
+	}
+	if err := tenancy.InTx(ctx, txStarter{err: boom}, "app.current_tenant", "t-1", func(pgx.Tx) error { return nil }); !errors.Is(err, boom) {
+		t.Fatalf("begin errors surface: %v", err)
+	}
+}
+
+func TestScopeBindsTheCallersTenant(t *testing.T) {
+	ctx := context.Background()
+	settings := tenancy.DefaultSettings()
+	settings.GUC = "app.tenant"
+	tx := &recordingTx{}
+	scope := tenancy.Scope(txStarter{tx: tx}, tenancy.NewResolver(settings, nil))
+	account := identity.New(uuid.New(), "user")
+	var received repositories.DBTX
+	if err := scope(ctx, account, func(q repositories.DBTX) error { received = q; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if received != repositories.DBTX(tx) || tx.arguments[0][0] != "app.tenant" || tx.arguments[0][1] != account.TenantID.String() {
+		t.Fatalf("scope: %v %v", received, tx.arguments)
+	}
+	failing := repositories.NewPgItemRepository(nil).WithScope(tenancy.Scope(txStarter{err: errors.New("down")}, tenancy.NewResolver(settings, nil)))
+	if err := failing.Delete(ctx, account, uuid.New()); err == nil {
+		t.Fatal("a scope that cannot begin fails the call")
+	}
+}
+
+func TestVerifiedClaims(t *testing.T) {
+	if tenancy.VerifiedClaims(context.Background()) != nil {
+		t.Fatal("no verified token, no claims")
+	}
+{%- if options['auth.mode'] == 'generate' %}
+	ctx := platformauth.WithIdentity(context.Background(), platformauth.IdentityContext{RawClaims: map[string]any{"tenant_id": "t-9"}})
+	if claims := tenancy.VerifiedClaims(ctx); claims["tenant_id"] != "t-9" {
+		t.Fatalf("verified claims: %v", claims)
+	}
+{%- endif %}
+}
+
+func TestInitTenancyValidatesTheEnvironment(t *testing.T) {
+	t.Cleanup(func() { _ = app.InitTenancy() })
+	t.Setenv("TENANT_RESOLUTION", "sideways")
+	if err := app.InitTenancy(); err == nil || !strings.Contains(err.Error(), "TENANT_RESOLUTION") {
+		t.Fatalf("invalid strategy: %v", err)
+	}
+	t.Setenv("TENANT_RESOLUTION", "")
+	t.Setenv("TENANT_RLS_GUC", "app.tenant")
+	if err := app.InitTenancy(); err == nil || !strings.Contains(err.Error(), "TENANT_RLS_GUC") {
+		t.Fatalf("a GUC the policies do not read: %v", err)
+	}
+	t.Setenv("TENANT_RLS_GUC", "")
+	t.Setenv("TENANT_RESOLUTION", "header")
+	t.Setenv("TENANT_HEADER_NAME", "X-Org")
+	if err := app.InitTenancy(); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.NewPool(context.Background(), unreachable, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	cfg := config.Defaults()
+	handler := app.New(&cfg, pool)
+	if status, _ := testutil.Do(t, handler, http.MethodGet, "/api/v1/health/live", nil); status != http.StatusOK {
+		t.Fatalf("live: %d", status)
+	}
+	status, body := testutil.Do(t, handler, http.MethodGet, itemsPath, nil)
+	if status != http.StatusServiceUnavailable && status != http.StatusInternalServerError {
+		t.Fatalf("items without a database: %d %v", status, body)
+	}
+}

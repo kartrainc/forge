@@ -477,7 +477,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--doctor",
         action="store_true",
-        help="Run environment diagnostics (Python/Node/Rust/Flutter toolchains, Docker, ports, forge.toml).",
+        help="Run environment diagnostics (Python/Node/Rust/Go/Flutter toolchains, Docker, ports, forge.toml).",
     )
 
     # Ports validation — compile every `_shared/ports/<port>/contract.tsp`

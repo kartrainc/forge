@@ -4,9 +4,11 @@ package testutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"{{ project_name }}/internal/identity"
 )
@@ -89,4 +92,53 @@ func DatabaseURL(t *testing.T) string {
 		t.Fatal("integration tests require DATABASE_URL")
 	}
 	return url
+}
+
+// TestSchema is an empty Postgres schema that is dropped when the test ends.
+type TestSchema struct {
+	Name  string
+	URL   string // DATABASE_URL whose connections use the schema
+	Admin *pgxpool.Pool
+}
+
+// NewSchema creates a TestSchema in the DATABASE_URL database, so tests never
+// touch the developer's tables.
+func NewSchema(t *testing.T) TestSchema {
+	t.Helper()
+	base := DatabaseURL(t)
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "forge_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+name); err != nil {
+		admin.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+name+" CASCADE")
+		admin.Close()
+	})
+	parsed, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", name)
+	parsed.RawQuery = query.Encode()
+	return TestSchema{Name: name, URL: parsed.String(), Admin: admin}
+}
+
+// HasTable reports whether table exists in the schema.
+func (s TestSchema) HasTable(t *testing.T, table string) bool {
+	t.Helper()
+	var found bool
+	err := s.Admin.QueryRow(context.Background(),
+		"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2)",
+		s.Name, table).Scan(&found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
 }

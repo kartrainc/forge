@@ -1,0 +1,17 @@
+# observability_metrics_middleware for Go: install the OTLP metric exporter
+# after the config and logger are ready, flush it when run() returns, and
+# record RED metrics per request.
+
+- target: cmd/server/main.go
+  marker: FORGE:STARTUP_INIT
+  position: before
+  zone: generated
+  snippet: |-
+    stopMetrics := app.StartMetrics(ctx, cfg)
+    defer stopMetrics()
+
+- target: internal/app/app.go
+  marker: FORGE:MIDDLEWARE_REGISTRATION
+  position: before
+  zone: generated
+  snippet: "otelMetrics,"

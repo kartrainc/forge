@@ -2,8 +2,9 @@
 
 Registers the ``database.multitenancy`` discriminator (``none`` |
 ``shared_rls`` | ``schema_per_tenant`` | ``db_per_tenant``) and its
-tenant-resolution sub-options, plus the ``multitenancy_rls_python``
-fragment that realises the ``shared_rls`` strategy on Python backends.
+tenant-resolution sub-options, plus the ``multitenancy_rls_python`` and
+``multitenancy_rls_go`` fragments that realise the ``shared_rls`` strategy on
+Python and Go backends.
 
 See ``options.py`` for the user-facing surface and ``fragments.py`` for
 the realised implementation.

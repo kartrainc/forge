@@ -13,8 +13,8 @@ future releases are not a capability guarantee.
 | Frontends | Vue, Svelte, Flutter, or none | Frontend framework support does not imply parity of every component/feature. |
 | Layouts | sidebar, topnav, tabbar, threepane, bento, docs | Available combinations are validated by the layout registry. |
 | Layered components | Vue basic components and application templates; composition graph | Vue is the current framework target; no standalone Layer-2 seed is shipped. |
-| LLM providers | OpenAI on Python/Node/Rust; Anthropic/Ollama/Bedrock on Python | A provider SDK existing upstream does not mean Forge ships its adapter. |
-| Vector-store/RAG stack | Python adapters | Node/Rust applications can call a separately integrated Python retrieval service. |
+| LLM providers | OpenAI on Python/Node/Rust/Go; Anthropic/Ollama/Bedrock on Python | A provider SDK existing upstream does not mean Forge ships its adapter. |
+| Vector-store/RAG stack | Python adapters | Node/Rust/Go applications can call a separately integrated Python retrieval service. |
 | MCP platform feature | Python | Select `platform.mcp` only where the resolver supports it. |
 | Queue port | Backend-specific adapters selected by `queue.backend` | Inspect adapter semantics and language support; delivery guarantees still require application behavior. |
 | Project options | One option map per project | Differing per-service requirements may need separate generated configurations. |
