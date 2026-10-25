@@ -14,9 +14,16 @@ from forge.config import FrontendConfig, FrontendFramework
 
 @pytest.fixture(autouse=True)
 def _isolate_registry():
-    """Restore built-in variants after any test that mutates the registry."""
+    """Restore built-in variants and plugin frameworks after any test that
+    registers one, so later tests (e.g. the README badge count) see only the
+    built-ins."""
+    from forge.config import PLUGIN_FRAMEWORKS
+
+    frameworks = dict(PLUGIN_FRAMEWORKS)
     yield
     lv._reset_for_tests()
+    PLUGIN_FRAMEWORKS.clear()
+    PLUGIN_FRAMEWORKS.update(frameworks)
 
 
 # --- registry ---------------------------------------------------------------
