@@ -1,5 +1,8 @@
 """Tests for forge.docker_manager compose rendering."""
 
+import fnmatch
+from pathlib import PurePosixPath
+
 import yaml
 
 from forge.config import (
@@ -199,6 +202,18 @@ def _ignore_patterns(path):
     return [line for line in lines if line and not line.startswith("#")]
 
 
+def _ignored(path, patterns):
+    """Whether a context path, or a directory above it, matches an ignore pattern.
+
+    ``fnmatch`` lets ``*`` cross ``/``, which Docker's matcher does not, so this
+    reports at least everything Docker would leave out: a path this says is
+    kept is kept.
+    """
+    parts = PurePosixPath(path).parts
+    prefixes = [PurePosixPath(*parts[:i]).as_posix() for i in range(1, len(parts) + 1)]
+    return any(fnmatch.fnmatchcase(prefix, pattern) for prefix in prefixes for pattern in patterns)
+
+
 class TestRenderFrontendDockerignore:
     def test_node_context_leaves_out_the_host_install_builds_and_local_env(self, tmp_path):
         config = _make_config(framework=FrontendFramework.VUE)
@@ -206,23 +221,47 @@ class TestRenderFrontendDockerignore:
 
         assert path == tmp_path / ".dockerignore"
         patterns = _ignore_patterns(path)
-        for pattern in ("node_modules", "dist", "build", ".svelte-kit", ".env.local", ".env.*.local"):
-            assert pattern in patterns
+        for left_out in (
+            "node_modules/vite/index.js",
+            "dist/index.html",
+            "build/index.html",
+            ".svelte-kit/tsconfig.json",
+            "coverage/lcov.info",
+            ".env.local",
+            ".env.production.local",
+        ):
+            assert _ignored(left_out, patterns), left_out
 
     def test_node_context_keeps_what_the_image_builds_from(self, tmp_path):
         config = _make_config(framework=FrontendFramework.SVELTE)
         patterns = _ignore_patterns(render_frontend_dockerignore(config, tmp_path))
 
-        for kept in ("package.json", "package-lock.json", ".env", ".env.development", "src"):
-            assert kept not in patterns
+        for kept in (
+            "package.json",
+            "package-lock.json",
+            ".env",
+            ".env.development",
+            "index.html",
+            "vite.config.ts",
+            "src/app/main.ts",
+            "public/favicon.ico",
+        ):
+            assert not _ignored(kept, patterns), kept
 
-    def test_flutter_context_leaves_out_the_build_and_tool_cache(self, tmp_path):
+    def test_flutter_context_leaves_out_the_build_tool_cache_and_plugin_manifests(self, tmp_path):
         config = _make_config(framework=FrontendFramework.FLUTTER)
         patterns = _ignore_patterns(render_frontend_dockerignore(config, tmp_path))
 
-        assert "build" in patterns
-        assert ".dart_tool" in patterns
-        assert "node_modules" not in patterns
+        for left_out in (
+            "build/web/index.html",
+            ".dart_tool/package_config.json",
+            ".flutter-plugins",
+            ".flutter-plugins-dependencies",
+            ".packages",
+        ):
+            assert _ignored(left_out, patterns), left_out
+        for kept in ("pubspec.yaml", "pubspec.lock", "lib/main.dart", "build.yaml"):
+            assert not _ignored(kept, patterns), kept
 
 
 class TestRenderNginxConf:

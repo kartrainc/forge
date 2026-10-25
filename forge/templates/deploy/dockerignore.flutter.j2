@@ -1,8 +1,12 @@
 # What `docker build` leaves out of the frontend image's build context.
 #
 # The Dockerfile runs `flutter pub get`, the code generators and the web
-# build itself. A host build and the tool cache would only be merged over
+# build itself. A host build, the tool cache and the plugin manifests
+# `pub get` writes with the host's absolute paths would only be merged over
 # the image's own by `COPY . .`.
 build
 .dart_tool
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
 coverage
