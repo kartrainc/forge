@@ -81,6 +81,12 @@ ui_kit:
   default: "shadcn"
   help: "Component library (set by forge from FrontendConfig.ui_kit; see forge.ui_kits)"
 
+dev_server:
+  type: bool
+  when: false
+  default: false
+  help: "Also render vite.dev.config.ts for docker-compose.dev.yaml (set by forge from FrontendConfig.dev_server)"
+
 nuxt_ui_version:
   type: str
   when: false

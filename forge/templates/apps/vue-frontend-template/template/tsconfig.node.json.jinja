@@ -23,6 +23,9 @@
   },
   "include": [
     "vite.config.ts",
+{%- if dev_server %}
+    "vite.dev.config.ts",
+{%- endif %}
 {%- if ui_kit == 'nuxt-ui' %}
     "src/custom/theme/nuxt-ui.config.ts",
 {%- else %}

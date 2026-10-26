@@ -337,6 +337,39 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
     return dockerfile_path
 
 
+# The lockfile each package manager writes, which a dependency change rebuilds.
+_LOCKFILES = {
+    "npm": "package-lock.json",
+    "pnpm": "pnpm-lock.yaml",
+    "yarn": "yarn.lock",
+    "bun": "bun.lockb",
+}
+
+
+def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
+    """Render ``docker-compose.dev.yaml``, the Vite dev-server overlay (ADR-013).
+
+    It overrides the ``frontend`` service of ``docker-compose.yml`` only: the
+    ``dev`` Dockerfile stage as the build target, the router's labels with the
+    service port set to the dev server's, a Node health check, and the Compose
+    Watch rules that sync the project into the container.
+    """
+    fc = config.frontend
+    if fc is None or not fc.dev_server:
+        raise ValueError("render_dev_overlay called without frontend.dev_server")
+    template = _jinja_env().get_template("deploy/docker-compose.dev.yaml.j2")
+    output = template.render(
+        {
+            "frontend_slug": config.frontend_slug,
+            "frontend_port": fc.server_port,
+            "lockfile": _LOCKFILES.get(fc.package_manager, "package-lock.json"),
+        }
+    )
+    overlay_path = project_root / "docker-compose.dev.yaml"
+    overlay_path.write_text(output, encoding="utf-8")
+    return overlay_path
+
+
 def render_frontend_dockerignore(config: ProjectConfig, frontend_dir: Path) -> Path:
     """Render the ``.dockerignore`` of the frontend image's build context.
 

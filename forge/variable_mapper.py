@@ -351,6 +351,8 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         # The component library the template renders on (forge.ui_kits);
         # kit-specific files are selected by Copier conditional names.
         "ui_kit": fc.ui_kit,
+        # The Vite dev-server overlay (ADR-013) also renders the wrapper config.
+        "dev_server": fc.dev_server,
         "nuxt_ui_version": NUXT_UI_VERSION,
         # The Tailwind palette behind Nuxt UI's primary colour (brand module).
         "nuxt_ui_primary": nuxt_ui_primary(fc.default_color_scheme),
