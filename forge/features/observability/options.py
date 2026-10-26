@@ -92,20 +92,28 @@ PORT: ``ErrorPort.serialize(exc) -> {error: {code, message, type, context, corre
             default=False,
             summary="OpenTelemetry traces + metrics via OTLP exporter (agent.run, tool.call spans).",
             description="""\
-OpenTelemetry traces (plus Python RED metrics) exported over OTLP, gated on
-``OTEL_EXPORTER_OTLP_ENDPOINT`` (unset = a clean no-op: no exporter is wired
-and the service runs without a collector). Python emits ``app/core/otel.py``
-(FastAPI + HTTPX instrumentation + a ``MeterProvider`` for RED metrics, gRPC
-OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK +
-``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust emits
-``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
+OpenTelemetry traces (plus Python and Go RED metrics) exported over OTLP,
+gated on ``OTEL_EXPORTER_OTLP_ENDPOINT`` (unset = a clean no-op: no exporter
+is wired and the service runs without a collector). Python emits
+``app/core/otel.py`` (FastAPI + HTTPX instrumentation + a ``MeterProvider``
+for RED metrics, gRPC OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK
++ ``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust
+emits ``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
 HTTP/protobuf); Go emits ``internal/otel`` (otelhttp server spans named by
-chi route, OTLP/HTTP exporter). Spans of interest for agentic workloads:
-``agent.run`` (per agent invocation), ``tool.call`` (per tool invocation).
+chi route, plus a ``MeterProvider`` with Go runtime metrics, OTLP/HTTP
+exporters). Spans of interest for agentic workloads: ``agent.run`` (per agent
+invocation), ``tool.call`` (per tool invocation).
+
+RED metrics (Python and Go, pushed over OTLP; no ``/metrics`` scrape
+endpoint): ``http.server.request.count`` and ``http.server.request.duration``
+(histogram, ms) by ``http.method`` / ``http.route`` / ``http.status_code``,
+plus the ``http.server.active_requests`` gauge. Go labels ``http.route`` with
+the chi route pattern, folds non-standard methods into ``_OTHER`` and keeps
+otelhttp's own server metrics off, so these are its only HTTP metrics.
 
 BACKENDS: python, node, rust, go
-DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / otlptracehttp / otelhttp
-ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES).""",
+DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / sdk/metric / otlptracehttp / otlpmetrichttp / otelhttp / contrib runtime
+ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES; Go and Python honour OTEL_METRIC_EXPORT_INTERVAL).""",
             category=FeatureCategory.OBSERVABILITY,
             enables={True: ("observability_otel", "observability_metrics_middleware")},
         )

@@ -3,12 +3,12 @@ package integration_test
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"{{ project_name }}/internal/app"
@@ -27,28 +27,8 @@ const itemsPath = "/api/v1/{{ entity_plural }}"
 // use it, so tests never touch the developer's tables.
 func isolatedSchema(t *testing.T) string {
 	t.Helper()
-	base := testutil.DatabaseURL(t)
+	scoped := testutil.NewSchema(t).URL
 	ctx := context.Background()
-	admin, err := pgxpool.New(ctx, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema := "forge_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		admin.Close()
-	})
-	parsed, err := url.Parse(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := parsed.Query()
-	query.Set("search_path", schema)
-	parsed.RawQuery = query.Encode()
-	scoped := parsed.String()
 	if err := migrations.Up(ctx, scoped); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +47,19 @@ func application(t *testing.T, databaseURL string) (http.Handler, *pgxpool.Pool)
 	t.Cleanup(pool.Close)
 	cfg := config.Defaults()
 	return app.New(&cfg, pool), pool
+}
+
+// bindTenant runs each call in a transaction bound to the caller's tenant, as
+// database.multitenancy=shared_rls does, so the test holds under forced RLS.
+func bindTenant(pool *pgxpool.Pool) repositories.Scope {
+	return func(ctx context.Context, ident identity.IdentityContext, fn func(repositories.DBTX) error) error {
+		return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", ident.TenantID.String()); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+	}
 }
 
 func TestReadinessQueriesRealPostgres(t *testing.T) {
@@ -116,7 +109,7 @@ func TestItemLifecycleUsesRealRouterAndPostgres(t *testing.T) {
 func TestRepositoryIsTenantScoped(t *testing.T) {
 	_, pool := application(t, isolatedSchema(t))
 	ctx := context.Background()
-	repo := repositories.NewPgItemRepository(pool)
+	repo := repositories.NewPgItemRepository(pool).WithScope(bindTenant(pool))
 	owner := identity.New(uuid.New(), uuid.NewString())
 	other := identity.New(uuid.New(), uuid.NewString())
 	status := "ACTIVE"

@@ -1,4 +1,4 @@
-"""Multitenancy fragments — Postgres tenant isolation for Python backends.
+"""Multitenancy fragments — Postgres tenant isolation for Python and Go backends.
 
 Two strategies, one per ``database.multitenancy`` value:
 
@@ -39,6 +39,11 @@ The fragment reads ``database.tenant_resolution`` / ``database.tenant_claim_path
 the project's chosen strategy. It is backend-scoped + Python-only (parity tier
 auto-derives to 3); the GUC-binding + Alembic RLS pattern targets the
 SQLAlchemy/Alembic stack the python-service-template ships.
+
+``multitenancy_rls_go`` realises ``shared_rls`` on Go backends with the same
+policy, GUC, options and env vars: a goose migration, a pgx transaction scope
+that binds ``app.current_tenant`` with ``set_config(..., true)``, and the
+resolver + middleware. ``schema_per_tenant`` stays Python-only.
 """
 
 from __future__ import annotations
@@ -88,6 +93,33 @@ def register_all(api: ForgeAPI) -> None:
             # its own ``0002_tms_tables`` migration off ``0001`` — adding the RLS
             # ``0002`` would create a second Alembic head and break its boot.
             excluded_app_templates=("tenant-management-service",),
+        )
+    )
+
+    # Go realisation of ``shared_rls``: ``internal/tenancy`` (settings, resolver,
+    # set_config(..., true) transaction binding), the ``TenantRLS`` middleware,
+    # the ``00099_enable_rls`` goose migration, and the items repository scope
+    # wired at ``FORGE:REPOSITORY_SCOPE``. Applied after the Go platform-auth
+    # middleware so ``TenantRLS`` sits inside it and sees the verified token.
+    api.add_fragment(
+        Fragment(
+            name="multitenancy_rls_go",
+            implementations={
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("multitenancy_rls_go", "go"),
+                    env_vars=(("TENANT_RLS_GUC", "app.current_tenant"),),
+                    # ``auth.mode`` selects whether token claims come from the
+                    # platform-auth SDK (generate) or are absent (none).
+                    reads_options=(
+                        "database.tenant_resolution",
+                        "database.tenant_claim_path",
+                        "database.tenant_header_name",
+                        "auth.mode",
+                    ),
+                ),
+            },
+            capabilities=(),
+            after=("platform_auth_go_middleware",),
         )
     )
 

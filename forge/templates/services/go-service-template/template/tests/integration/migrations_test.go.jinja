@@ -1,0 +1,342 @@
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
+	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/pressly/goose/v3"
+
+	"{{ project_name }}/migrations"
+	"{{ project_name }}/tests/testutil"
+)
+
+func openMigrator(t *testing.T, url string, fsys fs.FS) *migrations.Migrator {
+	t.Helper()
+	opened, err := migrations.Open(url, fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = opened.Close() })
+	return opened
+}
+
+func runMigrate(t *testing.T, p *migrations.Migrator, command string) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := migrations.Run(context.Background(), p, command, &out); err != nil {
+		t.Fatalf("%s: %v", command, err)
+	}
+	return out.String()
+}
+
+func sqlMigration(up, down string) *fstest.MapFile {
+	return &fstest.MapFile{Data: []byte("-- +goose Up\n" + up + "\n-- +goose Down\n" + down + "\n")}
+}
+
+// migrationStates counts the STATE column of a status report.
+func migrationStates(t *testing.T, p *migrations.Migrator) map[string]int {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(runMigrate(t, p, "status")), "\n")
+	if !strings.HasPrefix(lines[0], "VERSION") {
+		t.Fatalf("status header: %q", lines[0])
+	}
+	counts := map[string]int{}
+	for _, line := range lines[1:] {
+		counts[strings.Fields(line)[1]]++
+	}
+	return counts
+}
+
+func migrationVersion(t *testing.T, p *migrations.Migrator) int64 {
+	t.Helper()
+	parsed, err := strconv.ParseInt(strings.TrimSpace(runMigrate(t, p, "version")), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func TestMigrateCommandsLifecycle(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	p := openMigrator(t, schema.URL, migrations.Embedded())
+	sources := p.ListSources()
+	latest := sources[len(sources)-1]
+
+	if got := migrationVersion(t, p); got != 0 {
+		t.Fatalf("fresh database version: %d", got)
+	}
+	if counts := migrationStates(t, p); counts["pending"] != len(sources) || counts["applied"] != 0 {
+		t.Fatalf("fresh status: %v", counts)
+	}
+	if status := runMigrate(t, p, "status"); !strings.Contains(status, "00001_initial.sql") {
+		t.Fatalf("status names the migration files:\n%s", status)
+	}
+	if schema.HasTable(t, goose.DefaultTablename) {
+		t.Fatal("status and version leave a fresh database untouched")
+	}
+
+	runMigrate(t, p, "up")
+	runMigrate(t, p, "up")
+	if !schema.HasTable(t, "items") || migrationVersion(t, p) != latest.Version {
+		t.Fatal("up applies every migration once")
+	}
+	if counts := migrationStates(t, p); counts["applied"] != len(sources) || counts["pending"] != 0 {
+		t.Fatalf("applied status: %v", counts)
+	}
+
+	runMigrate(t, p, "down")
+	if counts := migrationStates(t, p); counts["pending"] != 1 {
+		t.Fatalf("down rolls back exactly one migration: %v", counts)
+	}
+	for range len(sources) - 1 {
+		runMigrate(t, p, "down")
+	}
+	if schema.HasTable(t, "items") || migrationVersion(t, p) != 0 {
+		t.Fatal("down reverses every migration")
+	}
+	err := migrations.Run(context.Background(), p, "down", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no applied migration") {
+		t.Fatalf("down with nothing applied: %v", err)
+	}
+
+	runMigrate(t, p, "up")
+	if !schema.HasTable(t, "items") {
+		t.Fatal("migrations re-apply after a full rollback")
+	}
+}
+
+func TestOutOfOrderGeneratorMigrationApplies(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	project := fstest.MapFS{"00100_project_notes.sql": sqlMigration(
+		"CREATE TABLE project_notes (id INT PRIMARY KEY);", "DROP TABLE project_notes;")}
+	runMigrate(t, openMigrator(t, schema.URL, project), "up")
+
+	upgraded := fstest.MapFS{
+		"00100_project_notes.sql": project["00100_project_notes.sql"],
+		"00050_generator_flags.sql": sqlMigration(
+			"CREATE TABLE generator_flags (id INT PRIMARY KEY);", "DROP TABLE generator_flags;"),
+	}
+	db, err := sql.Open("pgx", schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	strict, err := goose.NewProvider(goose.DialectPostgres, db, upgraded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := strict.Up(context.Background()); err == nil || !strings.Contains(err.Error(), "out-of-order") {
+		t.Fatalf("goose rejects a lower-numbered migration by default: %v", err)
+	}
+
+	p := openMigrator(t, schema.URL, upgraded)
+	runMigrate(t, p, "up")
+	if !schema.HasTable(t, "generator_flags") || migrationVersion(t, p) != 100 {
+		t.Fatal("the lower-numbered migration applies after 00100")
+	}
+	if counts := migrationStates(t, p); counts["applied"] != 2 || counts["pending"] != 0 {
+		t.Fatalf("status after an out-of-order up: %v", counts)
+	}
+	runMigrate(t, p, "down")
+	if schema.HasTable(t, "generator_flags") || !schema.HasTable(t, "project_notes") {
+		t.Fatal("down rolls back the most recently applied migration")
+	}
+}
+
+func TestFailedMigrationKeepsAppliedPrefix(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	broken := fstest.MapFS{
+		"00001_first.sql":  sqlMigration("CREATE TABLE first_table (id INT);", "DROP TABLE first_table;"),
+		"00002_broken.sql": sqlMigration("CREATE TABLE first_table (id INT);", "SELECT 1;"),
+	}
+	p := openMigrator(t, schema.URL, broken)
+	err := migrations.Run(context.Background(), p, "up", io.Discard)
+	var partial *goose.PartialError
+	if !errors.As(err, &partial) || partial.Failed.Source.Version != 2 || len(partial.Applied) != 1 {
+		t.Fatalf("partial failure: %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "apply migrations:") || migrationVersion(t, p) != 1 {
+		t.Fatalf("the applied prefix stays recorded: %v", err)
+	}
+}
+
+func TestConcurrentMigrationsSerialise(t *testing.T) {
+	schema := testutil.NewSchema(t)
+	var wg sync.WaitGroup
+	failures := make(chan error, 4)
+	for range 4 {
+		wg.Go(func() {
+			if err := migrations.Up(context.Background(), schema.URL); err != nil {
+				failures <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatalf("concurrent up: %v", err)
+	}
+	db, err := sql.Open("pgx", schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := migrations.UpDB(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PingContext(context.Background()); err != nil || !schema.HasTable(t, "items") {
+		t.Fatalf("UpDB keeps the caller's pool open: %v", err)
+	}
+}
+
+// statusLine returns the state and migration columns of the status row for
+// version.
+func statusLine(t *testing.T, p *migrations.Migrator, version string) (string, string) {
+	t.Helper()
+	status := runMigrate(t, p, "status")
+	for _, line := range strings.Split(status, "\n") {
+		if fields := strings.Fields(line); len(fields) >= 4 && fields[0] == version {
+			return fields[1], strings.Join(fields[3:], " ")
+		}
+	}
+	t.Fatalf("status has no row for %s:\n%s", version, status)
+	return "", ""
+}
+
+func TestStatusAndVersionDoNotWaitForARunningMigration(t *testing.T) {
+	ctx := context.Background()
+	schema := testutil.NewSchema(t)
+	gateTable := schema.Name + ".migration_gate"
+	if _, err := schema.Admin.Exec(ctx, "CREATE TABLE "+gateTable+" (id INT)"); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := schema.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = gate.Rollback(ctx) }()
+	if _, err := gate.Exec(ctx, "LOCK TABLE "+gateTable+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	slow := fstest.MapFS{"00001_slow.sql": sqlMigration("SELECT count(*) FROM "+gateTable+";", "SELECT 1;")}
+	running := openMigrator(t, schema.URL, slow)
+	done := make(chan error, 1)
+	go func() { done <- migrations.Run(ctx, running, "up", io.Discard) }()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for blocked := false; !blocked; {
+		if time.Now().After(deadline) {
+			t.Fatal("the slow migration never started")
+		}
+		err := schema.Admin.QueryRow(ctx,
+			"SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%' || $1 || '%')",
+			gateTable).Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	reader := openMigrator(t, schema.URL, slow)
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var version, status bytes.Buffer
+	if err := migrations.Run(readCtx, reader, "version", &version); err != nil || strings.TrimSpace(version.String()) != "0" {
+		t.Fatalf("version while a migration runs: %q %v", version.String(), err)
+	}
+	if err := migrations.Run(readCtx, reader, "status", &status); err != nil || !strings.Contains(status.String(), "pending") {
+		t.Fatalf("status while a migration runs: %q %v", status.String(), err)
+	}
+	if err := gate.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the slow migration: %v", err)
+	}
+	if state, _ := statusLine(t, reader, "1"); state != "applied" {
+		t.Fatalf("status after the slow migration: %s", state)
+	}
+}
+
+func TestOrphanVersionsAreListedAndBlockDown(t *testing.T) {
+	ctx := context.Background()
+	schema := testutil.NewSchema(t)
+	first := sqlMigration("CREATE TABLE first_table (id INT);", "DROP TABLE first_table;")
+	runMigrate(t, openMigrator(t, schema.URL, fstest.MapFS{
+		"00001_first.sql":   first,
+		"00100_project.sql": sqlMigration("CREATE TABLE project_table (id INT);", "DROP TABLE project_table;"),
+	}), "up")
+
+	p := openMigrator(t, schema.URL, fstest.MapFS{"00001_first.sql": first})
+	if state, file := statusLine(t, p, "100"); state != "applied" || file != "(no file)" {
+		t.Fatalf("an applied version without a file: %s %s", state, file)
+	}
+	if state, file := statusLine(t, p, "1"); state != "applied" || file != "00001_first.sql" {
+		t.Fatalf("an applied version with a file: %s %s", state, file)
+	}
+	if migrationVersion(t, p) != 100 {
+		t.Fatal("version counts applied versions without a file")
+	}
+	err := migrations.Run(ctx, p, "down", io.Discard)
+	if !errors.Is(err, goose.ErrVersionNotFound) || !strings.Contains(err.Error(), "no migration file for applied versions 100") {
+		t.Fatalf("down names the version without a file: %v", err)
+	}
+
+	withSecond := openMigrator(t, schema.URL, fstest.MapFS{
+		"00001_first.sql":  first,
+		"00002_second.sql": sqlMigration("CREATE TABLE second_table (id INT);", "DROP TABLE second_table;"),
+	})
+	runMigrate(t, withSecond, "up")
+	err = migrations.Run(ctx, withSecond, "down", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "applied versions 100") || !schema.HasTable(t, "second_table") {
+		t.Fatalf("an older version without a file still blocks down: %v", err)
+	}
+}
+
+func TestRollingBackTheRLSMigrationWarns(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	warnings := func() []map[string]any {
+		var found []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+			record := map[string]any{}
+			if json.Unmarshal([]byte(line), &record) == nil && record["level"] == "WARN" {
+				found = append(found, record)
+			}
+		}
+		return found
+	}
+
+	schema := testutil.NewSchema(t)
+	p := openMigrator(t, schema.URL, fstest.MapFS{
+		"00099_enable_rls.sql": sqlMigration("CREATE TABLE rls_marker (id INT);", "DROP TABLE rls_marker;"),
+		"00100_project.sql":    sqlMigration("CREATE TABLE project_table (id INT);", "DROP TABLE project_table;"),
+	})
+	runMigrate(t, p, "up")
+	runMigrate(t, p, "down")
+	if found := warnings(); len(found) != 0 {
+		t.Fatalf("rolling back a project migration does not warn: %v", found)
+	}
+	runMigrate(t, p, "down")
+	found := warnings()
+	if len(found) != 1 || found[0]["version"] != float64(migrations.RLSVersion) {
+		t.Fatalf("rolling back 00099 warns once: %v", found)
+	}
+	if message, _ := found[0]["msg"].(string); !strings.Contains(message, "no longer isolates tenants") {
+		t.Fatalf("rolling back 00099 warns: %v", found)
+	}
+}

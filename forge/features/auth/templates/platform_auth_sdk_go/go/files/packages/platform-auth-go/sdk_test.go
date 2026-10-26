@@ -349,11 +349,10 @@ func newSDKJWKSServer(document any) *sdkJWKSServer {
 	return s
 }
 
-// sdkWaitForClockTick returns once time.Now has moved past the current
-// reading. Windows advances its clock in ticks of up to 15.6ms, so a
-// nanosecond refresh interval has not elapsed between back-to-back calls.
-func sdkWaitForClockTick() {
-	for start := time.Now(); !time.Now().After(start); {
+// waitPast sleeps until the monotonic clock has moved more than d past start;
+// Windows advances it in coarse steps, so a short Sleep may not move it at all.
+func waitPast(start time.Time, d time.Duration) {
+	for time.Since(start) <= d {
 		time.Sleep(time.Millisecond)
 	}
 }
@@ -386,7 +385,7 @@ func TestSDKJWKSUnknownKidCooldown(t *testing.T) {
 	rotating, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: server.Client(), MinRefreshInterval: time.Nanosecond})
 	_ = rotating.RegisterIssuer("issuer", server.URL)
 	_, _ = rotating.SigningKey(ctx, "issuer", keypair.KID)
-	time.Sleep(time.Millisecond)
+	waitPast(time.Now(), 0)
 	_, _ = rotating.SigningKey(ctx, "issuer", "rotated")
 	if n := fetches.Load(); n != 3 {
 		t.Fatalf("after the interval an unknown kid refetches (rotation): %d fetches", n)
@@ -415,7 +414,7 @@ func TestSDKJWKSOutageBoundsFetches(t *testing.T) {
 		t.Fatal(err)
 	}
 	down.Store(true)
-	time.Sleep(2 * time.Millisecond)
+	waitPast(time.Now(), time.Millisecond)
 	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
 		t.Fatalf("the failed refresh serves the stale key: %v", err)
 	}
@@ -471,7 +470,7 @@ func TestSDKJWKSWaitersShareOneRefresh(t *testing.T) {
 		if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(30 * time.Millisecond)
+		waitPast(time.Now(), 20*time.Millisecond)
 		var wg sync.WaitGroup
 		for range 2 {
 			wg.Go(func() {
@@ -549,11 +548,11 @@ func TestSDKJWKSCache(t *testing.T) {
 		t.Fatalf("encryption keys are skipped: %v", err)
 	}
 	upstream.fail.Store(true)
-	time.Sleep(time.Millisecond)
+	waitPast(time.Now(), 0)
 	if _, err := cache.SigningKey(ctx, "issuer", keypair.KID); err != nil {
 		t.Fatalf("stale keys are served while the issuer is down: %v", err)
 	}
-	sdkWaitForClockTick()
+	waitPast(time.Now(), 0)
 	if _, err := cache.SigningKey(ctx, "issuer", "missing"); err == nil || !strings.Contains(err.Error(), "stale window expired") {
 		t.Fatalf("unknown kids fail while the issuer is down: %v", err)
 	}
@@ -565,7 +564,7 @@ func TestSDKJWKSCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream.fail.Store(true)
-	time.Sleep(time.Millisecond)
+	waitPast(time.Now(), 0)
 	if _, err := fresh.SigningKey(ctx, "issuer", keypair.KID); err == nil {
 		t.Fatal("stale keys expire after the stale window")
 	}

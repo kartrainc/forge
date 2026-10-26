@@ -15,4 +15,5 @@ options = [
 ]
 fragments = [
     "multitenancy_rls_python",
+    "multitenancy_rls_go",
 ]

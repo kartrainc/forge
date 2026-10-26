@@ -1,0 +1,29 @@
+package middleware
+
+import (
+	"net/http"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/tenancy"
+)
+
+// TenantRLS resolves each request's tenant with resolver.Attach, so the
+// request's tenant-scoped transactions bind it (see tenancy.Resolver.Tenant).
+// A tenant Attach rejects answers 400 with the RFC-007 envelope.
+func TenantRLS(resolver *tenancy.Resolver) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, err := resolver.Attach(r)
+			if err != nil {
+				apperrors.Write(badRequest{w}, r, apperrors.New(apperrors.InvalidInput, err.Error()))
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// badRequest answers 400 whatever status the error code maps to.
+type badRequest struct{ http.ResponseWriter }
+
+func (w badRequest) WriteHeader(int) { w.ResponseWriter.WriteHeader(http.StatusBadRequest) }

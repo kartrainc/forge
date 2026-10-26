@@ -23,11 +23,12 @@ jobs:
         with:
           go-version-file: ${{ matrix.path }}/go.mod
           cache-dependency-path: ${{ matrix.path }}/go.sum
-      - name: Format, vet, build and test
+      - name: Format, vet, lint, build and test
         run: |
           test -z "$(gofmt -l .)"
           go mod verify
           go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
           go build ./...
           go test -count=1 ./tests/unit/...
       - name: Audit dependencies

@@ -1,0 +1,378 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/pii"
+)
+
+func TestRedactScrubsPIIAndSecretShapes(t *testing.T) {
+	cases := map[string]string{
+		"contact Jane.Doe+ops@Example.co.uk now":         "contact [email] now",
+		"Authorization: Bearer abcdefghijklmnop.qrs-tuv": "Authorization: bearer [redacted]",
+		"bearer short":                                      "bearer short",
+		"key sk-abcdefghijklmnop1234 used":                  "key [api-key] used",
+		"key sk-ant-api03-abcdefghijklmnop":                 "key [api-key]",
+		"google AIzaSyA1234567890abcdefghijk":               "google [api-key]",
+		"hub hf_abcdefghijklmnopqrst":                       "hub [api-key]",
+		`password=hunter2 user=bob`:                         `password=[redacted] user=bob`,
+		`api_key: "abc123", region: eu`:                     `api_key: "[redacted]", region: eu`,
+		`{"api_key": "abc123"}`:                             `{"api_key": "[redacted]"}`,
+		`body {"password":"JSONPW99","id":1}`:               `body {"password":"[redacted]","id":1}`,
+		"Secret : s3cr3t; TOKEN=t0k3n, passwd='pw'":         "Secret : [redacted]; TOKEN=[redacted], passwd='[redacted]'",
+		"api-key=xyz apikey:qq":                             "api-key=[redacted] apikey:[redacted]",
+		`password="correct horse battery staple" user=bob`:  `password="[redacted]" user=bob`,
+		`passwd='two words' ok`:                             `passwd='[redacted]' ok`,
+		`{"password":"a \"quoted\" pass phrase","id":1}`:    `{"password":"[redacted]","id":1}`,
+		`secret: "unterminated value with spaces`:           `secret: "[redacted]`,
+		"GET /cb?access_token=AT99&state=1":                 "GET /cb?access_token=[redacted]&state=1",
+		"oauth client_secret=CS99 accessToken=AT2":          "oauth client_secret=[redacted] accessToken=[redacted]",
+		"dsn db_password=DBPASS99 secret_key=SK9":           "dsn db_password=[redacted] secret_key=[redacted]",
+		"Authorization: Basic dXNlcjpwYXNzd29yZA==":         "Authorization: Basic [redacted]",
+		`{"Authorization":"Token abc123"}`:                  `{"Authorization":"Token [redacted]"}`,
+		"jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.sig-1": "jwt [jwt]",
+		"connect postgres://app:DSNPASS99@db:5432/x":        "connect postgres://app:[redacted]@db:5432/x",
+		"cache redis://:p@ss@cache.example.com:6379/1":      "cache redis://:[redacted]@cache.example.com:6379/1",
+		"item 3f2504e0-4f89-11d3-9a0c-0305e82c3301":         "item 3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+		"used tokens=1234 secrets: 2 max_tokens=10":         "used tokens=1234 secrets: 2 max_tokens=10",
+		"pkg lodash@4.17.21 image@sha256:abc":               "pkg lodash@4.17.21 image@sha256:abc",
+		"flag sk-enable-new-checkout-flow-v2":               "flag sk-enable-new-checkout-flow-v2",
+		"risk-assessment-template-01234567":                 "risk-assessment-template-01234567",
+		"nothing sensitive in 42 items for tenant acme.com": "nothing sensitive in 42 items for tenant acme.com",
+	}
+	for input, want := range cases {
+		if got := pii.Redact(input); got != want {
+			t.Errorf("Redact(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func redactingLogger(buffer *bytes.Buffer) *slog.Logger {
+	return slog.New(pii.NewHandler(slog.NewJSONHandler(buffer, &slog.HandlerOptions{Level: slog.LevelInfo})))
+}
+
+func decodeLogLine(t *testing.T, buffer *bytes.Buffer) map[string]any {
+	t.Helper()
+	line := map[string]any{}
+	if err := json.Unmarshal(buffer.Bytes(), &line); err != nil {
+		t.Fatalf("log line %q: %v", buffer.String(), err)
+	}
+	buffer.Reset()
+	return line
+}
+
+func TestPIIHandlerRedactsMessagesAndAttributes(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := redactingLogger(&buffer).With("user", "alice@example.com", "attempts", 3, "apiSecret", "bound")
+	logger.Info("login for bob@example.com",
+		"password", "hunter2",
+		"x-api-key", "plain-looking",
+		"client_secret", errors.New("boom"),
+		"note", "token=abc",
+		"tokens", 7,
+		"token_count", "5",
+		"token", 987654,
+		"error", errors.New("dial carol@example.com: refused"),
+		slog.Group("request", "authorization", "Bearer abcdefghijklmnopqrstu", "id", 9),
+		slog.Group("password", "value", "GROUPPW99"),
+	)
+	line := decodeLogLine(t, &buffer)
+	want := map[string]any{
+		"msg":           "login for [email]",
+		"user":          "[email]",
+		"attempts":      float64(3),
+		"apiSecret":     "[redacted]",
+		"password":      "[redacted]",
+		"x-api-key":     "[redacted]",
+		"client_secret": "[redacted]",
+		"note":          "token=[redacted]",
+		"tokens":        float64(7),
+		"token_count":   "5",
+		"token":         "[redacted]",
+		"error":         "dial [email]: refused",
+	}
+	for key, value := range want {
+		if line[key] != value {
+			t.Errorf("%s = %#v, want %#v", key, line[key], value)
+		}
+	}
+	request, _ := line["request"].(map[string]any)
+	if request["authorization"] != "[redacted]" || request["id"] != float64(9) {
+		t.Errorf("group: %#v", request)
+	}
+
+	for _, key := range []string{"accessToken", "refreshToken", "clientSecret", "userPassword", "secret_key", "private_key", "Authorization", "Set-Cookie", "credentials", "aws.secret-access-key"} {
+		logger.Info("keyed", key, "PLAINVALUE99")
+		if line := decodeLogLine(t, &buffer); line[key] != "[redacted]" {
+			t.Errorf("%s = %#v", key, line[key])
+		}
+	}
+
+	logger.WithGroup("job").Info("queued", "owner", "dave@example.com", "payload", map[string]int{"n": 1})
+	line = decodeLogLine(t, &buffer)
+	job, _ := line["job"].(map[string]any)
+	if job["owner"] != "[email]" || job["payload"].(map[string]any)["n"] != float64(1) {
+		t.Errorf("grouped record: %#v", line)
+	}
+
+	logger.Debug("dropped erin@example.com")
+	if buffer.Len() != 0 || logger.Enabled(context.Background(), slog.LevelDebug) {
+		t.Fatalf("levels follow the wrapped handler: %q", buffer.String())
+	}
+}
+
+type piiUser struct {
+	Email    string
+	Password string
+	Age      int64
+}
+
+type piiStringer struct{ email string }
+
+func (s piiStringer) String() string { return "user " + s.email }
+
+type piiValuer struct{ email string }
+
+func (v piiValuer) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("email", v.email), slog.String("password", "pw-from-valuer"))
+}
+
+func TestPIIHandlerRedactsAnyValues(t *testing.T) {
+	link, _ := url.Parse("https://user:urlpass@api.example.com/cb?access_token=QUERYTOKEN123")
+	var nilLink *url.URL
+	values := map[string]any{
+		"headers": http.Header{"Authorization": {"Bearer abcdefghijklmnopqrstuvwxyz0123"}, "Cookie": {"session=SESSIONSECRET123"}, "Accept": {"text/html"}},
+		"emails":  []string{"alice@example.com", "ok"},
+		"user":    piiUser{Email: "bob@example.com", Password: "hunter2", Age: 9007199254740993},
+		"payload": map[string]any{"carol@example.com": 1, "nested": map[string]any{"refresh_token": "RT99"}},
+		"link":    link,
+		"who":     piiStringer{"dave@example.com"},
+		"body":    []byte("email=erin@example.com password=pw456"),
+		"raw":     json.RawMessage(`{"password":"RAWPW99","n":1}`),
+		"broken":  json.RawMessage(`{"password":"BROKEN99"`),
+		"valuer":  piiValuer{"frank@example.com"},
+		"stream":  map[string]any{"ch": make(chan int), "mail": "heidi@example.com"},
+		"none":    nilLink,
+	}
+	secrets := []string{
+		"abcdefghijklmnopqrstuvwxyz0123", "SESSIONSECRET123", "alice@", "bob@", "hunter2", "carol@", "RT99", "urlpass",
+		"QUERYTOKEN123", "dave@", "erin@", "pw456", "RAWPW99", "BROKEN99", "frank@", "pw-from-valuer", "heidi@",
+	}
+	for name, inner := range map[string]func(io.Writer) slog.Handler{
+		"json": func(w io.Writer) slog.Handler { return slog.NewJSONHandler(w, nil) },
+		"text": func(w io.Writer) slog.Handler { return slog.NewTextHandler(w, nil) },
+	} {
+		var buffer bytes.Buffer
+		logger := slog.New(pii.NewHandler(inner(&buffer)))
+		for key, value := range values {
+			logger.Info("value", key, value)
+		}
+		for _, secret := range secrets {
+			if strings.Contains(buffer.String(), secret) {
+				t.Errorf("%s output leaks %q:\n%s", name, secret, buffer.String())
+			}
+		}
+	}
+
+	var buffer bytes.Buffer
+	logger := redactingLogger(&buffer)
+	logger.Info("value", "user", values["user"], "headers", values["headers"], "raw", values["raw"], "who", values["who"])
+	if !strings.Contains(buffer.String(), `"Age":9007199254740993`) {
+		t.Fatalf("numbers keep their precision: %s", buffer.String())
+	}
+	line := decodeLogLine(t, &buffer)
+	user, _ := line["user"].(map[string]any)
+	headers, _ := line["headers"].(map[string]any)
+	raw, _ := line["raw"].(map[string]any)
+	if user["Email"] != "[email]" || user["Password"] != "[redacted]" ||
+		headers["Authorization"] != "[redacted]" || headers["Cookie"] != "[redacted]" || headers["Accept"].([]any)[0] != "text/html" ||
+		raw["password"] != "[redacted]" || raw["n"] != float64(1) || line["who"] != "user [email]" {
+		t.Fatalf("structured values stay JSON: %#v", line)
+	}
+	var text bytes.Buffer
+	slog.New(pii.NewHandler(slog.NewTextHandler(&text, nil))).Info("value", "user", piiUser{Email: "x@example.com"}, "none", nilLink)
+	if !strings.Contains(text.String(), `user="{\"Age\":0,\"Email\":\"[email]\",\"Password\":\"[redacted]\"}"`) ||
+		!strings.Contains(text.String(), "none=<nil>") {
+		t.Fatalf("text output: %s", text.String())
+	}
+}
+
+type piiCountingValuer struct{ calls *int }
+
+func (v piiCountingValuer) LogValue() slog.Value {
+	*v.calls++
+	return slog.IntValue(7)
+}
+
+type piiCode int
+
+func TestPIIHandlerResolvesValuesOnce(t *testing.T) {
+	var buffer bytes.Buffer
+	calls := 0
+	redactingLogger(&buffer).Info("ok", "lazy", piiCountingValuer{&calls}, "code", piiCode(4))
+	if line := decodeLogLine(t, &buffer); calls != 1 || line["lazy"] != float64(7) || line["code"] != float64(4) {
+		t.Fatalf("LogValue calls=%d %#v", calls, line)
+	}
+}
+
+type piiPassThrough struct{ slog.Handler }
+
+func TestPIIHandlerIsNotStacked(t *testing.T) {
+	handler := pii.NewHandler(slog.NewJSONHandler(&bytes.Buffer{}, nil))
+	if pii.NewHandler(handler) != handler {
+		t.Fatal("wrapping a redacting handler again must return it")
+	}
+	wrapped := piiPassThrough{handler}
+	if !pii.Redacts(wrapped) || pii.NewHandler(wrapped) != slog.Handler(wrapped) {
+		t.Fatal("a handler wrapping a redacting one is not wrapped again")
+	}
+	if pii.Redacts(slog.NewJSONHandler(&bytes.Buffer{}, nil)) {
+		t.Fatal("a plain handler does not redact")
+	}
+	var buffer bytes.Buffer
+	logger := slog.New(pii.NewHandler(slog.NewJSONHandler(&buffer, nil))).With("password", "pw").WithGroup("g")
+	logger.Info("ok", "n", 1)
+	if line := decodeLogLine(t, &buffer); line["password"] != "[redacted]" || line["g"].(map[string]any)["n"] != float64(1) {
+		t.Fatalf("bound attributes: %#v", line)
+	}
+}
+
+func TestLoggerRedactsInEveryBinary(t *testing.T) {
+	for _, pretty := range []bool{false, true} {
+		if !pii.Redacts(app.Logger("info", pretty).Handler()) {
+			t.Fatalf("app.Logger(pretty=%v) must redact", pretty)
+		}
+	}
+}
+
+func TestInstallPIIRedactionWrapsTheDefaultLogger(t *testing.T) {
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(writer)
+		log.SetFlags(flags)
+	})
+	var buffer bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buffer, nil)))
+	app.InstallPIIRedaction()
+	installed := slog.Default().Handler()
+	app.InstallPIIRedaction()
+	if slog.Default().Handler() != installed {
+		t.Fatal("installing twice must not stack handlers")
+	}
+	slog.Info("reset link sent", "to", "frank@example.com")
+	if line := decodeLogLine(t, &buffer); line["to"] != "[email]" {
+		t.Fatalf("default logger output: %#v", line)
+	}
+	log.Print("legacy log password=hunter2")
+	if !strings.Contains(buffer.String(), "password=[redacted]") {
+		t.Fatalf("standard library log output is redacted too: %q", buffer.String())
+	}
+
+	traced := slog.New(piiPassThrough{slog.Default().Handler()})
+	slog.SetDefault(traced)
+	app.InstallPIIRedaction()
+	if slog.Default() != traced {
+		t.Fatal("a logger wrapping a redacting handler is kept")
+	}
+}
+
+func TestInstallPIIRedactionOverTheBuiltinLogger(t *testing.T) {
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	deadlocked := false
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetFlags(flags)
+		if !deadlocked {
+			log.SetOutput(writer)
+		}
+	})
+	if fmt.Sprintf("%T", previous.Handler()) != "*slog.defaultHandler" {
+		t.Fatalf("a previous test leaked its default logger: %T", previous.Handler())
+	}
+	var buffer bytes.Buffer
+	log.SetOutput(&buffer)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.InstallPIIRedaction()
+		slog.Info("reset link sent", "to", "grace@example.com")
+		log.Print("legacy password=hunter2")
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		deadlocked = true
+		t.Fatal("installing over slog's built-in logger deadlocks")
+	}
+	if output := buffer.String(); !strings.Contains(output, "to=[email]") || !strings.Contains(output, "password=[redacted]") {
+		t.Fatalf("output: %q", output)
+	}
+}
+
+var cleanRequestAttrs = []slog.Attr{
+	slog.String("method", "GET"), slog.String("path", "/api/v1/items"), slog.String("query", "limit=10&skip=0"),
+	slog.Int("status", 200), slog.Float64("duration_ms", 12.5), slog.String("request_id", "0d9b2c9e-0c7b-4b8c-9b0a-1f2e3d4c5b6a"),
+	slog.String("user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"), slog.String("remote", "10.0.0.1:5555"),
+}
+
+func logCleanRequest(logger *slog.Logger) func() {
+	return func() {
+		logger.LogAttrs(context.Background(), slog.LevelInfo, "request completed", cleanRequestAttrs...)
+	}
+}
+
+// piiNopHandler accepts every record without allocating or pooling (slog's
+// own handlers use a sync.Pool, which drops items at random under -race), so
+// allocation counts measure the redacting handler alone.
+type piiNopHandler struct{}
+
+func (piiNopHandler) Enabled(context.Context, slog.Level) bool  { return true }
+func (piiNopHandler) Handle(context.Context, slog.Record) error { return nil }
+func (h piiNopHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
+func (h piiNopHandler) WithGroup(string) slog.Handler           { return h }
+
+// fewestAllocs ignores allocations by goroutines other tests left running.
+func fewestAllocs(f func()) float64 {
+	fewest := testing.AllocsPerRun(100, f)
+	for range 2 {
+		fewest = min(fewest, testing.AllocsPerRun(100, f))
+	}
+	return fewest
+}
+
+func TestPIIHandlerPassesCleanRecordsThroughWithoutAllocating(t *testing.T) {
+	plain := fewestAllocs(logCleanRequest(slog.New(piiNopHandler{})))
+	redacting := fewestAllocs(logCleanRequest(slog.New(pii.NewHandler(piiNopHandler{}))))
+	if redacting != plain {
+		t.Fatalf("allocations per record: %v redacting, %v plain", redacting, plain)
+	}
+}
+
+func BenchmarkPIIHandler(b *testing.B) {
+	for name, logger := range map[string]*slog.Logger{
+		"plain":     slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		"redacting": slog.New(pii.NewHandler(slog.NewJSONHandler(io.Discard, nil))),
+	} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			log := logCleanRequest(logger)
+			for b.Loop() {
+				log()
+			}
+		})
+	}
+}

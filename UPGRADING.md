@@ -255,7 +255,7 @@ without a forge record:
 
 ### Go backend (unreleased)
 
-Go is now a built-in backend (`language: go`). Three changes can affect an
+Go is now a built-in backend (`language: go`). These changes can affect an
 existing installation:
 
 - **Parity tier 1 covers Go.** A fragment that declares or derives tier 1 from
@@ -272,6 +272,47 @@ existing installation:
   The production profile sets `security.auth.enabled` from the generated auth
   mode, so an `auth.mode=none` service starts without `GATEKEEPER_ISSUER` and
   `SERVICE_AUDIENCE`. Python, Node and Rust profiles are unchanged.
+- **Go migrations below `00100` belong to forge.** `migrate` applies
+  out-of-order migrations, so a forge update can add one numbered below the
+  project's latest. Number project migrations from `00100`; one numbered
+  `00002`–`00099` can collide with a later forge migration of the same version.
+- **The items repository runs through a scope.** `internal/app/app.go` gains a
+  `// FORGE:REPOSITORY_SCOPE` marker after `NewPgItemRepository`, and
+  `PgItemRepository` gains `WithScope`, which `database.multitenancy=shared_rls`
+  uses to bind `app.current_tenant` per transaction. A project that edited either
+  file gets a `.forge-merge` sidecar on `forge --update`; keep the marker when
+  resolving it.
+- **`forge --update` needs `go` for Go services.** Updating or planning an
+  update now runs `go mod tidy` on the regenerated services and stops before
+  writing anything when `go` is not on PATH. If an earlier update broke a module
+  (`go: updates to go.mod needed`), the next update repairs it: an untouched
+  `go.mod` is replaced by the tidied one and `go.sum` is recorded again; a
+  `go.mod` you already tidied is kept without a `.forge-merge` proposal.
+- **Keep applied Go migrations.** Never delete or renumber an applied
+  migration: `migrate down` refuses while an applied version has no file.
+  `migrations.Open` returns `*migrations.Migrator`, which embeds
+  `*goose.Provider`; code that stored the result in a `*goose.Provider` variable
+  needs `.Provider`.
+- **Go `shared_rls` covers forge's `items` only.** Add `ENABLE`/`FORCE ROW LEVEL
+  SECURITY` and a `tenant_isolation_<table>` policy for project tables in a
+  migration numbered `00100` or higher, and run that table's repository through
+  the tenant scope (see the service's `OPERATIONS.md`). Data migrations must bind
+  `app.current_tenant` per tenant or run as a BYPASSRLS role. Right after
+  enabling `shared_rls` on an existing database, `migrate down` rolls back
+  `00099` first. Remove any `TENANT_RLS_GUC` override: other values stop boot.
+- **Go `shared_rls` without platform auth now honours the request tenant.** With
+  `auth.mode=none`, a tenant header or `<uuid>.` host makes the request act as
+  that tenant; rows created earlier under the dev tenant
+  `00000000-0000-0000-0000-000000000001` stay visible only to requests that name
+  no tenant, and a non-UUID header value gets 400.
+- **Go logs are redacted in every binary.** With `middleware.pii_redaction`
+  (on by default), every logger from `app.Logger` redacts; text-handler output
+  shows maps and structs as quoted JSON and `[]byte` attributes as strings
+  rather than base64. `InstallPIIRedaction` is a no-op when the default logger
+  already redacts.
+- **Go response cache keys default to `<service>:cache`.** Set
+  `RESPONSE_CACHE_PREFIX=forge:cache` to keep existing entries, or let them
+  expire.
 
 ### Executable Postgres init script (unreleased)
 

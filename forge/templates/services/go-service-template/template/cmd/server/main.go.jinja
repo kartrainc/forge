@@ -20,6 +20,7 @@ func main() {
 }
 
 func run() int {
+	slog.SetDefault(app.Logger("info", false))
 	// Load and validate config at startup so the fail-closed auth guard runs:
 	// it rejects a production-like env with auth enabled but
 	// GATEKEEPER_ISSUER/SERVICE_AUDIENCE unset.

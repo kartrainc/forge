@@ -60,7 +60,7 @@ secret checks.
 | Variable | How to generate | Notes |
 | --- | --- | --- |
 | `ENV` | Set to `production` | Controls fail-closed behavior for secrets |
-| `APP__SECURITY__SECRET_KEY` | `python -c "import secrets; print(secrets.token_hex(32))"` | Python application security setting, bound via `APP__`. Check the generated validator and selected auth mode; Node/Rust have their own schemas. |
+| `APP__SECURITY__SECRET_KEY` | `python -c "import secrets; print(secrets.token_hex(32))"` | Python application security setting, bound via `APP__`. Check the generated validator and selected auth mode; Node/Rust/Go have their own schemas. |
 
 ### Auth-enabled projects (Gatekeeper)
 
@@ -93,7 +93,7 @@ Before going live, verify:
 - [ ] Redis is accessible via `REDIS_URL`
 - [ ] Database credentials use least-privilege runtime roles and tenant-isolation tests pass
 - [ ] Health check endpoints (`/api/v1/health/live`, `/api/v1/health/ready`) are monitored
-- [ ] Body size limits are appropriate for your workload (Python: `audit.max_body_size`, Node/Rust: 1MB default)
+- [ ] Body size limits are appropriate for your workload (Python: `audit.max_body_size`, Node/Rust/Go: 1MB default)
 
 ## Key Rotation
 
@@ -226,6 +226,12 @@ backend owns its own database (so migrations never collide). If you point
 multiple backends at a single shared database, give those Jobs distinct
 ascending `helm.sh/hook-weight`s so Helm serialises them.
 
+Rust and Go Jobs run `/app/migrate` from the backend image. The Go binary also
+takes `status` and `version`, which only read the database and do not wait for a
+running migration, and `down` (roll back the most recently applied migration);
+see the service's `OPERATIONS.md`, which also covers row-level security for
+`database.multitenancy=shared_rls`.
+
 ### Ingress
 
 A standard `networking.k8s.io/v1` Ingress routes `/api/<backend>` to each
@@ -256,6 +262,6 @@ Generated projects include:
 
 See [known-issues.md](../reference/limitations.md) for the full list. Key production-relevant items:
 
-- PII redaction is Python-only (Node/Rust backends don't filter sensitive data from logs)
+- PII redaction is available on Python and Go (Node/Rust backends don't filter sensitive data from logs)
 - Vector store adapters are Python-only
 - Admin panel has no RBAC — all authenticated users see all models

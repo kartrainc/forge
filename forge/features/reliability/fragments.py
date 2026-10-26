@@ -105,15 +105,21 @@ def register_all(api: ForgeAPI) -> None:
     )
 
     # Resilient S2S HTTP base client (retry + circuit breaker + OAuth2 CC +
-    # correlation/identity propagation). Python-only, files-only fragment —
-    # subclassed by the user. httpx is already a service dependency, so no
-    # extra dep is declared. Off-by-default via ``reliability.service_client``.
+    # correlation/identity propagation). Files-only fragment — subclassed
+    # (Python) or configured (Go) by the user. httpx is already a service
+    # dependency, so no extra dep is declared. Off-by-default via
+    # ``reliability.service_client``. Go reuses internal/circuitbreaker and
+    # the platform-auth-go S2SClient when those fragments are in the plan.
     api.add_fragment(
         Fragment(
             name="reliability_service_client",
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("reliability_service_client", "python"),
+                ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("reliability_service_client", "go"),
+                    reads_options=("auth.mode", "reliability.circuit_breaker"),
                 ),
             },
         )

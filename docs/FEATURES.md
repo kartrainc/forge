@@ -394,20 +394,28 @@ DEPENDENCY: none (stdlib + forge_core correlation).
 
 _OpenTelemetry traces + metrics via OTLP exporter (agent.run, tool.call spans)._
 
-OpenTelemetry traces (plus Python RED metrics) exported over OTLP, gated on
-``OTEL_EXPORTER_OTLP_ENDPOINT`` (unset = a clean no-op: no exporter is wired
-and the service runs without a collector). Python emits ``app/core/otel.py``
-(FastAPI + HTTPX instrumentation + a ``MeterProvider`` for RED metrics, gRPC
-OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK +
-``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust emits
-``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
+OpenTelemetry traces (plus Python and Go RED metrics) exported over OTLP,
+gated on ``OTEL_EXPORTER_OTLP_ENDPOINT`` (unset = a clean no-op: no exporter
+is wired and the service runs without a collector). Python emits
+``app/core/otel.py`` (FastAPI + HTTPX instrumentation + a ``MeterProvider``
+for RED metrics, gRPC OTLP exporter); Node emits ``src/lib/otel.ts`` (NodeSDK
++ ``@opentelemetry/auto-instrumentations-node``, gRPC OTLP exporter); Rust
+emits ``src/otel.rs`` (a ``tracing-opentelemetry`` layer exporting over OTLP
 HTTP/protobuf); Go emits ``internal/otel`` (otelhttp server spans named by
-chi route, OTLP/HTTP exporter). Spans of interest for agentic workloads:
-``agent.run`` (per agent invocation), ``tool.call`` (per tool invocation).
+chi route, plus a ``MeterProvider`` with Go runtime metrics, OTLP/HTTP
+exporters). Spans of interest for agentic workloads: ``agent.run`` (per agent
+invocation), ``tool.call`` (per tool invocation).
+
+RED metrics (Python and Go, pushed over OTLP; no ``/metrics`` scrape
+endpoint): ``http.server.request.count`` and ``http.server.request.duration``
+(histogram, ms) by ``http.method`` / ``http.route`` / ``http.status_code``,
+plus the ``http.server.active_requests`` gauge. Go labels ``http.route`` with
+the chi route pattern, folds non-standard methods into ``_OTHER`` and keeps
+otelhttp's own server metrics off, so these are its only HTTP metrics.
 
 BACKENDS: python, node, rust, go
-DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / otlptracehttp / otelhttp
-ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES).
+DEPENDENCIES: python — opentelemetry-api / sdk / exporter-otlp / instrumentation-fastapi / instrumentation-httpx; node — @opentelemetry/sdk-node / exporter-trace-otlp-grpc / auto-instrumentations-node; rust — opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry; go — go.opentelemetry.io/otel / sdk / sdk/metric / otlptracehttp / otlpmetrichttp / otelhttp / contrib runtime
+ENV: OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (Python also reads OTEL_RESOURCE_ATTRIBUTES; Go and Python honour OTEL_METRIC_EXPORT_INTERVAL).
 
 **Enables fragments:**
 - on `true` → `observability_otel`, `observability_metrics_middleware`
@@ -455,17 +463,23 @@ _Protection + stability middleware that every production service needs._
 
 ### `middleware.pii_redaction`
 
-**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** python
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** go, python
 
 _Logging filter that scrubs emails / tokens / API keys._
 
 A logging.Filter attached at startup that scrubs emails, bearer tokens,
 common API-key shapes (sk-*, sk-ant-*, AIza*, hf_*), and
 password=/api_key= value pairs from every log record before handlers
-run. Helps satisfy GDPR / SOC2 log-hygiene requirements without
+run. Go redacts every logger the service builds (server, worker,
+migrate) and is stricter: it also scrubs URL credentials, raw JWTs,
+Authorization values and *_token= / *_secret= / *_password= pairs
+(JSON-quoted too), and masks any value whose key ends in password,
+secret, token, api_key, private_key, authorization, cookie or
+credentials, including inside maps, structs and http.Header values.
+Helps satisfy GDPR / SOC2 log-hygiene requirements without
 per-call-site discipline.
 
-BACKENDS: python
+BACKENDS: python, go
 ENDPOINTS: none — applies to logger output globally.
 
 **Enables fragments:**
@@ -492,19 +506,24 @@ REQUIRES: nothing by default; set REDIS_URL to share state across replicas.
 
 ### `middleware.response_cache`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** node, python
+**Type:** `bool` · **Default:** `false` · **Stability:** `beta` · **Backends:** go, node, python
 
 _Opt-in HTTP response caching (Redis or in-memory)._
 
 Wires a cache backend at startup so route handlers can decorate
 themselves for server-side response caching. Python uses fastapi-cache2
 with a Redis backend (falls back to in-memory if RESPONSE_CACHE_URL
-isn't set); Node uses @fastify/caching. No blanket behavior change —
-handlers opt in per-endpoint.
+isn't set); Node uses @fastify/caching; Go ships a net/http middleware
+with the same Redis / in-memory selection, keyed per tenant, subject,
+actor, scopes and roles, where an unreachable Redis means fast misses.
+No blanket behavior change — handlers opt in per-endpoint.
 
-BACKENDS: python, node
-ENDPOINTS: none — decorate existing routes with @cache(expire=N).
+BACKENDS: python, node, go
+ENDPOINTS: none — decorate existing routes with @cache(expire=N)
+(Go: wrap them with middleware.CacheResponse(ttl, namespace), inside
+the auth middleware).
 REQUIRES: RESPONSE_CACHE_URL pointing at Redis (recommended for prod).
+Go keys start with RESPONSE_CACHE_PREFIX, default "<service>:cache".
 
 **Enables fragments:**
 - on `true` → `response_cache`
@@ -604,7 +623,7 @@ PGX_IDLE_TIMEOUT_SECS (go).
 
 ### `reliability.service_client`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** python
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** go, python
 
 _Resilient async S2S HTTP base client (retry + circuit breaker + OAuth2)._
 
@@ -618,8 +637,22 @@ Self-contained (bundles its own lightweight breaker, no extra dependency) and
 distinct from ``reliability.circuit_breaker`` (a purgatory registry for
 wrapping arbitrary calls).
 
-BACKENDS: python
-DEPENDENCY: none (httpx already present).
+Go emits ``internal/clients`` (``clients.New(clients.Config{...})``): the same
+backoff, error type, client-credentials token source and propagated headers
+(``X-Request-Id``, ``x-customer-id``, ``x-user-id``, ``x-tenant-slug``), with
+stricter defaults: it retries only idempotent requests (GET, HEAD, OPTIONS,
+PUT, DELETE, or any request with an ``Idempotency-Key`` header) after a 5xx,
+a 429 (honouring ``Retry-After``), a failed connection or a timeout; it
+follows no redirects, requires paths starting with ``/`` and caps decoded
+responses at 16 MiB. Instead of bundling a breaker it uses the generated
+``internal/circuitbreaker`` when ``reliability.circuit_breaker`` is on (no
+breaker otherwise, or pass your own), counting only 5xx responses, failed
+connections and timeouts; with ``auth.mode=generate`` it adds
+``clients.PlatformAuth(s2s)``, a tenant-scoped token source over the
+platform-auth-go ``S2SClient``.
+
+BACKENDS: python, go
+DEPENDENCY: none (httpx already present; Go uses the standard library).
 
 **Enables fragments:**
 - on `true` → `reliability_service_client`
@@ -1135,7 +1168,7 @@ REQUIRES: >1 backend; the gatekeeper auth provider for S2S credentials.
 
 ### `database.multitenancy`
 
-**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** python
+**Type:** `enum` · **Default:** `none` · **Stability:** `stable` · **Backends:** go, python
 
 **Allowed values:** `none`, `shared_rls`, `schema_per_tenant`, `db_per_tenant`
 
@@ -1172,14 +1205,19 @@ Discriminator for how strongly tenants are isolated in the database.
   "not yet implemented" error rather than silently producing an un-isolated
   project. Use ``shared_rls`` or ``schema_per_tenant`` today.
 
-BACKENDS: python (shared_rls, schema_per_tenant). The non-``none`` strategies
-are Python-only in 1.x — the GUC/search_path hooks + Alembic stack target the
-SQLAlchemy / Alembic stack the python-service-template ships.
+BACKENDS: python (shared_rls, schema_per_tenant), go (shared_rls). Go ships
+``shared_rls`` as a goose migration with the same policy on ``items`` plus a pgx
+transaction scope that binds ``app.current_tenant`` with ``set_config(..., true)``
+for every items-repository call; project tables add the policy in the migration
+that creates them. Without a verified token (``auth.mode=none`` or the
+platform-auth dev mode) a Go request's header/subdomain tenant becomes its
+identity's tenant and must be a UUID (400 otherwise). ``schema_per_tenant`` is
+Python-only.
 ENGINE: postgres. The GUC / search_path hooks are no-ops on non-Postgres
 dialects.
 
 **Enables fragments:**
-- on `shared_rls` → `multitenancy_rls_python`
+- on `shared_rls` → `multitenancy_rls_python`, `multitenancy_rls_go`
 - on `schema_per_tenant` → `multitenancy_schema_per_tenant_python`
 
 ### `database.tenant_claim_path`
@@ -1194,8 +1232,8 @@ by the auth ``ClaimMapper`` (``organization.id`` reads
 ``https://example.com/tenant`` is matched as a whole key first). Defaults to
 ``tenant_id`` to match the platform-auth SDK's default tenant claim.
 
-BACKENDS: python. Written into the generated ``TenantResolver`` config; no
-fragment is keyed off the value.
+BACKENDS: python, go. Written into the generated ``TenantResolver`` config;
+no fragment is keyed off the value.
 
 ### `database.tenant_header_name`
 
@@ -1207,8 +1245,8 @@ Used when ``database.tenant_resolution=header``. The HTTP header the
 ``TenantResolver`` reads the tenant id from (case-insensitive). Defaults to
 ``X-Tenant-ID``.
 
-BACKENDS: python. Written into the generated ``TenantResolver`` config; no
-fragment is keyed off the value.
+BACKENDS: python, go. Written into the generated ``TenantResolver`` config;
+no fragment is keyed off the value.
 
 ### `database.tenant_resolution`
 
@@ -1228,14 +1266,16 @@ identical across both; only the binding mechanism differs. Inert when
   via a dot-path (``database.tenant_claim_path``), reusing the auth
   ``ClaimMapper`` seam the OIDC / in_memory providers ship. The middleware
   reads ``request.state.identity`` (bound by the platform-auth middleware)
-  and extracts the configured claim.
+  and extracts the configured claim. Go reads the platform-auth SDK's
+  verified claims and falls back to the bound identity's tenant.
 - ``header``: read the tenant id from a gateway-injected request header
   (``database.tenant_header_name``). For deployments where an upstream
   proxy / API gateway already resolved + validated the tenant.
 - ``subdomain``: parse the leftmost label of the request Host header
-  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing.
+  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing. Go
+  only reads a UUID label as a tenant (``example.com`` and IP hosts carry none).
 
-BACKENDS: python. Inert unless ``database.multitenancy != none``.
+BACKENDS: python, go. Inert unless ``database.multitenancy != none``.
 
 ### `deploy.target`
 
@@ -1619,3 +1659,23 @@ Current Rust stack (Axum layer order, outermost first):
 
 1. base: correlation (propagate + set request-id), CORS
 2. fragment `security_headers` — `axum::middleware::from_fn`
+
+Current Go stack (chi middleware list in `internal/app/app.go`, outermost
+first). The list runs its first entry outermost and the built-in Go fragments
+register with `position: before`, so among them a **lower** `order` is outer,
+the reverse of the convention above:
+
+1. base: `BodyLimit`, `Correlation`, `Recover`, `CORS` (hardcoded)
+2. fragment `security_headers` (`order=80`)
+3. the `order=100` fragments in resolver order (dependency tier, then name):
+   tracing (`observability`, `observability_otel`),
+   `observability_metrics_middleware`, `platform_auth_go_middleware`, and
+   `multitenancy_rls_go`, which always sits inside platform auth
+4. the `FORGE:MIDDLEWARE_REGISTRATION` marker
+5. `position: after` entries, where a **higher** `order` is outer:
+   `MiddlewareSpec` registrations (`render_chi_middleware`) and fragment
+   `rate_limit` (`order=50`)
+6. base: `devIdentity` (`auth.mode=none` only, innermost)
+
+A Go `MiddlewareSpec`'s `order` only ranks it among the step-5 entries: every
+step-2/3 fragment wraps it, whatever its `order`.

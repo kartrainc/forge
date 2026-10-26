@@ -1,0 +1,30 @@
+# multitenancy_rls_go: shared-RLS tenant isolation for Go.
+#
+#   1. cmd/server validates the TENANT_* environment at startup.
+#   2. TenantRLS stores the header/subdomain/token-claim tenant on the request
+#      context; without a verified token it also becomes the identity's tenant.
+#      The fragment applies after platform_auth_go_middleware, so the
+#      middleware sits inside it and sees the verified identity.
+#   3. The items repository runs each call in a transaction that binds
+#      app.current_tenant with set_config(..., true).
+#
+# migrations/00099_enable_rls.sql enables and forces RLS with the tenant policy.
+
+- target: cmd/server/main.go
+  marker: FORGE:STARTUP_INIT
+  position: before
+  snippet: |-
+    if err := app.InitTenancy(); err != nil {
+    	slog.Error("tenancy configuration error", "error", err)
+    	return 1
+    }
+
+- target: internal/app/app.go
+  marker: FORGE:MIDDLEWARE_REGISTRATION
+  position: before
+  snippet: "tenantRLS(),"
+
+- target: internal/app/app.go
+  marker: FORGE:REPOSITORY_SCOPE
+  position: before
+  snippet: "items = items.WithScope(tenantScope(pool))"

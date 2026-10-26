@@ -1,0 +1,317 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"io"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	otelapi "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/middleware"
+	"{{ project_name }}/internal/otel"
+)
+
+// metricsCollector is a fake OTLP/HTTP collector that keeps every metrics payload.
+type metricsCollector struct {
+	mu       sync.Mutex
+	payloads [][]byte
+}
+
+func (c *metricsCollector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	if r.URL.Path == "/v1/metrics" {
+		c.mu.Lock()
+		c.payloads = append(c.payloads, body)
+		c.mu.Unlock()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (c *metricsCollector) received(fragment string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.ContainsFunc(c.payloads, func(payload []byte) bool { return bytes.Contains(payload, []byte(fragment)) })
+}
+
+func resetMeterProvider(t *testing.T) {
+	t.Helper()
+	otelapi.SetMeterProvider(metricnoop.NewMeterProvider())
+	t.Cleanup(func() { otelapi.SetMeterProvider(metricnoop.NewMeterProvider()) })
+}
+
+func useManualMetricReader(t *testing.T) *sdkmetric.ManualReader {
+	t.Helper()
+	resetMeterProvider(t)
+	reader := sdkmetric.NewManualReader()
+	otelapi.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	return reader
+}
+
+func collectHTTPMetrics(t *testing.T, reader *sdkmetric.ManualReader) map[string]metricdata.Metrics {
+	t.Helper()
+	var collected metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &collected); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]metricdata.Metrics{}
+	for _, scope := range collected.ScopeMetrics {
+		if scope.Scope.Name != "http.server" {
+			continue
+		}
+		for _, recorded := range scope.Metrics {
+			found[recorded.Name] = recorded
+		}
+	}
+	return found
+}
+
+func requestAttrs(method, route string, status int) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{attribute.String("http.method", method), attribute.String("http.route", route)}
+	if status != 0 {
+		attrs = append(attrs, attribute.Int("http.status_code", status))
+	}
+	return attrs
+}
+
+func sumPoint(t *testing.T, recorded metricdata.Metrics, attrs []attribute.KeyValue) (int64, bool) {
+	t.Helper()
+	sum, ok := recorded.Data.(metricdata.Sum[int64])
+	if !ok {
+		t.Fatalf("%s is not an int64 sum: %T", recorded.Name, recorded.Data)
+	}
+	want := attribute.NewSet(attrs...)
+	for _, point := range sum.DataPoints {
+		if point.Attributes.Equals(&want) {
+			return point.Value, true
+		}
+	}
+	return 0, false
+}
+
+func histogramPoint(t *testing.T, recorded metricdata.Metrics, attrs []attribute.KeyValue) (metricdata.HistogramDataPoint[float64], bool) {
+	t.Helper()
+	histogram, ok := recorded.Data.(metricdata.Histogram[float64])
+	if !ok {
+		t.Fatalf("%s is not a float64 histogram: %T", recorded.Name, recorded.Data)
+	}
+	want := attribute.NewSet(attrs...)
+	for _, point := range histogram.DataPoints {
+		if point.Attributes.Equals(&want) {
+			return point, true
+		}
+	}
+	return metricdata.HistogramDataPoint[float64]{}, false
+}
+
+func TestMetricsRecordREDByRouteTemplate(t *testing.T) {
+	reader := useManualMetricReader(t)
+	router := chi.NewRouter()
+	router.Use(middleware.Recover, otel.MetricsMiddleware)
+	router.Route("/orders", func(orders chi.Router) {
+		orders.Get("/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) })
+		orders.Get("/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+		orders.Get("/{id}/boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	})
+	router.Get("/health/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	router.Get("/api/v1/health/ready", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, path := range []string{"/orders/1", "/orders/2", "/orders/", "/orders/1/boom", "/missing", "/health", "/health/live", "/api/v1/health/ready", "/metrics"} {
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	recorded := collectHTTPMetrics(t, reader)
+	count, duration, active := recorded["http.server.request.count"], recorded["http.server.request.duration"], recorded["http.server.active_requests"]
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodGet, "/orders/{id}", http.StatusNoContent)); value != 2 {
+		t.Fatalf("two requests share the route template: %d", value)
+	}
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodGet, "/orders", http.StatusOK)); value != 1 {
+		t.Fatalf("an implicit 200 is recorded without a trailing slash: %d", value)
+	}
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodGet, "/orders/{id}/boom", http.StatusInternalServerError)); value != 1 {
+		t.Fatalf("a panic counts as 500: %d", value)
+	}
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodGet, "", http.StatusNotFound)); value != 1 {
+		t.Fatalf("unmatched paths share an empty route: %d", value)
+	}
+	if points := count.Data.(metricdata.Sum[int64]).DataPoints; len(points) != 4 {
+		t.Fatalf("probes and scrapes are not measured: %v", points)
+	}
+	point, ok := histogramPoint(t, duration, requestAttrs(http.MethodGet, "/orders/{id}", http.StatusNoContent))
+	if !ok || point.Count != 2 || !slices.Equal(point.Bounds, otel.DurationBuckets) || duration.Unit != "ms" {
+		t.Fatalf("duration histogram in ms with the SDK buckets: %+v unit=%q", point, duration.Unit)
+	}
+	if value, ok := sumPoint(t, active, requestAttrs(http.MethodGet, "/orders/{id}", 0)); !ok || value != 0 {
+		t.Fatalf("the in-flight gauge returns to zero: %d %v", value, ok)
+	}
+}
+
+func TestMetricsFoldNonStandardMethods(t *testing.T) {
+	reader := useManualMetricReader(t)
+	router := chi.NewRouter()
+	router.Use(otel.MetricsMiddleware)
+	router.Get("/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, method := range []string{"RANDOM1", "RANDOM2", http.MethodPatch} {
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, "/orders/1", nil))
+	}
+	count := collectHTTPMetrics(t, reader)["http.server.request.count"]
+	if value, _ := sumPoint(t, count, requestAttrs("_OTHER", "", http.StatusMethodNotAllowed)); value != 2 {
+		t.Fatalf("unknown methods share _OTHER: %+v", count.Data)
+	}
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodPatch, "", http.StatusMethodNotAllowed)); value != 1 {
+		t.Fatalf("standard methods keep their name: %+v", count.Data)
+	}
+}
+
+func TestTracingMiddlewareRecordsNoMetrics(t *testing.T) {
+	reader := useManualMetricReader(t)
+	router := chi.NewRouter()
+	router.Use(otel.Middleware, otel.MetricsMiddleware)
+	router.Get("/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/orders/1", nil))
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+	var collected metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &collected); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range collected.ScopeMetrics {
+		if scope.Scope.Name != "http.server" && len(scope.Metrics) > 0 {
+			t.Fatalf("only the RED metrics are recorded, not %d from %s", len(scope.Metrics), scope.Scope.Name)
+		}
+	}
+	if len(collectHTTPMetrics(t, reader)) == 0 {
+		t.Fatal("the RED metrics are recorded")
+	}
+}
+
+func TestMetricsOutsideChiHaveNoRoute(t *testing.T) {
+	reader := useManualMetricReader(t)
+	handler := otel.MetricsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/jobs/9", nil))
+	count := collectHTTPMetrics(t, reader)["http.server.request.count"]
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodPost, "", http.StatusAccepted)); value != 1 {
+		t.Fatalf("the raw path never becomes a label: %+v", count.Data)
+	}
+}
+
+func TestMetricsLabelApplicationRoutes(t *testing.T) {
+	reader := useManualMetricReader(t)
+	pool, err := db.NewPool(context.Background(), "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	cfg := config.Defaults()
+	handler := app.New(&cfg, pool)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/health/live", nil))
+
+	count := collectHTTPMetrics(t, reader)["http.server.request.count"]
+	if value, _ := sumPoint(t, count, requestAttrs(http.MethodGet, "/api/v1/info", http.StatusOK)); value != 1 {
+		t.Fatalf("the service records its routes: %+v", count.Data)
+	}
+	if points := count.Data.(metricdata.Sum[int64]).DataPoints; len(points) != 1 {
+		t.Fatalf("health probes are skipped: %v", points)
+	}
+}
+
+func TestMetricsAreANoOpWithoutAnEndpoint(t *testing.T) {
+	resetMeterProvider(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdown, err := otel.ConfigureMetrics(context.Background(), "orders")
+	if err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("configure without endpoint: %v", err)
+	}
+	if _, ok := otelapi.GetMeterProvider().(*sdkmetric.MeterProvider); ok {
+		t.Fatal("no SDK meter provider is installed without an endpoint")
+	}
+	cfg := config.Defaults()
+	app.StartMetrics(context.Background(), &cfg)()
+}
+
+func TestMetricsExportOverOTLP(t *testing.T) {
+	resetMeterProvider(t)
+	collector := &metricsCollector{}
+	server := httptest.NewServer(collector)
+	defer server.Close()
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", server.URL)
+	t.Setenv("OTEL_SERVICE_NAME", "metrics-unit-service")
+	cfg := config.Defaults()
+	stop := app.StartMetrics(context.Background(), &cfg)
+	if _, ok := otelapi.GetMeterProvider().(*sdkmetric.MeterProvider); !ok {
+		t.Fatal("an SDK meter provider is installed")
+	}
+	if shutdown, err := otel.ConfigureMetrics(context.Background(), "again"); err != nil || shutdown(context.Background()) != nil {
+		t.Fatalf("a second configure is a no-op: %v", err)
+	}
+
+	router := chi.NewRouter()
+	router.Use(otel.MetricsMiddleware)
+	router.Get("/orders/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/orders/7", nil))
+	stop()
+	for _, fragment := range []string{"http.server.request.count", "http.server.request.duration", "/orders/{id}", "go.goroutine.count", "metrics-unit-service"} {
+		if !collector.received(fragment) {
+			t.Fatalf("the collector receives %q", fragment)
+		}
+	}
+}
+
+func TestMetricsReportExporterErrors(t *testing.T) {
+	resetMeterProvider(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+	t.Setenv("OTEL_EXPORTER_OTLP_CERTIFICATE", writeTestCertificate(t))
+	shutdown, err := otel.ConfigureMetrics(context.Background(), "")
+	if err == nil {
+		t.Fatal("a TLS certificate on a plain-HTTP endpoint fails exporter start")
+	}
+	if shutdown(context.Background()) != nil {
+		t.Fatal("the fallback shutdown is a no-op")
+	}
+	cfg := config.Defaults()
+	app.StartMetrics(context.Background(), &cfg)()
+}
+
+func writeTestCertificate(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "otel-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

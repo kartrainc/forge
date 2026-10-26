@@ -50,7 +50,7 @@ def test_python_only_providers_rejected_on_go_only_project(provider: str) -> Non
 
 def test_generated_go_service_carries_port_adapter_and_tests() -> None:
     root = generate(_go_project({"llm.provider": "openai"}), quiet=True, dry_run=True)
-    service = next(p.parent for p in root.rglob("go.mod"))
+    service = root / "services" / "api"
     port = service / "internal" / "ports" / "llm" / "llm.go"
     adapter = service / "internal" / "adapters" / "llmopenai" / "openai.go"
     assert "type Port interface" in port.read_text(encoding="utf-8")

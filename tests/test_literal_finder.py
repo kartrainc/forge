@@ -10,8 +10,8 @@ path (item 6 of the bidirectional-sync roadmap):
   ``int``) → empty tuple.
 * Parse failures → empty tuple.
 * Language gates — TypeScript returns ``()`` unless the ``ts-morph``
-  sidecar is enabled. (Rust has its own dedicated finder; see
-  :mod:`tests.test_literal_finder_rust`.)
+  sidecar is enabled. (Rust and Go have their own dedicated finders; see
+  :mod:`tests.test_literal_finder_rust` and :mod:`tests.test_literal_finder_go`.)
 
 The tests build snippet bodies inline because the finder is a pure
 function — no FragmentContext / fragment registry / inject.yaml needed.
@@ -152,6 +152,13 @@ class TestLanguageGates:
         upstream = "fn main() { let x = 1; }"
         current = "fn main() { let x = 2; }"
         edits = find_literal_edits(upstream, current, language="rust")
+        assert len(edits) == 1
+        assert edits[0].kind == "int"
+        assert edits[0].old_value == "1"
+        assert edits[0].new_value == "2"
+
+    def test_go_pure_literal_swap_emits_edit(self) -> None:
+        edits = find_literal_edits("x := 1", "x := 2", language="go")
         assert len(edits) == 1
         assert edits[0].kind == "int"
         assert edits[0].old_value == "1"

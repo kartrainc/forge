@@ -1,0 +1,680 @@
+{%- set platform_auth = options.get('auth.mode') == 'generate' -%}
+{%- set breaker = options.get('reliability.circuit_breaker') -%}
+// Package clients is the resilient service-to-service HTTP client: timeouts,
+// exponential-backoff retries of idempotent requests, a circuit breaker,
+// optional bearer auth, and propagation of the request correlation id and
+// caller identity, like the Python ServiceClient. Redirects are not followed.
+//
+//	knowledge, err := clients.New(clients.Config{
+//		BaseURL:     "http://knowledge:5002",
+//		ServiceName: "knowledge",
+{%- if platform_auth %}
+//		Auth:        clients.PlatformAuth(s2s), // or clients.KeycloakClientCredentials(...)
+{%- else %}
+//		Auth:        clients.KeycloakClientCredentials("http://keycloak:8080", "app", "svc-orders", secret),
+{%- endif %}
+//	})
+//	var hits []Hit
+//	err = knowledge.Do(ctx, clients.Request{Method: http.MethodGet, Path: "/api/v1/search",
+//		Query: url.Values{"q": {query}}}, &hits)
+package clients
+
+import (
+	"bytes"
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"math/rand/v2"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+{%- if platform_auth %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
+
+	"github.com/google/uuid"
+{%- if breaker %}
+
+	"{{ project_name }}/internal/circuitbreaker"
+	"{{ project_name }}/internal/identity"
+{%- else %}
+
+	"{{ project_name }}/internal/identity"
+{%- endif %}
+	"{{ project_name }}/internal/middleware"
+)
+
+// Default outbound identity header names, read by the tenant_context
+// middleware on the receiving side.
+const (
+	CustomerIDHeader = "x-customer-id"
+	UserIDHeader     = "x-user-id"
+	TenantSlugHeader = "x-tenant-slug"
+)
+
+// DefaultTimeout bounds each attempt.
+const DefaultTimeout = 30 * time.Second
+
+// DefaultMaxResponseBytes caps the JSON body decoded from a 2xx response.
+const DefaultMaxResponseBytes = 16 << 20
+
+// IdempotencyKeyHeader makes a request of any method safe to retry.
+const IdempotencyKeyHeader = "Idempotency-Key"
+
+const maxErrorBody = 1 << 20
+
+// ErrCircuitOpen marks a call the breaker rejected without contacting the
+// service.
+var ErrCircuitOpen = errors.New("circuit breaker open")
+
+// ServiceCallError is returned for every failed call. StatusCode and Body are
+// set when the service answered with a non-2xx status; Method and URL are "*"
+// when the circuit breaker rejected the call.
+type ServiceCallError struct {
+	Service    string
+	Method     string
+	URL        string
+	StatusCode int
+	Body       string
+	Err        error
+}
+
+func (e *ServiceCallError) Error() string {
+	message := e.Service + ": " + e.Method + " " + e.URL
+	if e.StatusCode != 0 {
+		return message + " -> " + strconv.Itoa(e.StatusCode)
+	}
+	return message + ": " + e.Err.Error()
+}
+
+func (e *ServiceCallError) Unwrap() error { return e.Err }
+
+// StatusError is a non-2xx response. RetryAfter is the Retry-After header of
+// a 429 or 503, zero when absent.
+type StatusError struct {
+	StatusCode int
+	Body       string
+	RetryAfter time.Duration
+}
+
+func (e *StatusError) Error() string { return "HTTP " + strconv.Itoa(e.StatusCode) }
+
+// TokenSource supplies the bearer token of each attempt. A source that also
+// implements Invalidate(ctx) gets one refresh-and-resend on a 401.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
+type tokenInvalidator interface {
+	Invalidate(ctx context.Context)
+}
+
+// Breaker guards one call, retries included; *circuitbreaker.Breaker
+// satisfies it.
+type Breaker interface {
+	Call(op func() error) error
+}
+
+// RetryPolicy retries failed attempts with exponential backoff:
+// min(BaseDelay*2^attempt, MaxDelay), scaled by a random 0.5-1.5 with Jitter,
+// and waits at least the Retry-After of a 429 or 503 (capped at MaxDelay).
+// New fills a zero BaseDelay or MaxDelay with the default; MaxRetries 0
+// disables retries.
+type RetryPolicy struct {
+	MaxRetries int
+	BaseDelay  time.Duration
+	MaxDelay   time.Duration
+	Jitter     bool
+	// Retryable decides whether a failed attempt of request is retried; nil
+	// means DefaultRetryable.
+	Retryable func(request Request, err error) bool
+}
+
+// DefaultRetryPolicy is three retries from 0.5s up to 30s, with jitter.
+func DefaultRetryPolicy() RetryPolicy {
+	return RetryPolicy{MaxRetries: 3, BaseDelay: 500 * time.Millisecond, MaxDelay: 30 * time.Second, Jitter: true}
+}
+
+// Backoff is the wait before retry number attempt+1.
+func (p RetryPolicy) Backoff(attempt int) time.Duration {
+	delay := math.Min(float64(p.BaseDelay)*math.Pow(2, float64(attempt)), float64(p.MaxDelay))
+	if p.Jitter {
+		delay *= 0.5 + rand.Float64()
+	}
+	return time.Duration(delay)
+}
+
+func (p RetryPolicy) withDefaults() RetryPolicy {
+	defaults := DefaultRetryPolicy()
+	p.BaseDelay = cmp.Or(p.BaseDelay, defaults.BaseDelay)
+	p.MaxDelay = cmp.Or(p.MaxDelay, defaults.MaxDelay)
+	return p
+}
+
+// Idempotent reports whether request is safe to resend: GET, HEAD, OPTIONS,
+// PUT and DELETE, or any method with an Idempotency-Key header.
+func Idempotent(request Request) bool {
+	switch request.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
+		return true
+	}
+	return request.Header.Get(IdempotencyKeyHeader) != ""
+}
+
+// DefaultRetryable retries an Idempotent request after a 5xx or 429 response,
+// a failed connection or a timeout; never after a 4xx, a TLS failure or a
+// connection lost once the request was sent.
+func DefaultRetryable(request Request, err error) bool {
+	if !Idempotent(request) {
+		return false
+	}
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.StatusCode == http.StatusTooManyRequests || status.StatusCode >= http.StatusInternalServerError
+	}
+	return transient(err)
+}
+
+// transient reports a connection that could not be opened or a timeout.
+func transient(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// serviceFailure is what the breaker counts: a 5xx or a transient transport
+// failure, never a 4xx or a call the caller gave up on.
+func serviceFailure(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.StatusCode >= http.StatusInternalServerError
+	}
+	return transient(err)
+}
+
+func (p RetryPolicy) run(ctx context.Context, service string, request Request, op func() error) error {
+	retryable := p.Retryable
+	if retryable == nil {
+		retryable = DefaultRetryable
+	}
+	for attempt := 0; ; attempt++ {
+		err := op()
+		switch {
+		case err == nil:
+			return nil
+		case ctx.Err() != nil:
+			return cancelled(ctx, err)
+		case attempt >= p.MaxRetries || !retryable(request, err):
+			return err
+		}
+		delay := p.delay(attempt, err)
+		slog.WarnContext(ctx, "retrying service call", "service", service, "attempt", attempt+1,
+			"max_retries", p.MaxRetries, "delay", delay.String(), "error", err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return cancelled(ctx, err)
+		case <-timer.C:
+		}
+	}
+}
+
+func (p RetryPolicy) delay(attempt int, err error) time.Duration {
+	delay := p.Backoff(attempt)
+	var status *StatusError
+	if errors.As(err, &status) && status.RetryAfter > 0 {
+		delay = max(delay, min(status.RetryAfter, p.MaxDelay))
+	}
+	return delay
+}
+
+// cancelled keeps the last failure and makes the caller's context error
+// visible to errors.Is.
+func cancelled(ctx context.Context, err error) error {
+	if errors.Is(err, ctx.Err()) {
+		return err
+	}
+	return errors.Join(ctx.Err(), err)
+}
+
+// retryAfter parses a Retry-After header: delay seconds or an HTTP date.
+func retryAfter(header string) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(header)); err == nil {
+		return time.Duration(min(max(seconds, 0), math.MaxInt32)) * time.Second
+	}
+	if at, err := http.ParseTime(header); err == nil {
+		return max(time.Until(at), 0)
+	}
+	return 0
+}
+
+// IdentityHeaders names the outbound identity headers; empty fields keep the
+// defaults.
+type IdentityHeaders struct {
+	CustomerID string
+	UserID     string
+	TenantSlug string
+}
+
+// Config configures a ServiceClient. Zero optional fields take the defaults.
+type Config struct {
+	// BaseURL is the service root, e.g. http://knowledge:5002.
+	BaseURL     string
+	ServiceName string
+	// Timeout bounds each attempt (DefaultTimeout); ignored with HTTPClient.
+	Timeout time.Duration
+	// Auth sets "Authorization: Bearer <token>"; nil sends no credentials.
+	Auth TokenSource
+	// Retry nil means DefaultRetryPolicy.
+	Retry *RetryPolicy
+	// MaxResponseBytes caps the JSON body decoded from a 2xx response
+	// (DefaultMaxResponseBytes).
+	MaxResponseBytes int64
+{%- if breaker %}
+	// Breaker nil means the internal/circuitbreaker breaker for ServiceName
+	// (CIRCUIT_BREAKER_THRESHOLD / CIRCUIT_BREAKER_RESET_TIMEOUT).
+{%- else %}
+	// Breaker nil means no circuit breaker (enable reliability.circuit_breaker
+	// for the generated one).
+{%- endif %}
+	Breaker Breaker
+	// HTTPClient replaces the default client, which follows no redirects (a
+	// 3xx fails the call); its own timeout and redirect policy apply.
+	HTTPClient      *http.Client
+	IdentityHeaders IdentityHeaders
+}
+
+// Request is one call. Path starts with "/" and is appended to BaseURL; an
+// empty Method is GET; Body is JSON-encoded when non-nil. Caller headers are
+// sent unless a propagated header replaces them; an Idempotency-Key header
+// makes the request retryable.
+type Request struct {
+	Method string
+	Path   string
+	Query  url.Values
+	Header http.Header
+	Body   any
+}
+
+// ServiceClient calls one downstream service. It is safe for concurrent use.
+type ServiceClient struct {
+	baseURL     string
+	service     string
+	auth        TokenSource
+	retry       RetryPolicy
+	breaker     Breaker
+	client      *http.Client
+	headers     IdentityHeaders
+	maxResponse int64
+}
+
+// New validates cfg and builds the client.
+func New(cfg Config) (*ServiceClient, error) {
+	base, err := url.Parse(strings.TrimRight(cfg.BaseURL, "/"))
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" ||
+		strings.ContainsAny(cfg.BaseURL, "?#") {
+		return nil, fmt.Errorf("clients: base URL %q must be an absolute http(s) URL without query or fragment", cfg.BaseURL)
+	}
+	if cfg.ServiceName == "" {
+		return nil, errors.New("clients: service name is required")
+	}
+	retry := DefaultRetryPolicy()
+	if cfg.Retry != nil {
+		retry = cfg.Retry.withDefaults()
+	}
+	breaker := cfg.Breaker
+	if breaker == nil {
+		breaker = defaultBreaker(cfg.ServiceName)
+	}
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: cmp.Or(cfg.Timeout, DefaultTimeout), CheckRedirect: noRedirects}
+	}
+	maxResponse := cfg.MaxResponseBytes
+	if maxResponse <= 0 {
+		maxResponse = DefaultMaxResponseBytes
+	}
+	headers := cfg.IdentityHeaders
+	headers.CustomerID = cmp.Or(headers.CustomerID, CustomerIDHeader)
+	headers.UserID = cmp.Or(headers.UserID, UserIDHeader)
+	headers.TenantSlug = cmp.Or(headers.TenantSlug, TenantSlugHeader)
+	return &ServiceClient{
+		baseURL:     base.String(),
+		service:     cfg.ServiceName,
+		auth:        cfg.Auth,
+		retry:       retry,
+		breaker:     breaker,
+		client:      client,
+		headers:     headers,
+		maxResponse: maxResponse,
+	}, nil
+}
+
+func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+{%- if breaker %}
+
+func defaultBreaker(service string) Breaker { return circuitbreaker.NewRegistry().Get(service) }
+{%- else %}
+
+type noBreaker struct{}
+
+func (noBreaker) Call(op func() error) error { return op() }
+
+func defaultBreaker(string) Breaker { return noBreaker{} }
+{%- endif %}
+
+// ServiceName is the downstream service name.
+func (c *ServiceClient) ServiceName() string { return c.service }
+
+// Get decodes the JSON response into out (skipped when out is nil or on 204).
+func (c *ServiceClient) Get(ctx context.Context, path string, out any) error {
+	return c.Do(ctx, Request{Method: http.MethodGet, Path: path}, out)
+}
+
+func (c *ServiceClient) Post(ctx context.Context, path string, body, out any) error {
+	return c.Do(ctx, Request{Method: http.MethodPost, Path: path, Body: body}, out)
+}
+
+func (c *ServiceClient) Put(ctx context.Context, path string, body, out any) error {
+	return c.Do(ctx, Request{Method: http.MethodPut, Path: path, Body: body}, out)
+}
+
+func (c *ServiceClient) Patch(ctx context.Context, path string, body, out any) error {
+	return c.Do(ctx, Request{Method: http.MethodPatch, Path: path, Body: body}, out)
+}
+
+func (c *ServiceClient) Delete(ctx context.Context, path string, out any) error {
+	return c.Do(ctx, Request{Method: http.MethodDelete, Path: path}, out)
+}
+
+// Do sends request through the breaker and the retry policy and decodes a 2xx
+// JSON response into out. Every failure is a *ServiceCallError; the breaker
+// counts only 5xx responses and transient transport failures.
+func (c *ServiceClient) Do(ctx context.Context, request Request, out any) error {
+	request.Method = cmp.Or(request.Method, http.MethodGet)
+	target := c.baseURL + request.Path
+	if !strings.HasPrefix(request.Path, "/") {
+		return &ServiceCallError{Service: c.service, Method: request.Method, URL: target,
+			Err: fmt.Errorf("path %q must start with /", request.Path)}
+	}
+	if len(request.Query) > 0 {
+		separator := "?"
+		if strings.Contains(target, "?") {
+			separator = "&"
+		}
+		target += separator + request.Query.Encode()
+	}
+	var body []byte
+	if request.Body != nil {
+		encoded, err := json.Marshal(request.Body)
+		if err != nil {
+			return &ServiceCallError{Service: c.service, Method: request.Method, URL: target, Err: err}
+		}
+		body = encoded
+	}
+	var err error
+	ran := false
+	rejected := c.breaker.Call(func() error {
+		ran = true
+		err = c.retry.run(ctx, c.service, request, func() error { return c.attempt(ctx, request, target, body, out) })
+		if serviceFailure(ctx, err) {
+			return err
+		}
+		return nil
+	})
+	switch {
+	case !ran:
+		return &ServiceCallError{Service: c.service, Method: "*", URL: "*", Err: errors.Join(ErrCircuitOpen, rejected)}
+	case err == nil:
+		return nil
+	}
+	callErr := &ServiceCallError{Service: c.service, Method: request.Method, URL: target, Err: err}
+	var status *StatusError
+	if errors.As(err, &status) {
+		callErr.StatusCode, callErr.Body = status.StatusCode, status.Body
+	}
+	return callErr
+}
+
+func (c *ServiceClient) attempt(ctx context.Context, request Request, target string, body []byte, out any) error {
+	response, err := c.send(ctx, request, target, body)
+	if invalidator, ok := c.auth.(tokenInvalidator); ok && err == nil && response.StatusCode == http.StatusUnauthorized {
+		discard(response)
+		invalidator.Invalidate(ctx)
+		response, err = c.send(ctx, request, target, body)
+	}
+	if err != nil {
+		return err
+	}
+	defer discard(response)
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBody))
+		failure := &StatusError{StatusCode: response.StatusCode, Body: string(raw)}
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
+			failure.RetryAfter = retryAfter(response.Header.Get("Retry-After"))
+		}
+		return failure
+	}
+	if out == nil || response.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	return json.NewDecoder(http.MaxBytesReader(nil, response.Body, c.maxResponse)).Decode(out)
+}
+
+func (c *ServiceClient) send(ctx context.Context, request Request, target string, body []byte) (*http.Response, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	outbound, err := http.NewRequestWithContext(ctx, request.Method, target, reader)
+	if err != nil {
+		return nil, err
+	}
+	if request.Header != nil {
+		outbound.Header = request.Header.Clone()
+	}
+	if body != nil && outbound.Header.Get("Content-Type") == "" {
+		outbound.Header.Set("Content-Type", "application/json")
+	}
+	c.propagate(ctx, outbound.Header)
+	if c.auth != nil {
+		token, err := c.auth.Token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		outbound.Header.Set("Authorization", "Bearer "+token)
+	}
+	return c.client.Do(outbound)
+}
+
+// propagate forwards the correlation id and the caller identity bound to ctx.
+func (c *ServiceClient) propagate(ctx context.Context, header http.Header) {
+	if id := middleware.RequestID(ctx); id != "" {
+		header.Set(middleware.RequestIDHeader, id)
+	}
+	caller, ok := identity.FromContext(ctx)
+	if !ok {
+		return
+	}
+	if caller.TenantID != uuid.Nil {
+		header.Set(c.headers.CustomerID, caller.TenantID.String())
+	}
+	if caller.Subject != "" {
+		header.Set(c.headers.UserID, caller.Subject)
+	}
+	if caller.TenantSlug != "" {
+		header.Set(c.headers.TenantSlug, caller.TenantSlug)
+	}
+}
+
+func discard(response *http.Response) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxErrorBody))
+	_ = response.Body.Close()
+}
+
+// ClientCredentials is an OAuth2 client-credentials TokenSource that caches
+// the token until RefreshMargin (default 30s) before it expires. Build it with
+// NewClientCredentials or KeycloakClientCredentials.
+type ClientCredentials struct {
+	TokenURL      string
+	ClientID      string
+	ClientSecret  string
+	Scopes        []string
+	RefreshMargin time.Duration
+	// HTTPClient nil means a client with DefaultTimeout that follows no
+	// redirects.
+	HTTPClient *http.Client
+
+	mu        sync.Mutex
+	token     string
+	expiresAt time.Time
+	inflight  *tokenFetch
+}
+
+// tokenFetch is the token request in flight; callers arriving meanwhile wait
+// for its result.
+type tokenFetch struct {
+	done      chan struct{}
+	token     string
+	err       error
+	abandoned bool
+}
+
+// NewClientCredentials targets an OAuth2 token endpoint.
+func NewClientCredentials(tokenURL, clientID, clientSecret string, scopes ...string) *ClientCredentials {
+	return &ClientCredentials{TokenURL: tokenURL, ClientID: clientID, ClientSecret: clientSecret, Scopes: scopes}
+}
+
+// KeycloakClientCredentials targets the token endpoint of a Keycloak realm.
+func KeycloakClientCredentials(serverURL, realm, clientID, clientSecret string) *ClientCredentials {
+	tokenURL := strings.TrimRight(serverURL, "/") + "/realms/" + realm + "/protocol/openid-connect/token"
+	return NewClientCredentials(tokenURL, clientID, clientSecret)
+}
+
+// Token returns the cached token or fetches a new one; concurrent callers
+// share one fetch and stop waiting when their ctx ends. A non-2xx answer is a
+// *StatusError.
+func (c *ClientCredentials) Token(ctx context.Context) (string, error) {
+	for {
+		c.mu.Lock()
+		if c.token != "" && time.Now().Before(c.expiresAt.Add(-cmp.Or(c.RefreshMargin, 30*time.Second))) {
+			token := c.token
+			c.mu.Unlock()
+			return token, nil
+		}
+		if flight := c.inflight; flight != nil {
+			c.mu.Unlock()
+			select {
+			case <-flight.done:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			if !flight.abandoned {
+				return flight.token, flight.err
+			}
+			continue
+		}
+		flight := &tokenFetch{done: make(chan struct{})}
+		c.inflight = flight
+		c.mu.Unlock()
+		token, lifetime, err := c.fetch(ctx)
+		c.mu.Lock()
+		if err == nil {
+			c.token, c.expiresAt = token, time.Now().Add(lifetime)
+		}
+		c.inflight = nil
+		c.mu.Unlock()
+		flight.token, flight.err, flight.abandoned = token, err, err != nil && ctx.Err() != nil
+		close(flight.done)
+		return token, err
+	}
+}
+
+func (c *ClientCredentials) fetch(ctx context.Context) (string, time.Duration, error) {
+	form := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {c.ClientID},
+		"client_secret": {c.ClientSecret},
+	}
+	if len(c.Scopes) > 0 {
+		form.Set("scope", strings.Join(c.Scopes, " "))
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", 0, err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	client := c.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: DefaultTimeout, CheckRedirect: noRedirects}
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", 0, err
+	}
+	defer discard(response)
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBody))
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return "", 0, &StatusError{StatusCode: response.StatusCode, Body: string(raw)}
+	}
+	var payload struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", 0, fmt.Errorf("token endpoint returned invalid JSON: %w", err)
+	}
+	if payload.AccessToken == "" {
+		return "", 0, errors.New("token endpoint response has no access_token")
+	}
+	return payload.AccessToken, time.Duration(cmp.Or(payload.ExpiresIn, 300)) * time.Second, nil
+}
+
+// Invalidate drops the cached token.
+func (c *ClientCredentials) Invalidate(context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = ""
+}
+{%- if platform_auth %}
+
+// PlatformAuth issues tokens through the platform-auth S2S client: a
+// client_credentials token for s2s.TargetAudience(), scoped to the tenant of
+// the identity bound to ctx. A 401 drops the cached token once.
+func PlatformAuth(s2s *platformauth.S2SClient) TokenSource { return platformAuthTokens{s2s: s2s} }
+
+type platformAuthTokens struct {
+	s2s *platformauth.S2SClient
+}
+
+func (p platformAuthTokens) Token(ctx context.Context) (string, error) {
+	return p.s2s.Token(ctx, p.options(ctx))
+}
+
+func (p platformAuthTokens) Invalidate(ctx context.Context) { p.s2s.Invalidate(p.options(ctx)) }
+
+func (p platformAuthTokens) options(ctx context.Context) platformauth.S2SRequestOptions {
+	var options platformauth.S2SRequestOptions
+	if caller, ok := identity.FromContext(ctx); ok && caller.TenantID != uuid.Nil {
+		options.TenantID = caller.TenantID.String()
+	}
+	return options
+}
+{%- endif %}

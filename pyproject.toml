@@ -28,11 +28,12 @@ dependencies = [
     # transitively present via copier; declaring it explicitly so the
     # typed_config module's dependency surface is honest.
     "pydantic>=2.13.5,<3",
-    # v2 Theme 3B — tree-sitter-rust drives the Rust path of
-    # ``forge.codegen.literal_finder``. Declared as a runtime dep (not
-    # dev-only) because the harvester invokes the finder during normal
-    # ``forge sync`` runs on Axum/other Rust targets.
+    # v2 Theme 3B — tree-sitter-rust and tree-sitter-go drive the Rust and
+    # Go paths of ``forge.codegen.literal_finder``. Declared as runtime deps
+    # (not dev-only) because the harvester invokes the finder during normal
+    # ``forge sync`` runs on Axum and Go targets.
     "tree-sitter>=0.26.0,<1",
+    "tree-sitter-go>=0.25.0,<1",
     "tree-sitter-rust>=0.24.2,<1",
     # Layered-component model — semver range satisfaction for component
     # `[feature.component.children]` version specs. Previously transitively

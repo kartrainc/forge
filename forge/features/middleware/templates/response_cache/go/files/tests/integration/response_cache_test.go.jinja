@@ -1,0 +1,52 @@
+package integration_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"{{ project_name }}/internal/middleware"
+)
+
+func TestResponseCacheAgainstRealRedis(t *testing.T) {
+	url := os.Getenv("RESPONSE_CACHE_URL")
+	if url == "" {
+		t.Skip("set RESPONSE_CACHE_URL to run the response cache against a real Redis")
+	}
+	store, err := middleware.NewRedisResponseCacheStore(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cache := middleware.NewResponseCache(store, "forge-test:"+uuid.NewString())
+	defer cache.Clear(context.Background(), "")
+	calls := 0
+	handler := cache.Middleware(time.Minute, "items")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	send := func() *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/items", nil))
+		return recorder
+	}
+	if miss := send(); miss.Header().Get(middleware.ResponseCacheStatusHeader) != "MISS" {
+		t.Fatalf("miss: %v", miss.Header())
+	}
+	hit := send()
+	if calls != 1 || hit.Header().Get(middleware.ResponseCacheStatusHeader) != "HIT" || hit.Body.String() != `{"ok":true}` {
+		t.Fatalf("hit: calls=%d %v %q", calls, hit.Header(), hit.Body.String())
+	}
+	if err := cache.Clear(context.Background(), "items"); err != nil {
+		t.Fatal(err)
+	}
+	if send(); calls != 2 {
+		t.Fatal("clear invalidates the namespace")
+	}
+}

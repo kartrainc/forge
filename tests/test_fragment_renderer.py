@@ -336,12 +336,16 @@ class TestLegacyImportShim:
     def test_legacy_render_helpers_re_exported(self) -> None:
         from forge.middleware_spec import (
             render_axum_layer,
+            render_chi_middleware,
             render_fastapi_middleware,
             render_fastify_plugin,
             render_middleware_injections,
         )
         from forge.specs.middleware import (
             render_axum_layer as new_axum,
+        )
+        from forge.specs.middleware import (
+            render_chi_middleware as new_chi,
         )
         from forge.specs.middleware import (
             render_fastapi_middleware as new_fastapi,
@@ -354,6 +358,7 @@ class TestLegacyImportShim:
         )
 
         assert render_axum_layer is new_axum
+        assert render_chi_middleware is new_chi
         assert render_fastapi_middleware is new_fastapi
         assert render_fastify_plugin is new_fastify
         assert render_middleware_injections is new_dispatch
@@ -398,6 +403,7 @@ def test_pipeline_run_accepts_renderers_kwarg() -> None:
         (BackendLanguage.PYTHON, "src/app/main.py"),
         (BackendLanguage.NODE, "src/app.ts"),
         (BackendLanguage.RUST, "src/app.rs"),
+        (BackendLanguage.GO, "internal/app/app.go"),
     ],
 )
 def test_render_dispatches_to_correct_target_per_backend(
