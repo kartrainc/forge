@@ -570,6 +570,7 @@ def _update_locked(
             # The recorded Vue UI kit selects fragments' files-<kit>/ trees below.
             if data.frontend.ui_kit:
                 config.frontend.ui_kit = data.frontend.ui_kit
+            config.frontend.dev_server = data.frontend.dev_server
             # A Vue project with the chat is served without the content-security
             # policy (forge.frontend_csp), which the Helm chart's values carry.
             config.frontend.include_chat = _recorded_include_chat(

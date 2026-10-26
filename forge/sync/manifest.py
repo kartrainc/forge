@@ -154,6 +154,9 @@ class ForgeFrontendData:
     # reason as ``layout``. Empty ⇒ a manifest from before the option, or a
     # framework without kits: the default kit at the consume site.
     ui_kit: str = ""
+    # Vite dev-server overlay (``--dev-server`` / FrontendConfig.dev_server), written
+    # only when on so a project without it keeps the manifest it had.
+    dev_server: bool = False
 
 
 @dataclass
@@ -330,6 +333,7 @@ def read_forge_toml(path: Path) -> ForgeTomlData:
             app_dir=str(_unwrap(frontend_tbl.get("app_dir", ""))),
             layout=str(_unwrap(frontend_tbl.get("layout", ""))),
             ui_kit=str(_unwrap(frontend_tbl.get("ui_kit", ""))),
+            dev_server=bool(_unwrap(frontend_tbl.get("dev_server", False))),
         )
     else:
         frontend = _infer_frontend_from_v3(path.parent, templates)
@@ -637,6 +641,8 @@ def write_forge_toml(
             fe_tbl.add("layout", frontend.layout)
         if frontend.ui_kit:
             fe_tbl.add("ui_kit", frontend.ui_kit)
+        if frontend.dev_server:
+            fe_tbl.add("dev_server", True)
         forge_tbl.add("frontend", fe_tbl)
 
     options_tbl = tomlkit.table()

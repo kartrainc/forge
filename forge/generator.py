@@ -1283,6 +1283,7 @@ def _frontend_manifest_data(config: ProjectConfig):
         layout=config.frontend.layout,
         # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
         ui_kit=config.frontend.ui_kit if applies_to(config.frontend.framework) else "",
+        dev_server=config.frontend.dev_server,
     )
 
 

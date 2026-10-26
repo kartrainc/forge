@@ -266,6 +266,7 @@ def _build_frontend_from_cfg(
         ),
         layout=r.get("layout", "frontend", "layout", default="sidebar"),
         ui_kit=r.get("ui_kit", "frontend", "ui_kit", default="shadcn"),
+        dev_server=r.get("dev_server", "frontend", "dev_server", default=False),
     )
     return frontend, include_auth
 

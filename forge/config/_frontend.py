@@ -200,6 +200,9 @@ class FrontendConfig:
     generate_e2e_tests: bool = True
     layout: str = "sidebar"  # UI app-shell layout; see forge.layout_variants
     ui_kit: str = "shadcn"  # Vue only: component library; see forge.ui_kits
+    # Run the Compose frontend as a Vite dev server with hot reload (ADR-013):
+    # a ``dev`` Dockerfile stage plus docker-compose.dev.yaml. Vue only for now.
+    dev_server: bool = False
 
     def effective_mode(self, options_mode: str = "generate") -> str:
         """Collapse two sources of frontend-mode truth into one value.
@@ -250,6 +253,14 @@ class FrontendConfig:
                 "(the home feature's retrofit client depends on the generated OpenAPI bindings)."
             )
         validate_port(self.server_port, "Frontend port")
+        if not isinstance(self.dev_server, bool):
+            raise ValueError(
+                f"dev_server must be true or false, got {type(self.dev_server).__name__}"
+            )
+        if self.dev_server and self.framework != FrontendFramework.VUE:
+            raise ValueError(
+                f"dev_server is only available for the Vue template, not {self.framework.value}."
+            )
         validate_features(self.features)
         for f in self.features:
             if f in FRONTEND_RESERVED:
