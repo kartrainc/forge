@@ -473,6 +473,9 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert "  store:\n    build:\n      target: dev" in dev
     assert "./services/store/prisma" in dev
     assert "./services/capture/prisma" not in dev
+    # A new migration reruns the store's migrate one-shot; capture has none.
+    assert "  store-migrate:\n    develop:\n      watch:" in dev
+    assert "capture-migrate" not in dev
     assert "./services/capture/tsconfig.json" in dev
 
     # The dev stage branches before the compile, so a type error mid-edit never
@@ -481,6 +484,95 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     dev_stage = dockerfile[dockerfile.index("AS dev") : dockerfile.index("AS builder")]
     assert "FROM deps AS dev" in dockerfile
     assert "npm run build" not in dev_stage
+
+    # No entity, so no domain enum; the database-backed sibling keeps them.
+    assert not (svc / "src" / "schemas" / "enums").exists()
+    assert (root / "services" / "store" / "src" / "schemas" / "enums").is_dir()
+
+    # Its own tests carry the coverage gate: the entrypoint and the routes over real HTTP.
+    assert (svc / "tests" / "e2e" / "entrypoint.test.ts").is_file()
+    assert '"/api/v1/"' in (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
+
+
+def test_a_backend_without_a_database_defaults_to_no_features():
+    http = BackendConfig(name="capture", language=BackendLanguage.NODE, app_template="http-service")
+    crud = BackendConfig(name="store", language=BackendLanguage.NODE)
+
+    assert http.features == []
+    assert crud.features == ["items"]
+    http.validate()
+
+
+def test_a_backend_without_a_database_refuses_crud_features():
+    # A feature is a table, its API and the frontend's pages: without a database the pages
+    # would call an API nobody serves.
+    http = BackendConfig(
+        name="capture",
+        language=BackendLanguage.NODE,
+        app_template="http-service",
+        features=["items"],
+    )
+
+    with pytest.raises(ValueError, match="owns no database"):
+        http.validate()
+
+
+def test_a_stack_file_backend_without_features_gets_its_templates_default():
+    import argparse
+
+    from forge.cli.builder import _build_config
+
+    args = argparse.Namespace()
+    stack = {
+        "project_name": "http_demo",
+        "backends": [
+            {"name": "capture", "language": "node", "app_template": "http-service", "server_port": 5100},
+            {"name": "store", "language": "node", "server_port": 5101},
+        ],
+        "frontend": {"framework": "none"},
+    }
+
+    config = _build_config(args, stack)
+
+    assert [b.features for b in config.backends] == [[], ["items"]]
+
+
+def test_authenticated_e2e_verifies_a_minted_token(tmp_path: Path):
+    """Behind the gatekeeper, the E2E suite serves its own keys, expects the verifier's 401 for an
+    anonymous request and routes an authenticated one; without auth it routes directly."""
+    from forge.generator import generate
+
+    def network_test(auth: bool, out: Path) -> str:
+        cfg = ProjectConfig(
+            project_name="http_auth",
+            output_dir=str(out),
+            backends=[
+                BackendConfig(
+                    name="capture",
+                    project_name="http_auth",
+                    language=BackendLanguage.NODE,
+                    app_template="http-service",
+                    server_port=5100,
+                )
+            ],
+            frontend=None,
+            include_keycloak=auth,
+            options={"auth.provider": "gatekeeper"} if auth else {},
+        )
+        root = generate(cfg, quiet=True, dry_run=True)
+        svc = root / "services" / "capture"
+        assert "tests/integration/setup-env.ts" in (svc / "vitest.e2e.config.ts").read_text(
+            encoding="utf-8"
+        )
+        return (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
+
+    with_auth = network_test(True, tmp_path / "auth")
+    without = network_test(False, tmp_path / "plain")
+
+    assert "buildTestToken" in with_auth
+    assert "toBe(401)" in with_auth
+    assert "buildTestToken" not in without
+    assert "toBe(401)" not in without
 
 
 def _http_only_project(tmp_path: Path, names: list[str]) -> ProjectConfig:

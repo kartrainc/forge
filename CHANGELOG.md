@@ -250,7 +250,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Helm chart wire no database, DB URL or migration for it. The connection
   pool, background tasks, queue and cache fragments skip it, as the HTTP
   middleware skips `worker`. Its image keeps only production dependencies.
-  `crud-service` output is unchanged.
+  Without `features` it serves none, and naming CRUD features for it is
+  refused: the frontend would get pages for an API it does not serve. No
+  domain enum or entity type is emitted into it.
 - Let an app-template manifest declare `uses_database = false` for a service
   shape without a database of its own.
 - Render a `.dockerignore` into every Node service, so a host install, build
@@ -260,8 +262,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   builds each Node Dockerfile's new `dev` stage (every dependency, `tsx
   watch`). A `src/` change is synced and the server restarts; a `config/`
   change restarts the container; `package.json`, the lockfile, `prisma/` or
-  `packages/` rebuild the image. The services stay behind the same Traefik,
-  auth and network, which a host-side `npm run dev` leaves.
+  `packages/` rebuild the image, and a `prisma/` change reruns the service's
+  migrate one-shot, which applies a new migration. The services stay behind
+  the same Traefik, auth and network, which a host-side `npm run dev` leaves.
+- Every Node service's E2E suite runs behind platform auth: it loads the
+  integration tier's issuer and audience defaults, serves its own keys, mints
+  a token and expects the verifier's 401 for an anonymous request. It also
+  starts the entrypoint (listen, drain on SIGTERM), and the error-handler
+  suite covers a schema failure's 422.
+- `scripts/check_generated_quality.py` takes `--app-template` and
+  `--platform-auth`; the generated-quality lanes include a Node
+  `http-service`.
 
 ### Fixed
 

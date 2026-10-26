@@ -263,6 +263,14 @@ GO_RESERVED_MODULE_NAMES: frozenset[str] = frozenset(
 )
 
 
+class _DefaultFeatures(list):
+    """The features of a backend whose configuration names none, told apart from an explicit list."""
+
+
+def _default_features() -> list[str]:
+    return _DefaultFeatures(["items"])
+
+
 @dataclass
 class BackendConfig:
     """Backend service configuration."""
@@ -271,7 +279,8 @@ class BackendConfig:
     project_name: str = ""
     language: BackendLanguage = BackendLanguage.PYTHON
     description: str = "A microservice"
-    features: list[str] = field(default_factory=lambda: ["items"])
+    # Omitted: ["items"], or none for an app template that owns no database (resolved in __post_init__).
+    features: list[str] = field(default_factory=_default_features)
     python_version: str = "3.13"
     node_version: str = "22"
     rust_edition: str = "2024"
@@ -298,6 +307,16 @@ class BackendConfig:
     # validation (each name must be a real backend) lives in ProjectConfig.
     depends_on: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if isinstance(self.features, _DefaultFeatures):
+            self.features = ["items"] if self._uses_database() else []
+
+    def _uses_database(self) -> bool:
+        # Local import: forge.backend_app_templates imports BackendLanguage from this package.
+        from forge.backend_app_templates import backend_uses_database  # noqa: PLC0415
+
+        return backend_uses_database(self.language, self.app_template)
+
     def validate(self) -> None:
         validate_port(self.server_port, f"Backend '{self.name}' port")
         if not re.match(r"^[a-z][a-z0-9_-]*$", self.name):
@@ -317,6 +336,13 @@ class BackendConfig:
                 raise ValueError(f"Backend '{self.name}' cannot depend on itself.")
         if self.features:
             validate_features(self.features)
+        # A CRUD feature is a table, its API and the frontend's pages for it: a template without a
+        # database would publish pages for an API it does not serve.
+        if self.features and not self._uses_database():
+            raise ValueError(
+                f"Backend '{self.name}' uses the '{self.app_template}' app template, which owns no "
+                "database, so it serves no CRUD features; leave `features` out."
+            )
         # The chosen application template must be a registered variant for
         # this language. Local import avoids a config<->backend_app_templates
         # import cycle (the latter imports BackendLanguage from this package).

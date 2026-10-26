@@ -31,6 +31,8 @@ def check(
     auth: bool = False,
     features: list[str] | None = None,
     extra_frontends: list[tuple[str, str]] | None = None,
+    app_template: str | None = None,
+    platform_auth: bool = False,
 ) -> dict:
     """Render the reference application for ``language`` and run its gates.
 
@@ -38,13 +40,23 @@ def check(
     ``(name, ui_kit)`` pairs: each becomes its own quality subject.
     """
     frontend = language in {"vue", "svelte"}
+    # The backend behind the gatekeeper, as Kartra runs it: platform auth and its Keycloak.
+    auth_settings = (
+        {"include_keycloak": True, "options": {"auth.provider": "gatekeeper"}}
+        if platform_auth
+        else {}
+    )
     config = ProjectConfig(
         project_name=f"quality-{language}",
+        **auth_settings,
         backends=[
             BackendConfig(
                 name="api",
                 language=BackendLanguage.PYTHON if frontend else BackendLanguage(language),
                 **({"features": features} if features else {}),
+                **({"app_template": app_template} if app_template else {}),
+                # The gatekeeper takes 5000, the backend's default port.
+                **({"server_port": 5100} if platform_auth else {}),
             )
         ],
         frontends=[
@@ -131,6 +143,15 @@ if __name__ == "__main__":
     )
     parser.add_argument("--features", help="Comma-separated CRUD features (default: items).")
     parser.add_argument(
+        "--app-template",
+        help="The backend's app template variant (default: the language's crud-service).",
+    )
+    parser.add_argument(
+        "--platform-auth",
+        action="store_true",
+        help="Render the backend behind the gatekeeper (Keycloak).",
+    )
+    parser.add_argument(
         "--extra-frontend",
         action="append",
         default=[],
@@ -148,6 +169,8 @@ if __name__ == "__main__":
             (name, kit or "shadcn")
             for name, _, kit in (item.partition(":") for item in args.extra_frontend)
         ],
+        app_template=args.app_template,
+        platform_auth=args.platform_auth,
     )
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["passed"] else 12)

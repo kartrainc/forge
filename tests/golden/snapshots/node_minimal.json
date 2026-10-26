@@ -53,15 +53,15 @@
       "sha256": "77ac9733140f48bb"
     },
     "deploy/compose/dev.yaml": {
-      "size": 1172,
-      "sha256": "34724a3eb8ce2fc8"
+      "size": 1514,
+      "sha256": "bf60f344cdb1a8a4"
     },
     "docker-compose.yml": {
       "size": 5712,
       "sha256": "6a5b8740cc1c34fe"
     },
     "forge.toml": {
-      "size": 29927,
+      "size": 30227,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -272,17 +272,21 @@
       "size": 2366,
       "sha256": "13617898a495428a"
     },
+    "services/api/tests/e2e/entrypoint.test.ts": {
+      "size": 1393,
+      "sha256": "65e44b01af2ebc63"
+    },
     "services/api/tests/e2e/network.test.ts": {
-      "size": 550,
-      "sha256": "6e3ee5363f14ef93"
+      "size": 617,
+      "sha256": "2e47ca7bbc1cade2"
     },
     "services/api/tests/integration/database.test.ts": {
       "size": 569,
       "sha256": "a95f55a654cab2c1"
     },
     "services/api/tests/integration/error-handler.test.ts": {
-      "size": 4498,
-      "sha256": "a315048dec5845c0"
+      "size": 5066,
+      "sha256": "805f4ab3f60205f9"
     },
     "services/api/tests/integration/health.test.ts": {
       "size": 1330,
@@ -341,8 +345,8 @@
       "sha256": "aba39920c3521b92"
     },
     "services/api/vitest.e2e.config.ts": {
-      "size": 413,
-      "sha256": "045cfed396d05d8b"
+      "size": 550,
+      "sha256": "8810403c1dc8c6eb"
     },
     "services/api/vitest.integration.config.ts": {
       "size": 619,

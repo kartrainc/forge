@@ -6,7 +6,9 @@
 # Each Node service builds its Dockerfile's `dev` stage (every dependency,
 # `tsx watch`). Compose syncs src/ into the running container and tsx restarts
 # the server; a config/ change restarts the container; a dependency change
-# rebuilds the image. Paths resolve from the project root, the first -f file.
+# rebuilds the image. A prisma/ change also reruns the service's migrate
+# one-shot, which applies a new migration. Paths resolve from the project root,
+# the first -f file.
 services:
 {% for be in backends %}
   {{ be.name }}:
@@ -39,5 +41,14 @@ services:
           ignore:
             - node_modules/
             - dist/
+{% endif %}
+{% if be.migrates %}
+  {{ be.name }}-migrate:
+    develop:
+      watch:
+        # The server restarts on the new Prisma client; this one-shot, rebuilt
+        # and run again, applies the new migration beside it.
+        - action: rebuild
+          path: ./services/{{ be.name }}/prisma
 {% endif %}
 {% endfor %}

@@ -374,9 +374,16 @@ Every Node service also gains a development path and two fixes.
   and `tests/integration/setup-env.ts`, and a project with Node services
   `deploy/compose/dev.yaml`. Run the services from source with
   `docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch`.
+- The E2E suite gains `tests/e2e/entrypoint.test.ts`, `tests/e2e/network.test.ts`
+  checks the verifier when platform auth is on, `vitest.e2e.config.ts` loads
+  `tests/integration/setup-env.ts`, and the error-handler suite gains a case.
+- `deploy/compose/dev.yaml` also watches each database-backed service's
+  `prisma/` from its `<name>-migrate` one-shot, so `watch` applies a new
+  migration.
 - An untouched file gets the change on the next update. A `Dockerfile`,
-  `README.md` or `vitest.integration.config.ts` you edited gets a
-  `.forge-merge` sidecar: fold the new stage or setup file into yours.
+  `README.md`, `vitest.integration.config.ts`, `vitest.e2e.config.ts` or test
+  you edited gets a `.forge-merge` sidecar: fold the new stage, setup file or
+  case into yours.
 - The circuit breaker now adds `@types/opossum` to `dependencies`. If you added
   it yourself under `devDependencies`, keep one of the two.
 

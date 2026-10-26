@@ -1,0 +1,58 @@
+{%- if include_platform_auth | default(false) %}
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { buildTestToken, generateTestKeypair } from "@forge/platform-auth-node/testing";
+{%- endif %}
+import { expect, it } from "vitest";
+import { buildApp } from "../../src/app.js";
+{%- if include_platform_auth | default(false) %}
+
+it("serves real HTTP through the verifier, the middleware and the router", async () => {
+  // The issuer's keys from a local server: the verifier fetches them as it would the gatekeeper's.
+  const keypair = await generateTestKeypair();
+  const issuerServer = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(keypair.jwks()));
+  });
+  await new Promise<void>((resolve) => issuerServer.listen(0, "127.0.0.1", resolve));
+  const issuer = `http://127.0.0.1:${(issuerServer.address() as AddressInfo).port}`;
+  process.env.GATEKEEPER_ISSUER = issuer;
+  const token = await buildTestToken({
+    keypair,
+    issuer,
+    audience: process.env.SERVICE_AUDIENCE as string,
+    subject: "svc-e2e",
+    tenantId: "00000000-0000-0000-0000-000000000001",
+  });
+  const authorization = { authorization: `Bearer ${token}` };
+
+  const app = await buildApp();
+  try {
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const response = await fetch(address + "/api/v1/health/live");
+    expect(response.status).toBe(200);
+    expect((await response.json()).status).toBe("UP");
+    // The verifier answers an anonymous request before the router does.
+    expect((await fetch(address + "/not-found")).status).toBe(401);
+    expect((await fetch(address + "/api/v1/", { headers: authorization })).status).toBe(200);
+    expect((await fetch(address + "/not-found", { headers: authorization })).status).toBe(404);
+  } finally {
+    await app.close();
+    issuerServer.close();
+  }
+});
+{%- else %}
+
+it("serves real HTTP through the application middleware and router", async () => {
+  const app = await buildApp();
+  try {
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const response = await fetch(address + "/api/v1/health/live");
+    expect(response.status).toBe(200);
+    expect((await response.json()).status).toBe("UP");
+    expect((await fetch(address + "/api/v1/")).status).toBe(200);
+    expect((await fetch(address + "/not-found")).status).toBe(404);
+  } finally {
+    await app.close();
+  }
+});
+{%- endif %}

@@ -108,6 +108,11 @@ class _Resolver:
         return node if node is not None else default
 
 
+def _features_of(raw: Any) -> dict[str, list[str]]:
+    """A ``features`` keyword when the configuration names some, else none (the backend's default)."""
+    return {} if raw is None else {"features": _normalize_features(raw)}
+
+
 def _normalize_features(raw: Any, default: list[str] | None = None) -> list[str]:
     """Coerce CLI/config feature input (list or comma-string) to a clean list."""
     if raw is None:
@@ -236,7 +241,8 @@ def _build_backends_from_cfg(
                     project_name=project_name,
                     language=language,
                     description=be_cfg.get("description", description),
-                    features=_normalize_features(be_cfg.get("features"), default=["items"]),
+                    # Omitted, the backend's own default: ["items"], or none without a database.
+                    **_features_of(be_cfg.get("features")),
                     python_version=be_cfg.get("python_version", "3.13"),
                     node_version=be_cfg.get("node_version", "22"),
                     rust_edition=be_cfg.get("rust_edition", "2024"),

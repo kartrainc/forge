@@ -232,10 +232,17 @@ def render_compose_dev(
     if not node_backends:
         return None
 
-    backends_ctx = [
-        {"name": bc.name, "uses_database": backend_uses_database(bc.language, bc.app_template)}
-        for bc in node_backends
-    ]
+    backends_ctx = []
+    for bc in node_backends:
+        uses_database = backend_uses_database(bc.language, bc.app_template)
+        backends_ctx.append(
+            {
+                "name": bc.name,
+                "uses_database": uses_database,
+                # docker-compose.yml renders its <name>-migrate one-shot under the same condition.
+                "migrates": uses_database and config.database_mode != "none",
+            }
+        )
     template = _jinja_env().get_template("deploy/docker-compose.dev.yml.j2")
     output = template.render(
         {"backends": backends_ctx, "has_project_sdks": _has_project_sdks(plan)}
