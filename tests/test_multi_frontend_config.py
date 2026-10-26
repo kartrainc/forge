@@ -65,12 +65,11 @@ class TestConfigShape:
         assert "frontends" in names and "frontend" not in names
         assert "frontends" in dataclasses.asdict(cfg) and "frontend" not in dataclasses.asdict(cfg)
 
-    def test_frontend_kwarg_is_shorthand_for_a_list_of_one(self):
-        fc = _vue()
-        assert ProjectConfig(project_name="Test", frontend=fc).frontends == [fc]  # type: ignore[call-arg]
-        assert ProjectConfig(project_name="Test", frontend=None).frontends == []  # type: ignore[call-arg]
-        with pytest.raises(TypeError, match="either 'frontend' or 'frontends'"):
-            ProjectConfig(project_name="Test", frontend=fc, frontends=[fc])  # type: ignore[call-arg]
+    def test_frontend_kwarg_is_gone_like_backend(self):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'frontend'"):
+            ProjectConfig(project_name="Test", frontend=_vue())  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="unexpected keyword argument 'backend'"):
+            ProjectConfig(project_name="Test", backend=BackendConfig(project_name="Test"))  # type: ignore[call-arg]
 
     def test_frontend_setter_mirrors_backend(self):
         cfg = _project()
@@ -139,11 +138,18 @@ class TestBuilder:
         )
         assert cfg.frontend.features is None
 
-    @pytest.mark.parametrize("key", ["frontends", "backends"])
+    def test_a_backends_mapping_keeps_its_old_reading(self):
+        # Unchanged from before the frontend list: anything but a list falls
+        # back to the single default backend.
+        cfg = _build_config(_args(), {"project_name": "demo", "backends": {"name": "api"}})
+        assert [bc.name for bc in cfg.backends] == ["backend"]
+
     @pytest.mark.parametrize("value", [{"framework": "vue", "name": "api"}, "vue"])
-    def test_list_key_must_be_a_list(self, key, value):
-        with pytest.raises(ValueError, match=f"'{key}:' must be a list of tables"):
-            _build_config(_args(), {"project_name": "demo", key: value})
+    def test_a_frontends_mapping_reads_like_a_backends_mapping(self, value):
+        # As for backends:, anything but a list falls back to the single form,
+        # here no frontend: table, so no frontend.
+        cfg = _build_config(_args(), {"project_name": "demo", "frontends": value})
+        assert cfg.frontends == []
 
     def test_list_entry_must_be_a_table(self):
         with pytest.raises(ValueError, match=r"frontends\[0\] must be a table"):
@@ -223,16 +229,22 @@ class TestBuilder:
                 {"project_name": "demo", "frontends": [{"framework": "vue"}, {"name": "admin"}]},
             )
 
-    def test_both_keys_refused(self):
-        with pytest.raises(ValueError, match="not both"):
-            _build_config(
-                _args(),
-                {
-                    "project_name": "demo",
-                    "frontend": {"framework": "vue"},
-                    "frontends": [{"framework": "vue"}],
-                },
-            )
+    def test_with_both_keys_the_list_wins_as_for_backends(self):
+        cfg = _build_config(
+            _args(),
+            {
+                "project_name": "demo",
+                "frontend": {"framework": "svelte"},
+                "frontends": [{"framework": "vue"}, {"framework": "vue", "name": "admin"}],
+                "backend": {"name": "single"},
+                "backends": [{"name": "api"}],
+            },
+        )
+        assert [(fc.name, fc.framework.value) for fc in cfg.frontends] == [
+            ("frontend", "vue"),
+            ("admin", "vue"),
+        ]
+        assert [bc.name for bc in cfg.backends] == ["api"]
 
     def test_preset_frontend_merges_under_the_primary(self):
         cfg = _build_config(
@@ -263,42 +275,35 @@ class TestBuilder:
         assert [fc.keycloak_realm for fc in cfg.frontends] == ["demo-realm", "demo-realm"]
         assert [fc.keycloak_client_id for fc in cfg.frontends] == ["demo-client", "demo-client"]
 
-    def test_frontend_flags_refused_beside_a_list(self):
-        with pytest.raises(
-            ValueError, match="--frontend-port cannot be combined with a 'frontends:' list"
-        ):
-            _build_config(
-                _args(frontend_port=5999),
-                {"project_name": "demo", "frontends": [{"framework": "vue"}]},
-            )
-        with pytest.raises(ValueError, match="--include-auth"):
-            _build_config(
-                _args(include_auth=False),
-                {"project_name": "demo", "frontends": [{"framework": "vue"}]},
-            )
+    def test_frontend_flags_beside_a_list_have_no_effect_like_backend_flags(self):
+        # As beside backends:, the list's entries give every value.
+        cfg = _build_config(
+            _args(frontend_port=5999, include_auth=False),
+            {"project_name": "demo", "frontends": [{"framework": "vue"}]},
+        )
+        assert (cfg.frontend.server_port, cfg.frontend.include_auth) == (5173, True)
 
-    def test_backend_flags_refused_beside_a_list(self):
-        with pytest.raises(
-            ValueError, match="--backend-port cannot be combined with a 'backends:' list"
-        ):
-            _build_config(
-                _args(backend_port=5001), {"project_name": "demo", "backends": [{"name": "api"}]}
-            )
+    def test_backend_flags_beside_a_list_keep_their_old_effect(self):
+        # Unchanged from before the frontend list: the list's entries win and
+        # the flag has no effect.
+        cfg = _build_config(
+            _args(backend_port=5001), {"project_name": "demo", "backends": [{"name": "api"}]}
+        )
+        assert [(bc.name, bc.server_port) for bc in cfg.backends] == [("api", 5000)]
 
-    def test_backend_flags_beside_a_preset_name_the_preset(self):
-        # A --platform preset brings its own backends: list.
-        with pytest.raises(ValueError, match="or the --platform preset"):
-            _build_config(_args(platform="monolithic", features="items,orders"), {})
+    def test_backend_flags_beside_a_preset_keep_their_old_effect(self):
+        # A --platform preset brings its own backends: list, as before.
+        plain = _build_config(_args(platform="monolithic"), {})
+        flagged = _build_config(_args(platform="monolithic", features="items,orders"), {})
+        assert [bc.features for bc in flagged.backends] == [bc.features for bc in plain.backends]
 
-    def test_the_single_table_and_a_list_of_one_name_the_app_alike(self):
-        for cfg in (
-            {"project_name": "demo", "frontend": {"framework": "vue", "name": "web"}},
-            {"project_name": "demo", "frontends": [{"framework": "vue", "name": "web"}]},
-        ):
-            frontend = _build_config(_args(), cfg).frontend
-            assert frontend.name == "web"
-        default = _build_config(_args(), {"project_name": "demo", "frontend": {"framework": "vue"}})
-        assert default.frontend.name == "frontend"
+    def test_a_name_is_read_from_a_list_entry_only(self):
+        # The single frontend: table keeps the app at apps/frontend, as it
+        # always has; frontends: is new and names its entries.
+        single = {"project_name": "demo", "frontend": {"framework": "vue", "name": "web"}}
+        assert _build_config(_args(), single).frontend.name == "frontend"
+        listed = {"project_name": "demo", "frontends": [{"framework": "vue", "name": "web"}]}
+        assert _build_config(_args(), listed).frontend.name == "web"
 
     def test_flags_still_override_the_single_table(self):
         cfg = _build_config(

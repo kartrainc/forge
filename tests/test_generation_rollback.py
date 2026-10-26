@@ -115,6 +115,6 @@ def _minimal_config(output_dir: Path):
         project_name="rollback-test",
         output_dir=str(output_dir),
         backends=[],
-        frontend=None,
+        frontends=[],
         include_keycloak=False,
     )

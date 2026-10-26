@@ -87,7 +87,7 @@ def go_auth_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 server_port=8100,
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=True,
     )
     root = Path(generate(config, quiet=True, dry_run=True))
@@ -133,7 +133,7 @@ def test_noauth_go_service_has_no_sdk(tmp_path: Path) -> None:
         project_name="gonoauth",
         output_dir=str(tmp_path),
         backends=[BackendConfig(name="api", project_name="gonoauth", language=BackendLanguage.GO)],
-        frontend=None,
+        frontends=[],
         include_keycloak=False,
     )
     root = Path(generate(config, quiet=True, dry_run=True))

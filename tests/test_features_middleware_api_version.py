@@ -44,7 +44,7 @@ def _generate(tmp_path: Path, enabled: bool) -> Path:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         options={"middleware.api_version": enabled},
     )
     return generate(config, quiet=True, dry_run=True)

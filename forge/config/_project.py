@@ -1070,23 +1070,3 @@ class ProjectConfig:
     def frontend_slug(self) -> str:
         """Directory name of the primary frontend (``apps/<slug>``). Backward compat."""
         return self.frontends[0].name if self.frontends else PRIMARY_FRONTEND_NAME
-
-
-# ``ProjectConfig(frontend=x)``: shorthand for ``frontends=[x]`` (``None`` for
-# none), so existing callers keep working while the frontend list lands. A
-# follow-up removes it, as ``backend`` has no such keyword.
-_UNSET: Any = object()
-_dataclass_init = ProjectConfig.__init__
-
-
-def _init_with_frontend_shorthand(
-    self: ProjectConfig, *args: Any, frontend: Any = _UNSET, **kwargs: Any
-) -> None:
-    if frontend is not _UNSET:
-        if "frontends" in kwargs:
-            raise TypeError("Pass either 'frontend' or 'frontends' to ProjectConfig, not both.")
-        kwargs["frontends"] = [] if frontend is None else [frontend]
-    _dataclass_init(self, *args, **kwargs)
-
-
-ProjectConfig.__init__ = _init_with_frontend_shorthand  # type: ignore[method-assign]

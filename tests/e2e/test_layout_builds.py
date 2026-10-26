@@ -64,13 +64,15 @@ def _generate(tmp_path: Path, framework: str, layout: str, *, include_chat: bool
                 features=["items"],
             )
         ],
-        frontend=FrontendConfig(
-            project_name="e2e",
-            framework=_FRAMEWORKS[framework],
-            layout=layout,
-            include_chat=include_chat,
-            include_openapi=True,  # Flutter requires it; harmless for Vue/Svelte.
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="e2e",
+                framework=_FRAMEWORKS[framework],
+                layout=layout,
+                include_chat=include_chat,
+                include_openapi=True,  # Flutter requires it; harmless for Vue/Svelte.
+            )
+        ],
     )
     return Path(generate(cfg, quiet=True))
 

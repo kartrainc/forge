@@ -54,7 +54,7 @@ def test_node_auth_install_runs_after_sdk_and_workspace_root(tmp_path, monkeypat
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=True,
     )
 

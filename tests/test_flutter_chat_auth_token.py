@@ -40,7 +40,7 @@ def _gen_flutter_chat(*, include_auth: bool) -> Path:
         include_chat=True,
         include_openapi=True,
     )
-    cfg = ProjectConfig(project_name="ChatAuth", backends=[bc], frontend=fc)
+    cfg = ProjectConfig(project_name="ChatAuth", backends=[bc], frontends=[fc])
     cfg.validate()
     root = Path(generate(cfg, quiet=True, dry_run=True))
     # Locate the file directly rather than rglob-ing the directory name: a

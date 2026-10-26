@@ -451,15 +451,15 @@ nothing with one frontend.
 - **`features` on a frontend is now read.** In a stack file, an absent key
   means every backend feature, `[]` no CRUD pages and a list those pages; each
   listed page must be a backend feature or the file is refused. The builder
-  used to drop the key, so a stack file that sets it to a non-empty list now
-  generates only those pages.
-- **Unit flags beside a list are refused.** `--backend-name`, `--features` and
-  the other backend flags beside a `backends:` list, and the frontend flags
-  beside a `frontends:` list, used to be ignored; they now stop with an error.
-  A `--platform` preset brings its own `backends:` list, so a backend flag beside
-  a preset stops too; set the value in a config file. A `backends:` or
-  `frontends:` key holding a mapping instead of a list is refused too, where
-  `backends:` used to fall back to one default backend.
+  used to drop the key, so a `frontend:` table that already set it now takes it
+  into account: check such a stack file before updating.
+- **`name` exists on `frontends:` entries only.** It sets the app's folder
+  (`apps/<name>`). The single `frontend:` table ignores it, as before, and keeps
+  the app at `apps/frontend`.
+- **A `frontends:` list reads like a `backends:` list.** Its entries give every
+  value, so frontend CLI flags beside it have no effect, as backend flags have
+  none beside `backends:`; a `frontends:` value that is not a list falls back to
+  the single `frontend:` table, as `backends:` falls back to `backend:`.
 - **Every Kubernetes project's chart gains two inert pieces.**
   `templates/frontends.yaml` renders the further apps from a `frontends:` values
   map, and the gatekeeper container takes `GATEKEEPER_FRONTEND_HOST_LABELS` from
@@ -467,10 +467,11 @@ nothing with one frontend.
 - **The generated gatekeeper reads `GATEKEEPER_FRONTEND_HOST_LABELS`.** Empty
   (the default) keeps its behaviour. A gatekeeper you run yourself in front of
   several apps needs the first label of each further app's host listed there.
-- **Python API.** `ProjectConfig` takes `frontends=[...]`. `frontend=x` still
-  works as shorthand for `frontends=[x]` but is due to go, as `backend` has no
-  such keyword: move to `frontends=`. `config.frontend` still returns the
-  primary and can still be assigned. `FrontendConfig.features` defaults to `None`
+- **Python API (internal).** `ProjectConfig` is not part of the plugin API
+  (`forge/api.py`), which SemVer covers, and forge's CLI and stack files do not
+  depend on it. Code that builds one directly passes `frontends=[...]`, as it
+  passes `backends=[...]`; `frontend=` is not accepted. `config.frontend` still
+  returns the primary and can still be assigned. `FrontendConfig.features` defaults to `None`
   (every backend feature), and an app's pages are
   `fc.page_features(config.all_features)`.
 - **Template updates reach every backend.** A template bump now re-renders each

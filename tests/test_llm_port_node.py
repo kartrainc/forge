@@ -256,7 +256,7 @@ def _node_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontend=None,
+        frontends=[],
         options=options or {},
     )
 
@@ -272,7 +272,7 @@ def _python_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontend=None,
+        frontends=[],
         options=options or {},
     )
 
@@ -307,7 +307,7 @@ def test_resolver_targets_node_in_mixed_python_node_project() -> None:
                 server_port=5002,
             ),
         ],
-        frontend=None,
+        frontends=[],
         options={"llm.provider": "openai"},
     )
     plan = resolve(config)
@@ -357,7 +357,7 @@ def test_resolver_allows_python_only_provider_on_mixed_project() -> None:
                 name="js", project_name="P", language=BackendLanguage.NODE, server_port=5001
             ),
         ],
-        frontend=None,
+        frontends=[],
         options={"llm.provider": "anthropic"},
     )
     resolve(config)  # must not raise
