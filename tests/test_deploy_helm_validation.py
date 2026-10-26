@@ -221,24 +221,51 @@ def test_a_frontend_host_can_be_overridden() -> None:
     assert _gatekeeper_env(docs)["GATEKEEPER_FRONTEND_HOST_LABELS"] == "staff"
 
 
-def test_long_names_keep_both_ingresses_apart() -> None:
+def test_long_names_stay_unique_and_within_the_limit() -> None:
+    # Two apps whose names differ only at the end, under a long release name:
+    # cutting both to 63 characters would give them the same resource names.
     kw = dict(_scenarios())["py_two_vue_keycloak"]
-    long_name = "customer-self-service-portal-admin-ui-xy"  # the longest name allowed
-    kw = {**kw, "frontends": [kw["frontends"][0], replace(kw["frontends"][1], name=long_name)]}
+    primary, admin = kw["frontends"]
+    kw = {
+        **kw,
+        "frontends": [
+            primary,
+            replace(admin, name="customer-self-service-portal-a"),
+            replace(admin, name="customer-self-service-portal-b", server_port=5175),
+        ],
+    }
     chart = _gen_chart(**kw)
     tmpl = subprocess.run(
-        ["helm", "template", "shop-production-eu-west", str(chart)],
+        ["helm", "template", "shop-production-eu-west-1-cluster-a", str(chart)],
         capture_output=True,
         text=True,
     )
     assert tmpl.returncode == 0, tmpl.stderr
-    names = [
-        d["metadata"]["name"]
-        for d in yaml.safe_load_all(tmpl.stdout)
-        if d and d["kind"] == "Ingress"
-    ]
-    assert len(names) == len(set(names)) == 3
-    assert all(len(name) <= 63 for name in names)
+    names = [(d["kind"], d["metadata"]["name"]) for d in yaml.safe_load_all(tmpl.stdout) if d]
+    assert len(names) == len(set(names)), "two resources of one kind share a name"
+    assert all(len(name) <= 63 for _, name in names)
+    for kind in ("ConfigMap", "Deployment", "Service"):
+        assert sum(1 for k, n in names if k == kind and "-customer-se" in n) == 2
+    assert sum(1 for k, n in names if k == "Ingress" and "-customer-se" in n) == 4
+    if _KUBECONFORM:
+        kc = subprocess.run(
+            [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
+            input=tmpl.stdout,
+            capture_output=True,
+            text=True,
+        )
+        assert kc.returncode == 0, f"kubeconform failed:\n{kc.stdout}\n{kc.stderr}"
+
+
+def test_short_names_keep_their_plain_form() -> None:
+    names = _kinds_and_names(_template(_gen_chart(**dict(_scenarios())["py_two_vue_keycloak"])))
+    for resource in (
+        ("ConfigMap", "rel-admin-nginx"),
+        ("Deployment", "rel-admin"),
+        ("Ingress", "rel-admin-api"),
+        ("Ingress", "rel-admin-web"),
+    ):
+        assert resource in names
 
 
 def test_a_secondary_flutter_app_gets_kubernetes_names() -> None:

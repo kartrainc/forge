@@ -7,11 +7,18 @@
        Ingresses: <release>-<name>-api routes the /api/<backend> paths of
        ingress.paths with ingress.annotations, and <release>-<name>-web routes
        / to the app without them, since nginx-ingress applies an Ingress's
-       rewrite-target to every one of its paths. The suffixes are added after
-       the name is cut to length, so an app's two Ingresses never share a name. */ -}}
+       rewrite-target to every one of its paths.
+
+       Every name of an app starts from <release>-<name>. Longer than 57
+       characters, it is cut to 48 and given the first 8 characters of its
+       SHA-256, so two apps never share a name, and the -nginx, -api and -web
+       suffixes still fit Kubernetes' 63-character limit. */ -}}
 {{- range $name, $fe := .Values.frontends }}
-{{- $fullname := printf "%s-%s" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- $nginx := printf "%s-%s-nginx" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- $fullname := printf "%s-%s" $.Release.Name $name }}
+{{- if gt (len $fullname) 57 }}
+{{- $fullname = printf "%s-%s" ($fullname | trunc 48 | trimSuffix "-") ($fullname | sha256sum | trunc 8) }}
+{{- end }}
+{{- $nginx := printf "%s-nginx" $fullname }}
 {{- $host := $fe.host | default (printf "%s.%s" $name $.Values.ingress.host) }}
 ---
 apiVersion: v1
@@ -114,7 +121,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ printf "%s-api" ($fullname | trunc 59 | trimSuffix "-") }}
+  name: {{ printf "%s-api" $fullname }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ $name }}
@@ -142,7 +149,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ printf "%s-web" ($fullname | trunc 59 | trimSuffix "-") }}
+  name: {{ printf "%s-web" $fullname }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ $name }}
