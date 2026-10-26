@@ -69,7 +69,7 @@
       "sha256": "9a94950eef4a8084"
     },
     "forge.toml": {
-      "size": 76741,
+      "size": 77048,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -300,6 +300,10 @@
       "size": 6080,
       "sha256": "b4c4a62ca57f328b"
     },
+    "services/api-node/tests/integration/setup-env.ts": {
+      "size": 378,
+      "sha256": "269814ba916e3ab7"
+    },
     "services/api-node/tests/setup.ts": {
       "size": 339,
       "sha256": "dc034e13846f29fb"
@@ -349,8 +353,8 @@
       "sha256": "045cfed396d05d8b"
     },
     "services/api-node/vitest.integration.config.ts": {
-      "size": 567,
-      "sha256": "2849d98820cb0d33"
+      "size": 619,
+      "sha256": "264370db3ae0a104"
     },
     "services/api-py/.copier-answers.yml": {
       "size": 556,
