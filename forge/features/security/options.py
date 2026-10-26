@@ -28,7 +28,8 @@ Permissions-Policy. Strict-Transport-Security is left to the TLS terminator.
 
 FRONTENDS: vue without the AI chat, whose MCP panels frame remote origins
 (Svelte, Flutter, plugin frontends and chat projects are served without it)
-CUSTOMISE: add the origins your frontend calls to ``connect-src`` in nginx.conf.""",
+CUSTOMISE: add the origins your frontend calls, WebSocket ones included, to
+``connect-src`` in nginx.conf.""",
             category=FeatureCategory.PLATFORM,
             # Read by the frontend renderers (forge.frontend_csp); no fragment.
             requires_backend=False,

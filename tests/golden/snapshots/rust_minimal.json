@@ -65,7 +65,7 @@
       "sha256": "<version-dependent>"
     },
     "services/api/.copier-answers.yml": {
-      "size": 547,
+      "size": 540,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
