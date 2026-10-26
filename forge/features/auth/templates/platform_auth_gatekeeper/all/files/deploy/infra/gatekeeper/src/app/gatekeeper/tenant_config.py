@@ -127,15 +127,23 @@ def get_fallback_config(tenant_slug: str) -> TenantConfig:
     ``client_secret`` from environment variables.
     """
     cfg = get_settings()
+    # Further frontends of the project (``GATEKEEPER_FRONTEND_HOST_LABELS``)
+    # are served on hosts of their own and resolve like the admin realm.
+    frontend_labels = {
+        label.strip()
+        for label in cfg.gatekeeper_frontend_host_labels.split(",")
+        if label.strip()
+    }
+    realm = cfg.keycloak_admin_realm if tenant_slug in frontend_labels else tenant_slug
     return TenantConfig(
         tenant_id=(
             cfg.default_tenant_id
-            if tenant_slug == cfg.keycloak_admin_realm
+            if realm == cfg.keycloak_admin_realm
             else tenant_slug
         ),
         realm_type="dedicated",
-        realm_name=tenant_slug,
-        issuer_url=f"{cfg.keycloak_base_url}/{tenant_slug}",
+        realm_name=realm,
+        issuer_url=f"{cfg.keycloak_base_url}/{realm}",
         client_id=cfg.gatekeeper_client_id,
         client_secret=cfg.gatekeeper_client_secret,
         rate_limit=cfg.default_rate_limit,

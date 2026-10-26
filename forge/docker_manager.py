@@ -22,6 +22,8 @@ from forge.config._topology import (
     backend_topology_entry,
     compute_render_postgres,
     compute_rendered_infra,
+    frontend_host_rule,
+    frontend_topology_entry,
 )
 from forge.errors import GeneratorError
 from forge.services.registry import get_services_for_capabilities
@@ -88,6 +90,12 @@ def render_compose(
                 block.setdefault("environment", {})["API_KEYS_ENABLED"] = (
                     "true" if plan.option_values.get("auth.api_keys") else "false"
                 )
+                if config.frontend_host_labels:
+                    # Hosts of the frontends beside the primary, which the
+                    # gatekeeper resolves to the project's realm and tenant.
+                    block["environment"]["GATEKEEPER_FRONTEND_HOST_LABELS"] = ",".join(
+                        config.frontend_host_labels
+                    )
             extra_services.append({"name": svc.name, "block": block})
             for vol in svc.named_volumes:
                 if vol not in seen_volumes:
@@ -181,6 +189,14 @@ def render_compose(
         ),
         "extra_services": extra_services,
         "extra_volumes": extra_volumes,
+        # Frontends beside the primary, and the host rule backend routers
+        # match (every frontend's host; app.localhost alone for one frontend).
+        "extra_frontends": [
+            frontend_topology_entry(config, fc)
+            for fc in config.active_frontends
+            if not config.is_primary_frontend(fc)
+        ],
+        "frontend_host_rule": frontend_host_rule(config),
     }
 
     output = template.render(context)
@@ -211,17 +227,14 @@ def render_compose(
 def _project_has_node(config: ProjectConfig, active_fragments: set[str]) -> bool:
     if any(b.language == BackendLanguage.NODE for b in config.backends):
         return True
-    if config.frontend is not None and config.frontend.framework in (
-        FrontendFramework.VUE,
-        FrontendFramework.SVELTE,
-    ):
-        return True
-    # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
-    # workspace root — its FrontendSpec declares node_based.
-    if config.frontend is not None:
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
 
-        spec = FRONTEND_SPECS.get(config.frontend.framework.value)
+    for fc in config.active_frontends:
+        if fc.framework in (FrontendFramework.VUE, FrontendFramework.SVELTE):
+            return True
+        # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
+        # workspace root — its FrontendSpec declares node_based.
+        spec = FRONTEND_SPECS.get(fc.framework.value)
         if spec is not None and spec.node_based:
             return True
     return "platform_auth_sdk_node" in active_fragments

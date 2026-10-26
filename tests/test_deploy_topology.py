@@ -14,7 +14,11 @@ import pytest
 from forge.config import BackendConfig, FrontendConfig, ProjectConfig
 from forge.config._backend import BackendLanguage
 from forge.config._frontend import FrontendFramework
-from forge.config._topology import compute_render_postgres, compute_topology
+from forge.config._topology import (
+    compute_render_postgres,
+    compute_topology,
+    frontend_host_rule,
+)
 
 
 def _cfg(backends: list[BackendConfig], *, frontend=None, include_keycloak=False) -> ProjectConfig:
@@ -102,6 +106,65 @@ def test_topology_db_none_no_keycloak_omits_postgres() -> None:
     )
     topo = compute_topology(cfg)
     assert topo["render_postgres"] is False
+
+
+# --- several frontends ---------------------------------------------------------
+
+
+def _vue(name: str = "frontend", port: int = 5173, **kw) -> FrontendConfig:
+    return FrontendConfig(
+        framework=FrontendFramework.VUE, project_name="acme app", name=name, server_port=port, **kw
+    )
+
+
+def _several(*frontends: FrontendConfig) -> ProjectConfig:
+    return ProjectConfig(
+        project_name="acme app",
+        backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8001)],
+        frontends=list(frontends),
+    )
+
+
+def test_one_frontend_has_no_extra_entries_and_the_old_host_rule() -> None:
+    for cfg in (_cfg([BackendConfig(name="api")]), _several(_vue())):
+        topo = compute_topology(cfg)
+        assert topo["extra_frontends"] == ()
+        assert frontend_host_rule(cfg) == "Host(`app.localhost`)"
+
+
+def test_frontends_beside_the_primary_get_their_own_entries_and_hosts() -> None:
+    cfg = _several(
+        _vue(),
+        _vue("admin", 5174, ui_kit="nuxt-ui", features=[]),
+        FrontendConfig(
+            framework=FrontendFramework.FLUTTER,
+            project_name="acme app",
+            name="frontend_1",
+            server_port=5175,
+        ),
+    )
+    topo = compute_topology(cfg)
+    assert topo["frontend_slug"] == "frontend"  # the primary keeps the scalar keys
+    assert [
+        (fe["name"], fe["dns_name"], fe["host"], fe["port"]) for fe in topo["extra_frontends"]
+    ] == [
+        ("admin", "admin", "admin.localhost", 5174),
+        ("frontend_1", "frontend-1", "frontend-1.localhost", 5175),
+    ]
+    assert cfg.frontend_host_labels == ["admin", "frontend-1"]
+    assert frontend_host_rule(cfg) == (
+        "(Host(`app.localhost`) || Host(`admin.localhost`) || Host(`frontend-1.localhost`))"
+    )
+
+
+def test_extra_entries_carry_each_apps_own_security_policy() -> None:
+    cfg = _several(_vue(include_chat=False), _vue("admin", 5174, include_chat=False))
+    cfg.options["security.csp"] = True
+    (admin,) = compute_topology(cfg)["extra_frontends"]
+    assert admin["csp"] and admin["security_headers"]
+    cfg.options["security.csp"] = False
+    (admin,) = compute_topology(cfg)["extra_frontends"]
+    assert (admin["csp"], admin["security_headers"]) == ("", ())
 
 
 # --- byte-identity guard on the render context -------------------------------

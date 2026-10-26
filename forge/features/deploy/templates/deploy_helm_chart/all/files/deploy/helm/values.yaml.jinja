@@ -153,6 +153,43 @@ frontend:
     limits:
       cpu: 200m
       memory: 256Mi
+{%- if topology.extra_frontends %}
+
+# Frontends beside the primary, keyed by name (templates/frontends.yaml). Each
+# is served on its own host, <name>.<ingress.host> unless `host` is set, with
+# the /api/<backend> paths of ingress.paths routed there too.
+frontends:
+{%- for fe in topology.extra_frontends %}
+  {{ fe.dns_name }}:
+    image:
+      repository: ghcr.io/example/{{ topology.project_slug }}-{{ fe.name }}
+      tag: latest
+      pullPolicy: IfNotPresent
+    replicaCount: 2
+    port: 80
+    # Empty = {{ fe.dns_name }}.<ingress.host>. The in-cluster gatekeeper
+    # resolves the host's first label to the project's realm; an external one
+    # needs it in GATEKEEPER_FRONTEND_HOST_LABELS.
+    host: ""
+    nginxConf: ""
+{%- if fe.security_headers %}
+    securityHeaders:
+{%- for name, value in fe.security_headers %}
+      {{ name }}: "{{ value }}"
+{%- endfor %}
+{%- else %}
+    securityHeaders: {}
+{%- endif %}
+    contentSecurityPolicy: "{{ fe.csp }}"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+{%- endfor %}
+{%- endif %}
 
 # HTTP ingress. Replaces the dev-only Traefik in docker-compose. The rewrite
 # annotation below is nginx-ingress-specific; switch className + annotations
