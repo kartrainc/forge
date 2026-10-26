@@ -87,6 +87,7 @@ class TestOff:
         assert not (off / "docker-compose.dev.yaml").exists()
         assert not (off / "apps/frontend/vite.dev.config.ts").exists()
         assert "vite.dev.config.ts" not in (off / "apps/frontend/tsconfig.node.json").read_text()
+        assert "docker-compose.dev.yaml" not in (off / "apps/frontend/README.md").read_text()
 
 
 class TestOverlay:
@@ -163,6 +164,13 @@ class TestOverlay:
         finally:
             shutil.rmtree(root.parent, ignore_errors=True)
 
+    def test_it_sets_no_environment_so_the_projects_own_env_reaches_vite(self, on: Path) -> None:
+        frontend = _frontend(_load(on / "docker-compose.dev.yaml"))
+        assert "environment" not in frontend and "env_file" not in frontend
+        dockerignore = (on / "apps/frontend/.dockerignore").read_text(encoding="utf-8")
+        assert ".env.local" in dockerignore
+        assert not any(line.strip() in (".env", ".env*") for line in dockerignore.splitlines())
+
     def test_the_header_names_the_command_the_floor_and_what_dev_leaves_out(self, on: Path) -> None:
         text = (on / "docker-compose.dev.yaml").read_text(encoding="utf-8")
         assert "up --build --watch" in text
@@ -170,12 +178,35 @@ class TestOverlay:
         assert "content-security policy" in text
 
 
+class TestReadme:
+    def test_the_generated_readme_says_how_to_run_it_and_what_it_leaves_out(self, on: Path) -> None:
+        readme = (on / "apps/frontend/README.md").read_text(encoding="utf-8")
+        section = readme.split("## Hot reload in Docker Compose", 1)[1]
+        assert (
+            "docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch"
+            in section
+        )
+        assert "Docker Compose 2.40" in section
+        assert "content-security policy" in section and "/auth/" in section
+        assert "apps/frontend" in section
+
+
 class TestWrapper:
     def test_it_wraps_the_projects_own_config_in_every_shape(self, on: Path) -> None:
         wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
         assert "import base from './vite.config.ts'" in wrapper
         assert "typeof exported === 'function' ? exported(env) : exported" in wrapper
-        assert "await" in wrapper and "mergeConfig(" in wrapper
+        assert "await resolve(base, env)" in wrapper
+
+    def test_the_guarded_keys_are_set_after_the_project_config_not_merged_into_it(
+        self, on: Path
+    ) -> None:
+        # mergeConfig concatenates arrays and keeps `true`, which would let the
+        # project's own allowedHosts widen the list; the e2e test proves it at run time.
+        wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
+        assert "mergeConfig" not in wrapper
+        assert wrapper.index("...resolved.server") < wrapper.index("allowedHosts")
+        assert wrapper.index("...resolved,") < wrapper.index("server: {")
 
     def test_it_allows_only_the_routed_host_and_never_moves_the_port(self, on: Path) -> None:
         wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")

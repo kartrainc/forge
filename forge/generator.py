@@ -42,6 +42,7 @@ from forge.config import (
 )
 from forge.docker_manager import (
     DEV_STACK_COMMAND,
+    append_dev_server_readme,
     render_compose,
     render_dev_overlay,
     render_frontend_dockerfile,
@@ -797,6 +798,7 @@ def _generate_frontend_extras(
             if config.frontend.dev_server:
                 _log("  Rendering docker-compose.dev.yaml ...")
                 render_dev_overlay(config, project_root)
+                append_dev_server_readme(config, frontend_dir)
 
 
 def _vue_ui_kit(config: ProjectConfig) -> str | None:

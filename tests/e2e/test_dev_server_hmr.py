@@ -5,6 +5,10 @@ the overlay with ``docker compose up --watch``, then drives Chromium through Tra
 an edit to a component on the host must reach the page without a reload, and nothing the
 container writes may be owned by anyone but the developer.
 
+Runtime coverage is npm with the shadcn kit and sign-in off. pnpm and yarn are covered by
+the render tests: their Docker install step and host generation fail before the dev stage
+does (see the plan's risks), so a runtime case for them would not test this feature.
+
 Traefik reads every container on the Docker daemon, so this test constrains its own to the
 test's Compose project and publishes it on a free loopback port. Heavy and opt-in (``e2e``);
 needs Docker Compose 2.40 or newer (``develop.watch.initial_sync``).
@@ -118,6 +122,29 @@ def _statuses(compose: list[str], root: Path) -> dict[str, str]:
     return found
 
 
+def _http_status(compose: list[str], root: Path, host_header: str) -> str:
+    """Status the dev server answers with for ``Host: <host_header>``, asked from inside."""
+    script = (
+        "require('http').get({host:'127.0.0.1',port:5173,headers:{Host:'"
+        + host_header
+        + "'}},r=>{console.log(r.statusCode);r.resume()})"
+    )
+    out = subprocess.run(
+        [*compose, "exec", "-T", "frontend", "node", "-e", script],
+        cwd=root, capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    return out.stdout.strip()
+
+
+def _wait(what: str, ready, log: Path, timeout: int) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ready():
+            return
+        time.sleep(4)
+    raise AssertionError(f"{what} not reached in {timeout}s:\n{log.read_text()[-3000:]}")
+
+
 def test_dev_server_hot_reloads_a_component_through_traefik(
     tmp_path: Path, has_docker: bool, has_npm: bool
 ) -> None:
@@ -150,6 +177,12 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     root = tmp_path / "out" / "devhmr"
     app = root / "apps" / "frontend"
     assert (root / "docker-compose.dev.yaml").is_file()
+    # A project config that admits every host must not widen what the dev server admits.
+    vite_config = app / "vite.config.ts"
+    original_config = vite_config.read_text(encoding="utf-8")
+    widened = original_config.replace("  server: {\n", "  server: {\n    allowedHosts: true,\n", 1)
+    assert widened != original_config, "the template's server block moved"
+    vite_config.write_text(widened, encoding="utf-8")
 
     project = f"forgedev{uuid.uuid4().hex[:8]}"
     port = _free_port()
@@ -186,6 +219,12 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
             raise AssertionError(
                 f"frontend not healthy:\n{(tmp_path / 'up.log').read_text()[-3000:]}"
             )
+        up_log = tmp_path / "up.log"
+        healthy = lambda: _statuses(compose, root).get("frontend") == "healthy"  # noqa: E731
+
+        # Only the routed host is admitted, whatever the project's own config says.
+        assert _http_status(compose, root, "app.localhost") == "200"
+        assert _http_status(compose, root, "evil.example") == "403"
 
         _run(["npx", "--no-install", "playwright", "install", "chromium"], app, 900)
         probe = tmp_path / "probe.mjs"
@@ -223,6 +262,35 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         ]
         assert foreign == []
         assert (app / _HOME).read_text(encoding="utf-8").count("[HMR-PROBE]") == 0
+        writable = subprocess.run(
+            [*compose, "exec", "-T", "frontend", "sh", "-c"]
+            + ["test -w /app && test -w /app/node_modules/.vite && test -w /app/node_modules/.vite-temp"],
+            cwd=root, capture_output=True, timeout=60,
+        )  # fmt: skip
+        assert writable.returncode == 0, "Vite's cache and the app directory must be writable"
+
+        # A dependency change rebuilds the image and replaces the container.
+        def container() -> str:
+            return subprocess.run(
+                [*compose, "ps", "-q", "frontend"], cwd=root, capture_output=True, text=True
+            ).stdout.strip()
+
+        before = container()
+        package = app / "package.json"
+        manifest = json.loads(package.read_text(encoding="utf-8"))
+        manifest["description"] = "rebuild probe"
+        package.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        def replaced() -> bool:
+            now = container()
+            return bool(now) and now != before and healthy()
+
+        _wait("a rebuilt, healthy frontend", replaced, up_log, 600)
+        shown = subprocess.run(
+            [*compose, "exec", "-T", "frontend", "cat", "/app/package.json"],
+            cwd=root, capture_output=True, text=True, timeout=60,
+        ).stdout  # fmt: skip
+        assert "rebuild probe" in shown
     finally:
         watcher.terminate()
         try:

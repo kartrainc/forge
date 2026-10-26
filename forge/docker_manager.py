@@ -354,6 +354,45 @@ _LOCKFILES = {
 }
 
 
+_DEV_SERVER_README = """
+## Hot reload in Docker Compose
+
+This app also runs as a Vite dev server in the project's Compose stack, behind the same
+Traefik router and host as the built app. From the project root:
+
+```bash
+{command}
+```
+
+- Needs Docker Compose 2.40 or newer.
+- Edits under `apps/{slug}` sync into the container; a change to `package.json` or the
+  lockfile rebuilds the image.
+- No content-security policy applies and nginx is not in the path, so check security
+  headers on the built image (`docker compose up --build`).
+- The generated stack does not route the sign-in paths (`/auth/*`) on any frontend. With auth
+  on, the app redirects to `/auth/login` as it does in the built stack; generate with auth off
+  for a hot-reload loop without sign-in, or route the gatekeeper in your own Compose overlay.
+- Turn it off with `dev_server: false` and `forge --update`.
+"""
+
+
+def append_dev_server_readme(config: ProjectConfig, frontend_dir: Path) -> Path | None:
+    """Add the hot-reload section to the app's README, which the Vue template writes.
+
+    Done here rather than in the template's post-generate script so a project without
+    ``dev_server`` keeps that script, and every other file, byte for byte.
+    """
+    readme = frontend_dir / "README.md"
+    if not readme.is_file():
+        return None
+    text = readme.read_text(encoding="utf-8")
+    if "## Hot reload in Docker Compose" in text:
+        return readme
+    section = _DEV_SERVER_README.format(command=DEV_STACK_COMMAND, slug=config.frontend_slug)
+    readme.write_text(text.rstrip("\n") + "\n" + section, encoding="utf-8")
+    return readme
+
+
 def dev_server_files(app_dir: str) -> tuple[str, ...]:
     """The files ``frontend.dev_server`` makes forge write, relative to the project root."""
     return (DEV_OVERLAY, f"{app_dir.strip('/') or 'apps/frontend'}/vite.dev.config.ts")

@@ -1,21 +1,27 @@
 // The Vite config docker-compose.dev.yaml runs the dev server with (ADR-013).
-// It resolves the project's own vite.config.ts, whatever it exports, and adds
+// It resolves the project's own vite.config.ts, whatever it exports, and sets
 // only what a dev server behind Traefik needs; change vite.config.ts, not this.
-import { mergeConfig, type ConfigEnv, type UserConfig, type UserConfigExport } from 'vite'
+import type { ConfigEnv, UserConfig, UserConfigExport } from 'vite'
 import base from './vite.config.ts'
 
 // An object, a promise or a function of ConfigEnv: all three are valid exports.
 const resolve = async (exported: UserConfigExport, env: ConfigEnv): Promise<UserConfig> =>
   typeof exported === 'function' ? exported(env) : exported
 
-export default async (env: ConfigEnv): Promise<UserConfig> =>
-  mergeConfig(await resolve(base, env), {
+export default async (env: ConfigEnv): Promise<UserConfig> => {
+  const resolved = await resolve(base, env)
+  return {
+    ...resolved,
     server: {
+      ...resolved.server,
       // Reachable from the Traefik container, not only from loopback.
       host: '0.0.0.0',
       // The port is the one the router targets: fail rather than move.
       strictPort: true,
-      // Only the host Traefik routes to this service.
+      // Only the host Traefik routes to this service. Set after the project's
+      // config, not merged into it: a merge concatenates host lists and keeps
+      // `true`, so the project could widen what this admits.
       allowedHosts: ['app.localhost'],
     },
-  })
+  }
+}
