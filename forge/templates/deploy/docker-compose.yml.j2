@@ -60,8 +60,13 @@ services:
     build:
       context: ./services/{{ be.name }}
       dockerfile: Dockerfile
+{% if database_mode != "none" and be.has_migrations %}
       # See the {{ be.name }}-migrate build above — same rationale (the
       # ``packages`` context is only declared when a project-root packages/ ships).
+{% else %}
+      # The ``packages`` context is only declared when a project-root
+      # packages/ ships.
+{% endif %}
       additional_contexts:
 {% if has_project_sdks %}
         packages: ./packages

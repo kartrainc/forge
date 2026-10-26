@@ -510,6 +510,7 @@ def test_stack_of_http_services_has_no_postgres(tmp_path: Path):
 
     assert "postgres:" not in compose
     assert "POSTGRES_DB" not in compose
+    assert "capture-migrate" not in compose
 
 
 def test_postgres_names_its_database_after_a_backend_that_owns_one(tmp_path: Path):
