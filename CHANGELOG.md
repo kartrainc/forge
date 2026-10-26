@@ -263,9 +263,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   a token and expects the verifier's 401 for an anonymous request. It also
   starts the entrypoint (listen, drain on SIGTERM), and the error-handler
   suite covers a schema failure's 422.
-- `scripts/check_generated_quality.py` takes `--app-template` and
-  `--platform-auth`; the generated-quality lanes include a Node
-  `http-service`.
+- `scripts/check_generated_quality.py` takes `--app-template`; the
+  generated-quality lanes include a Node `http-service`.
 
 ### Fixed
 
