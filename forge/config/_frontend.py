@@ -236,11 +236,13 @@ class FrontendConfig:
                 conflicting.append("include_chat")
             if self.include_openapi:
                 conflicting.append("include_openapi")
+            if self.dev_server:
+                conflicting.append("dev_server")
             if conflicting:
                 raise ValueError(
                     f"Frontend feature flags ({', '.join(conflicting)}) require "
                     "a frontend framework. Either pick --frontend vue/svelte/flutter "
-                    "or drop the --include-* flag."
+                    "or drop the flag."
                 )
             return
         # Flutter's home_repository binds against the retrofit-generated api

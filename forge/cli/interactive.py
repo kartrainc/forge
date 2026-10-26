@@ -245,8 +245,13 @@ def _collect_inputs() -> ProjectConfig | None:
         if _kit is None or _kit.chat:
             include_chat = _ask_confirm("Enable AI chat panel?", default=False)
         include_openapi = False
+        dev_server = False
         if framework == FrontendFramework.VUE:
             include_openapi = _ask_confirm("Enable OpenAPI code generation?", default=False)
+            dev_server = _ask_confirm(
+                "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.40+)?",
+                default=False,
+            )
         elif framework == FrontendFramework.FLUTTER:
             # Flutter's retrofit-generated client is wired into the home feature,
             # so OpenAPI generation is mandatory (see FrontendConfig.validate).
@@ -304,6 +309,7 @@ def _collect_inputs() -> ProjectConfig | None:
             org_name=org_name,
             layout=layout,
             ui_kit=ui_kit,
+            dev_server=dev_server,
         )
 
     include_keycloak = include_auth

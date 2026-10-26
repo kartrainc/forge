@@ -109,7 +109,7 @@ def _json_error(stdout_fd, err: object) -> None:
 
 def _start_stack(args: argparse.Namespace, config: Any, project_root: Path, quiet: bool) -> None:
     """Start the generated Compose stack when asked to, or say how to."""
-    if args.no_docker or config.backend is None or getattr(args, "dry_run", False):
+    if args.no_docker or getattr(args, "dry_run", False):
         return
     if config.frontend is not None and config.frontend.dev_server:
         # boot() runs docker-compose.yml alone, which serves the nginx frontend, so
@@ -118,6 +118,8 @@ def _start_stack(args: argparse.Namespace, config: Any, project_root: Path, quie
             print("\n  The frontend runs as a Vite dev server. Start the stack with:")
             print(f"    cd {project_root}")
             print(f"    {DEV_STACK_COMMAND}")
+        return
+    if config.backend is None:
         return
     if args.yes:
         boot(project_root)

@@ -222,6 +222,9 @@ def _build_frontend_from_cfg(
             f"Unknown frontend framework {fw_str!r}; valid frameworks are {valid}."
         ) from None
     if framework == FrontendFramework.NONE:
+        if r.get("dev_server", "frontend", "dev_server", default=False):
+            # Not a silent no-op: there is no frontend to run as a dev server.
+            raise ValueError("dev_server needs a Vue frontend: pass --frontend vue.")
         return None, False
 
     # A plugin frontend declares its package manager on its FrontendSpec; use

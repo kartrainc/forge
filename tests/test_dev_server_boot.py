@@ -45,6 +45,19 @@ class TestStartStack:
         assert "up --build --watch" in DEV_STACK_COMMAND
         assert "-f docker-compose.dev.yaml" in DEV_STACK_COMMAND
 
+    def test_a_frontend_only_project_gets_the_command_too(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("forge.cli.main.boot") as boot:
+            _start_stack(_args(), _config(dev_server=True, backend=False), tmp_path, quiet=False)
+        boot.assert_not_called()
+        assert DEV_STACK_COMMAND in capsys.readouterr().out
+
+    def test_a_frontend_only_project_without_the_option_boots_nothing(self, tmp_path: Path) -> None:
+        with patch("forge.cli.main.boot") as boot:
+            _start_stack(_args(), _config(dev_server=False, backend=False), tmp_path, quiet=False)
+        boot.assert_not_called()
+
     def test_the_interactive_prompt_is_not_asked_either(self, tmp_path: Path) -> None:
         with (
             patch("forge.cli.main.boot") as boot,

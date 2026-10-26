@@ -56,6 +56,10 @@ class TestConfig:
     def test_a_framework_off_by_default_is_not_refused(self) -> None:
         _frontend(framework=FrontendFramework.SVELTE).validate()
 
+    def test_no_frontend_refuses_it_like_the_other_frontend_flags(self) -> None:
+        with pytest.raises(ValueError, match=r"dev_server\) require a frontend framework"):
+            _frontend(framework=FrontendFramework.NONE, dev_server=True).validate()
+
     @pytest.mark.parametrize("value", ["yes", 1, None, ["true"]])
     def test_a_malformed_value_is_a_configuration_error(self, value) -> None:
         with pytest.raises(ValueError, match="dev_server must be true or false"):
@@ -78,6 +82,23 @@ class TestEntryPoints:
             _Resolver(Namespace(), {"frontend": {"framework": "vue"}}), "P", "d"
         )
         assert fe is not None and fe.dev_server is False
+
+
+class TestWithoutAFramework:
+    """``--dev-server`` must not vanish silently when no Vue frontend is selected."""
+
+    def test_the_flag_without_a_frontend_is_an_error(self) -> None:
+        with pytest.raises(ValueError, match="--frontend vue"):
+            _build_frontend_from_cfg(_Resolver(Namespace(dev_server=True), {}), "P", "d")
+
+    def test_the_stack_key_without_a_framework_is_an_error(self) -> None:
+        cfg = {"frontend": {"dev_server": True}}
+        with pytest.raises(ValueError, match="--frontend vue"):
+            _build_frontend_from_cfg(_Resolver(Namespace(), cfg), "P", "d")
+
+    def test_off_without_a_frontend_is_still_no_frontend(self) -> None:
+        fe, include_auth = _build_frontend_from_cfg(_Resolver(Namespace(), {}), "P", "d")
+        assert fe is None and include_auth is False
 
 
 class TestRecorded:
@@ -114,4 +135,62 @@ class TestRecorded:
         del data["config"]["frontend"]["dev_server"]
         recipe.write_text(json.dumps(data), encoding="utf-8")
         config = read_recipe(tmp_path, check_generator=False)
+        assert config.frontend is not None and config.frontend.dev_server is False
+
+
+class TestWizard:
+    """The interactive generator asks for the option on Vue, and only there."""
+
+    @staticmethod
+    def _run(
+        monkeypatch, selects: list[str], confirms: list[bool]
+    ) -> tuple[ProjectConfig, list[str]]:
+        import sys
+        from unittest.mock import patch
+
+        from forge.cli import _collect_inputs
+
+        class _Tty:
+            def isatty(self) -> bool:
+                return True
+
+        monkeypatch.setattr(sys, "stdin", _Tty())
+        texts = iter(["P", "D", "api", "5010", "items", "Alice", "5173", "18080", "app", "p"])
+        picks, answers, asked = iter(selects), iter(confirms), []
+
+        def confirm(message, *_, **__):
+            asked.append(message)
+            return next(answers)
+
+        with (
+            patch("forge.cli.interactive._ask_text", side_effect=lambda *a, **k: next(texts)),
+            patch("forge.cli.interactive._ask_select", side_effect=lambda *a, **k: next(picks)),
+            patch("forge.cli.interactive._ask_confirm", side_effect=confirm),
+        ):
+            config = _collect_inputs()
+        assert config is not None
+        return config, asked
+
+    _QUESTION = "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.40+)?"
+    _VUE = [
+        "Python (FastAPI)",
+        "3.13",
+        "Vue 3",
+        "npm",
+        "shadcn-vue (Radix Vue + Tailwind CSS 4)",
+        "blue",
+        "Sidebar App Shell",
+    ]
+
+    @pytest.mark.parametrize("answer", [True, False])
+    def test_the_answer_reaches_the_frontend_config(self, monkeypatch, answer: bool) -> None:
+        # backend, auth, chat, openapi, dev server, go
+        config, asked = self._run(monkeypatch, self._VUE, [False, True, False, False, answer, True])
+        assert self._QUESTION in asked
+        assert config.frontend is not None and config.frontend.dev_server is answer
+
+    def test_svelte_is_not_asked(self, monkeypatch) -> None:
+        selects = ["Python (FastAPI)", "3.13", "Svelte 5", "npm", "Sidebar App Shell"]
+        config, asked = self._run(monkeypatch, selects, [False, True, False, True])
+        assert self._QUESTION not in asked
         assert config.frontend is not None and config.frontend.dev_server is False
