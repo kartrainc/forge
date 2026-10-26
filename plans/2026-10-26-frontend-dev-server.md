@@ -97,23 +97,25 @@ gatekeeper overlay as its own concern.
 
 | Test | Proves |
 | --- | --- |
-| render, off | Dockerfile, Compose and `.dockerignore` byte-identical to the base for every package manager; recipe and manifest gain only `dev_server = false` |
+| render, off | Dockerfile, Compose and `.dockerignore` byte-identical to the base for every package manager; the recipe gains `dev_server = false`; `forge.toml` and every other file are unchanged |
 | render, on | stages `deps → source → dev`, `source → builder → nginx`; nginx last; one `COPY . .`; `dev` non-root with `COPY --chown` |
 | merged Compose | `docker compose config` with both files: the dev service has no nginx volume, the labels equal the base's except the service port, a Node health check, `develop.watch` with `initial_sync` and the expected rules |
-| wrapper | object, function and promise base configs; exact `allowedHosts`; `strictPort`; host `0.0.0.0` |
+| wrapper | object, function and promise exports resolve; the guarded keys are set after the project's config, not merged; at run time a project's `allowedHosts: true` still refuses `evil.example` |
 | updates | false → true, true → false (no stale files), edited overlay and edited Dockerfile give sidecars |
-| doctor and boot | `forge doctor` flags Compose below 2.40.0 when the field is on; `forge --dev-server --yes` and the interactive confirm do not run `docker compose up`, and print the Watch command |
+| options | `--dev-server`, the stack key and the interactive prompt (Vue only) reach the config; asking for it without a Vue frontend is an error; Svelte is not asked |
+| doctor and boot | `forge doctor` flags Compose below 2.40.0 when the field is on; `--yes`, the interactive confirm and a frontend-only project do not run `docker compose up`, and print the Watch command |
+| readme | the generated app README gains the Compose section only with the field on |
 | ownership | the dev server writes nothing into the checkout as a different uid; Vite's cache directory is writable |
 | runtime HMR | Playwright through Traefik, started with `up --watch --build`: edit a watched source component, the DOM changes, and the document did not navigate or reload (a `window` marker survives, no new main-frame navigation); a `package.json` change rebuilds |
-| matrix | npm, pnpm, yarn; shadcn and nuxt-ui; `include_auth` on and off |
-| origin | the overlay publishes no port for the frontend, and the rendered `.env` value of `VITE_AUTH_DISABLED` reaches the dev server unchanged |
+| matrix | render tests for npm, pnpm and yarn (stages, `CMD`, corepack location) and for shadcn and nuxt-ui. Runtime coverage is npm, shadcn, sign-in off: pnpm and yarn cannot reach the dev stage today (see Risks) and nuxt-ui and sign-in on are not run |
+| origin | the overlay publishes no port for the frontend and sets no `environment`, so the rendered `.env` value of `VITE_AUTH_DISABLED` reaches the dev server unchanged |
 | production | the existing Compose, Helm and CSP tests still pass unchanged with the field off |
 
 ## Risks and open points
 
 - **Watch latency and file events on Docker Desktop.** Sync writes into the
   container, so the watcher inside it should see events; the Playwright test
-  decides whether polling is needed. Measure on Linux and Docker Desktop
+  showed polling is not needed on Linux. Measure on Linux and Docker Desktop
   (Windows or macOS) before the pull request merges, or the docs say Linux only.
 - **Single-file watch paths.** Compose Watch rules on individual files
   (`vite.config.ts`, the lockfile) need checking against the Compose versions at
@@ -121,8 +123,8 @@ gatekeeper overlay as its own concern.
 - **Deleting on `true → false`.** The updater's general rule leaves vanished
   scaffold on disk. The exception is limited to the overlay and wrapper and to
   unmodified files; it is a new rule, so it is called out for review.
-- **Docker image size.** A non-root `deps` stage may double `node_modules` in a
-  layer; the measurement in step 2.2 decides.
+- **pnpm and yarn at run time.** Not proven. For pnpm, the install step in the image's `deps` stage (the same command the production build runs) was rejected by the `pnpm@latest` that corepack fetched, which refused the lockfile the host generated ("lockfile contains entries that the active policies reject"). For yarn, generation on this host stopped at the project's lint step (`eslint: not found`) before any image. Both exist without this change; fixing them is separate work.
+- **Nuxt UI and sign-in on at run time.** Not run; they rest on the render tests and the Nuxt UI quality lane.
 - **Port.** The overlay reads the frontend's `server_port` rather than assuming
   5173.
 - **Svelte unknowns.** Its dev command, wrapper and generated files are not

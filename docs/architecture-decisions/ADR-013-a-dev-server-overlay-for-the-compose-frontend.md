@@ -47,10 +47,11 @@ What it learned shapes this decision:
 1. **A per-frontend field, Vue first.** `frontend.dev_server` (boolean,
    default `false`) is a `FrontendConfig` field, travelling the way `ui_kit`
    does (ADR-011): the stack file, `--dev-server`, `[forge.frontend]` in
-   `forge.toml`, the recipe. There is no interactive prompt: it is an opt-in for
-   a project that wants hot reload, and a prompt would ask every Vue user.
-   `forge.toml` records it only when on, so a project without it keeps the
-   manifest it had; the recipe always holds the field. It is not an option-registry
+   `forge.toml`, the recipe. The interactive generator asks on Vue only. Asking for it
+   without a Vue frontend (`--dev-server` or the stack key with no
+   `--frontend vue`) is an error, never a silent no-op. `forge.toml` records it
+   only when on, so a project without it keeps the manifest it had; the recipe
+   always holds the field. It is not an option-registry
    path. It applies to Vue first; Svelte follows in a separate change with the
    same tests; Flutter is refused. The overlay overrides the project's one
    `frontend` service (`apps/<frontend_slug>`, host `app.localhost`). A list of
@@ -103,11 +104,14 @@ What it learned shapes this decision:
    `--ignore-scripts` workaround exist.
 5. **A wrapper Vite config, never an edit of the project's own.**
    `apps/<frontend_slug>/vite.dev.config.ts` resolves the base `vite.config.ts` whether
-   it exports an object, a function of `ConfigEnv`, or a promise, merges it with
-   Vite's `mergeConfig`, and sets `server.host` to `0.0.0.0`, `strictPort`,
-   and `allowedHosts` to the frontend's exact generated Traefik hostname,
+   it exports an object, a function of `ConfigEnv`, or a promise, spreads it, and
+   then sets `server.host` to `0.0.0.0`, `strictPort`, and `allowedHosts` to the frontend's exact generated Traefik hostname,
    `app.localhost`, read from the same place the Compose template reads it. It
-   never sets `allowedHosts: true`. File polling is off: Compose writes the
+   never sets `allowedHosts: true`. The three keys are set after the project's
+   config and not merged into it: `mergeConfig` concatenates host lists and keeps
+   `true`, so a project's own `allowedHosts` would otherwise widen the list (the
+   e2e test sets `allowedHosts: true` in the project and expects `evil.example`
+   refused). File polling is off: Compose writes the
    synced files inside the container, where Vite's watcher sees them (measured:
    an edit reaches the browser in under a second). It imports the project's
    config with its `.ts` extension, which Vite 8's native config loader asks for.
@@ -181,8 +185,8 @@ that changes what is rendered.
 Rejected. Every project's Dockerfile, recipe and golden snapshots would change
 for a feature most projects do not use, and the overlay would have to live in
 every update. An option keeps the off state's Dockerfile and Compose output
-unchanged. The recipe and `forge.toml` still record the field, so the goldens
-change; that is the accepted cost, as in ADR-011.
+unchanged. The recipe records the field, so the goldens change; that is the
+accepted cost, as in ADR-011.
 
 ### A compose profile in `docker-compose.yml`
 
@@ -197,8 +201,10 @@ Rejected. It is the second-origin setup the Context describes.
 ## Consequences
 
 - With the field off, the rendered Dockerfile and Compose files are
-  unchanged. `forge.toml` and `.forge/quality.json` gain `dev_server = false`
-  on the next update, so golden snapshots, the manifest and the recipe change.
+  unchanged, and so is every other generated file. `.forge/quality.json` gains
+  `dev_server = false` on the next update, so the recipe and the golden
+  snapshots that hash it change; `forge.toml` records `dev_server = true` only
+  for a project that enables it.
 - Projects on Docker Compose older than 2.40.0 cannot use the overlay.
 - A change under `package.json` or a lockfile rebuilds the image and restarts
   the service; a change to the Vite config restarts it without a rebuild.
