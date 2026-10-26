@@ -31,6 +31,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { URL } from 'node:url';
@@ -141,7 +142,7 @@ async function provesReporting() {
     const tab = await browser.newPage();
     await tab.goto(`http://127.0.0.1:${port}/__csp-canary`);
     for (let waited = 0; !canaryReported && waited < 15_000; waited += 100) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await sleep(100);
     }
     if (!canaryReported) process.stderr.write('serve-csp: the canary page sent no report within 15 s\n');
   } catch (error) {

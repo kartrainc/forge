@@ -282,6 +282,41 @@ def test_the_charts_default_server_sends_what_nginx_conf_sends(render, csp: bool
         assert nginx.count(f'add_header {name} "{value}" always;') == 2
 
 
+@pytest.mark.parametrize("edited", [False, True], ids=["untouched", "edited"])
+def test_an_update_brings_the_current_serve_script(render, tmp_path: Path, edited: bool) -> None:
+    """A project's older serve script is replaced while untouched, kept with a sidecar once edited."""
+    from forge.sync.provenance import sha256_of
+
+    root = tmp_path / "project"
+    shutil.copytree(render(_config()), root)
+    rel = "apps/frontend/scripts/serve-csp.mjs"
+    script = root / rel
+    older = "// serve-csp.mjs as forge wrote it before the canary\n"
+    script.write_text(older, encoding="utf-8")
+    manifest = root / "forge.toml"
+    recorded = re.compile(
+        r'(\[forge\.provenance\."' + re.escape(rel) + r'"\][^\[]*?sha256 = ")[0-9a-f]+'
+    )
+    assert recorded.search(manifest.read_text(encoding="utf-8"))
+    # forge.toml records what forge wrote: the older script.
+    manifest.write_text(
+        recorded.sub(
+            lambda m: m.group(1) + sha256_of(script), manifest.read_text(encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
+    if edited:
+        script.write_text(older + "// the project's own edit\n", encoding="utf-8")
+    update_project(root, quiet=True, update_mode="merge")
+    current = script.read_text(encoding="utf-8")
+    sidecar = root / (rel + ".forge-merge")
+    if edited:
+        assert "the project's own edit" in current and "/__csp-canary" not in current
+        assert "/__csp-canary" in sidecar.read_text(encoding="utf-8")
+    else:
+        assert "/__csp-canary" in current and not sidecar.exists()
+
+
 # --- scripts/serve-csp.mjs -------------------------------------------------------
 
 _SERVE_CSP = Path(__file__).resolve().parents[1] / "forge/templates/_common/serve-csp.mjs"

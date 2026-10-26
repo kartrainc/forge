@@ -210,10 +210,14 @@ def _content_security(
     exit_code=0,
     errors=(),
     canary=True,
+    script="fetch('/__csp-canary')\n",
 ):
     service = tmp_path / "apps" / "web"
-    service.mkdir(parents=True)
+    (service / "scripts").mkdir(parents=True)
     (service / "playwright.csp.config.ts").write_text("export default {}\n", encoding="utf-8")
+    # The project's serve script; one that opens the canary page makes its
+    # report mandatory.
+    (service / "scripts" / "serve-csp.mjs").write_text(script, encoding="utf-8")
     # serve-csp.mjs opens its canary page once: its report proves that reports
     # reach the check.
     reports = [*reports, _CANARY] if canary else reports
@@ -290,6 +294,16 @@ def test_content_security_fails_when_no_report_reaches_it(tmp_path, monkeypatch)
     result = _content_security(tmp_path, monkeypatch, [], canary=False)
     assert result["passed"] is False and result["canary"] == 0
     assert "no report reached the check" in result["error"]
+
+
+def test_a_serve_script_older_than_the_canary_warns_instead_of_failing(tmp_path, monkeypatch):
+    # A project updated without a recipe, or with an unmerged sidecar, still
+    # runs the serve script forge wrote before the canary existed.
+    result = _content_security(
+        tmp_path, monkeypatch, [], ui_kit="shadcn", canary=False, script="// before the canary\n"
+    )
+    assert result["passed"] is True and result["canary"] == 0 and "error" not in result
+    assert "predates the canary" in result["warning"] and "forge --update" in result["warning"]
 
 
 def test_the_canary_proves_collection_and_is_no_violation(tmp_path, monkeypatch):

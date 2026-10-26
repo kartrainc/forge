@@ -409,11 +409,13 @@ kit it uses, unless the project has the AI chat:
   script opens a canary page of its own in the project's Playwright Chromium,
   under a fixed policy that blocks the page's script whatever the project's
   policy admits; the check fails without its report, so a collector that
-  receives nothing cannot pass. The app's pages are served untouched. Both scripts are written only
-  when absent and are the project's afterwards: give the config the specs,
-  projects and builds a production run can serve (a development-only route or
-  a second build is the project's to arrange); to take a later version,
-  delete yours before updating.
+  receives nothing cannot pass. The app's pages are served untouched. Both
+  scripts are scaffold: an update replaces them while you have not edited
+  them and writes a `.forge-merge` sidecar once you have (an update without a
+  recipe writes them only when absent). Give the config the specs, projects
+  and builds a production run can serve (a development-only route or a second
+  build is the project's to arrange). A serve script older than the canary
+  makes the check warn, not fail, until you take the current one.
 - A project that keeps its own policy and adopts the nonce rewrites the
   placeholder in `index.html` wherever the page is served: in `nginx.conf` and
   in the Helm chart's server block, or every script is blocked.

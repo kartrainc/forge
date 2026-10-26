@@ -64,11 +64,22 @@ def is_canary(report: dict) -> bool:
     return str(report.get("blocked-uri", "")).endswith(CANARY)
 
 
+def _serves_the_canary(service: Path) -> bool:
+    """True when the project's ``scripts/serve-csp.mjs`` opens the canary page.
+
+    A script forge wrote before the canary existed does not; an update brings
+    the current one while the script is untouched, a sidecar when it is edited.
+    """
+    script = service / "scripts" / "serve-csp.mjs"
+    return script.is_file() and "/__csp-canary" in script.read_text(encoding="utf-8")
+
+
 def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn") -> dict:
     """Build ``service``, run its browser suites under the policy, judge the reports.
 
     Passes only when Playwright exits cleanly with tests run, no failed or flaky
-    test and no global error, the canary's report arrived, and every other
+    test and no global error, the canary's report arrived (when the project's
+    serve script opens the canary; an older one is a warning), and every other
     report is admitted for ``ui_kit``. Returns ``{"passed", "tests",
     "violations", "admitted", "canary"}``. A service without
     ``playwright.csp.config.ts`` (the option off) is reported as skipped.
@@ -141,8 +152,12 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
                     )
                 }
             )
+    # A script that predates the canary cannot prove collection; that is a
+    # warning naming the fix, not a failure, until the project takes the
+    # current script.
+    canary_required = _serves_the_canary(service)
     outcome = {
-        "passed": passed_tests and canary > 0 and not violations,
+        "passed": passed_tests and (canary > 0 or not canary_required) and not violations,
         "tests": statistics.get("expected", 0),
         "failed_tests": statistics.get("unexpected", 0),
         "exit_code": completed.returncode,
@@ -151,7 +166,13 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
         "admitted": known,
         "canary": canary,
     }
-    if not canary:
+    if not canary and not canary_required:
+        outcome["warning"] = (
+            "scripts/serve-csp.mjs predates the canary, so the check cannot prove that reports "
+            "reach it: take forge's current script (merge its .forge-merge sidecar, or delete "
+            "it and run forge --update)"
+        )
+    elif not canary:
         outcome["error"] = (
             "no report reached the check: the canary page went unreported (Chromium did "
             "not start for scripts/serve-csp.mjs, or its reports never reached the collector; "
