@@ -153,8 +153,9 @@ def render_compose(
         "backend_slug": config.backend_slug,
         "backend_port": primary.server_port if primary else 5000,
         # Postgres's own database: the first backend that owns one, so a leading
-        # http-service backend does not leave a stray database behind.
-        "db_name": (owners[0].name if owners else config.backend_slug).replace("-", "_"),
+        # http-service backend does not leave a stray database behind; with none
+        # (Postgres rendered for Keycloak alone), the image's default database.
+        "db_name": owners[0].name.replace("-", "_") if owners else "postgres",
         "has_frontend": has_frontend,
         "frontend_slug": config.frontend_slug if has_frontend else "",
         "frontend_port": (

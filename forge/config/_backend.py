@@ -308,8 +308,13 @@ class BackendConfig:
     depends_on: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self._resolve_default_features()
+
+    def _resolve_default_features(self) -> None:
+        # Omitted features stay marked as the default, so a template set later
+        # (dataclasses.replace, an assignment) gets its own default too.
         if isinstance(self.features, _DefaultFeatures):
-            self.features = ["items"] if self._uses_database() else []
+            self.features = _DefaultFeatures(["items"] if self._uses_database() else [])
 
     def _uses_database(self) -> bool:
         # Local import: forge.backend_app_templates imports BackendLanguage from this package.
@@ -318,6 +323,7 @@ class BackendConfig:
         return backend_uses_database(self.language, self.app_template)
 
     def validate(self) -> None:
+        self._resolve_default_features()
         validate_port(self.server_port, f"Backend '{self.name}' port")
         if not re.match(r"^[a-z][a-z0-9_-]*$", self.name):
             raise ValueError(f"Backend name '{self.name}' must be lowercase kebab/snake case.")

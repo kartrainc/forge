@@ -455,7 +455,9 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     prune = "npm prune --omit=dev"
     assert prune in (svc / "Dockerfile").read_text(encoding="utf-8")
     assert prune not in (root / "services" / "store" / "Dockerfile").read_text(encoding="utf-8")
-    assert "node_modules" in (svc / ".dockerignore").read_text(encoding="utf-8")
+    dockerignore = (svc / ".dockerignore").read_text(encoding="utf-8")
+    assert "node_modules" in dockerignore
+    assert ".env.*\n!.env.example" in dockerignore
 
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "capture-migrate:" not in compose
@@ -484,6 +486,8 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     dev_stage = dockerfile[dockerfile.index("AS dev") : dockerfile.index("AS builder")]
     assert "FROM deps AS dev" in dockerfile
     assert "npm run build" not in dev_stage
+    # A service waiting for this one's service_healthy also waits under the overlay.
+    assert "HEALTHCHECK" in dev_stage and "/api/v1/health/live" in dev_stage
 
     # No entity, so no domain enum; the database-backed sibling keeps them.
     assert not (svc / "src" / "schemas" / "enums").exists()
@@ -501,6 +505,20 @@ def test_a_backend_without_a_database_defaults_to_no_features():
     assert http.features == []
     assert crud.features == ["items"]
     http.validate()
+
+
+def test_a_template_set_later_still_gets_its_own_default_features():
+    import dataclasses
+
+    crud = BackendConfig(name="capture", language=BackendLanguage.NODE)
+    replaced = dataclasses.replace(crud, app_template="http-service")
+    assigned = BackendConfig(name="capture", language=BackendLanguage.NODE)
+    assigned.app_template = "http-service"
+    assigned.validate()
+
+    assert crud.features == ["items"]
+    assert replaced.features == []
+    assert assigned.features == []
 
 
 def test_a_backend_without_a_database_refuses_crud_features():
@@ -603,6 +621,19 @@ def test_stack_of_http_services_has_no_postgres(tmp_path: Path):
     assert "postgres:" not in compose
     assert "POSTGRES_DB" not in compose
     assert "capture-migrate" not in compose
+
+
+def test_postgres_for_keycloak_alone_keeps_its_default_database(tmp_path: Path):
+    """No backend owns a database, but Keycloak needs Postgres: no database named after an http-service."""
+    from forge.generator import generate
+
+    cfg = _http_only_project(tmp_path, ["capture"])
+    cfg.include_keycloak = True
+    root = generate(cfg, quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "POSTGRES_DB: postgres" in compose
+    assert "POSTGRES_DB: capture" not in compose
 
 
 def test_postgres_names_its_database_after_a_backend_that_owns_one(tmp_path: Path):

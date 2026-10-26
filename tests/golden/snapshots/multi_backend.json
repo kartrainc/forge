@@ -81,8 +81,8 @@
       "sha256": "<version-dependent>"
     },
     "services/api-node/.dockerignore": {
-      "size": 346,
-      "sha256": "f732bc7a0ec23d5e"
+      "size": 367,
+      "sha256": "aa0dbdd6c260cad1"
     },
     "services/api-node/.env.example": {
       "size": 162,
@@ -93,8 +93,8 @@
       "sha256": "1e5b3e6f3b0203aa"
     },
     "services/api-node/Dockerfile": {
-      "size": 4338,
-      "sha256": "c6ef72b72f311afa"
+      "size": 4676,
+      "sha256": "787592aca088fe73"
     },
     "services/api-node/OBSERVABILITY.md": {
       "size": 2091,
