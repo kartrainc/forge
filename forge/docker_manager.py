@@ -107,22 +107,7 @@ def render_compose(
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
     )
 
-    # Whether a project-root ``packages/`` tree actually ships — only the
-    # platform-auth SDK fragments create it. forge-core is backend-local
-    # (services/<svc>/sdks/forge-core, main build context), so a no-auth
-    # project has no project-root ``packages/``. Declaring the ``packages`` build
-    # context when the dir is absent makes ``docker compose build`` fail
-    # ("failed to get build context packages") — so gate the context on this.
-    active_fragments = {rf.fragment.name for rf in plan.ordered} if plan is not None else set()
-    has_project_sdks = bool(
-        active_fragments
-        & {
-            "platform_auth_sdk_python",
-            "platform_auth_sdk_node",
-            "platform_auth_sdk_rust",
-            "platform_auth_sdk_go",
-        }
-    )
+    has_project_sdks = _has_project_sdks(plan)
 
     # Build per-backend context list for the template loop. The per-backend
     # entry shape and the postgres predicate live in ``forge.config._topology``
@@ -204,6 +189,58 @@ def render_compose(
     compose_path = project_root / "docker-compose.yml"
     compose_path.write_text(output, encoding="utf-8")
     return compose_path
+
+
+def _has_project_sdks(plan: ResolvedPlan | None) -> bool:
+    """Whether a project-root ``packages/`` tree actually ships.
+
+    Only the platform-auth SDK fragments create it. forge-core is backend-local
+    (services/<svc>/sdks/forge-core, main build context), so a no-auth project
+    has no project-root ``packages/``. Declaring the ``packages`` build context
+    when the dir is absent makes ``docker compose build`` fail ("failed to get
+    build context packages") — so the context is gated on this.
+    """
+    active_fragments = {rf.fragment.name for rf in plan.ordered} if plan is not None else set()
+    return bool(
+        active_fragments
+        & {
+            "platform_auth_sdk_python",
+            "platform_auth_sdk_node",
+            "platform_auth_sdk_rust",
+            "platform_auth_sdk_go",
+        }
+    )
+
+
+def render_compose_dev(
+    config: ProjectConfig,
+    project_root: Path,
+    plan: ResolvedPlan | None = None,
+) -> Path | None:
+    """Render the development overlay ``deploy/compose/dev.yaml``.
+
+    It switches each Node service to its Dockerfile's ``dev`` stage and adds
+    ``develop.watch`` rules, so ``docker compose ... watch`` runs the service
+    from source inside the full stack. Nothing is rendered without a Node
+    backend.
+    """
+    node_backends = [bc for bc in config.backends if bc.language == BackendLanguage.NODE]
+    if not node_backends:
+        return None
+
+    backends_ctx = [
+        {"name": bc.name, "uses_database": backend_uses_database(bc.language, bc.app_template)}
+        for bc in node_backends
+    ]
+    template = _jinja_env().get_template("deploy/docker-compose.dev.yml.j2")
+    output = template.render(
+        {"backends": backends_ctx, "has_project_sdks": _has_project_sdks(plan)}
+    )
+
+    dev_path = project_root / "deploy" / "compose" / "dev.yaml"
+    dev_path.parent.mkdir(parents=True, exist_ok=True)
+    dev_path.write_text(output, encoding="utf-8")
+    return dev_path
 
 
 # -- Workspace root manifests -------------------------------------------------

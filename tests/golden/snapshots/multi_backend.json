@@ -56,6 +56,10 @@
       "size": 100,
       "sha256": "77ac9733140f48bb"
     },
+    "deploy/compose/dev.yaml": {
+      "size": 1062,
+      "sha256": "38488e1eba3ca84b"
+    },
     "deploy/compose/init-db.sh": {
       "size": 343,
       "sha256": "72fe8243235d907b"
@@ -65,7 +69,7 @@
       "sha256": "9a94950eef4a8084"
     },
     "forge.toml": {
-      "size": 76535,
+      "size": 76741,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -89,8 +93,8 @@
       "sha256": "1e5b3e6f3b0203aa"
     },
     "services/api-node/Dockerfile": {
-      "size": 3850,
-      "sha256": "8d77a24d4b4dbd7c"
+      "size": 4175,
+      "sha256": "eefcfd2a978be236"
     },
     "services/api-node/OBSERVABILITY.md": {
       "size": 2091,
@@ -101,8 +105,8 @@
       "sha256": "3edf1f3627fa2dd7"
     },
     "services/api-node/README.md": {
-      "size": 1412,
-      "sha256": "389f88b89941827e"
+      "size": 1606,
+      "sha256": "639be5aa86a8c51d"
     },
     "services/api-node/biome.json": {
       "size": 296,

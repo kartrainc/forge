@@ -428,7 +428,8 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
         assert not (svc / rel).exists(), f"database, queue or worker file rendered: {rel}"
     for rel in ("src/app.ts", "src/config/schema.ts", "src/routes/health.ts", "entrypoint.sh"):
         text = (svc / rel).read_text(encoding="utf-8")
-        assert "prisma" not in text.lower() and "itemRoutes" not in text, rel
+        assert "prisma" not in text.lower(), rel
+        assert "itemRoutes" not in text, rel
 
     package = json.loads((svc / "package.json").read_text(encoding="utf-8"))
     assert not [name for name in package["dependencies"] if "prisma" in name]
@@ -456,6 +457,36 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert "capture" not in init_db
     assert "store" in init_db
     assert (root / "services" / "store" / "src" / "lib" / "prisma.ts").is_file()
+
+    # The development overlay runs both from source; only the database-backed
+    # one rebuilds on a Prisma schema change.
+    dev = (root / "deploy" / "compose" / "dev.yaml").read_text(encoding="utf-8")
+    assert "  capture:\n    build:\n      target: dev" in dev
+    assert "  store:\n    build:\n      target: dev" in dev
+    assert "./services/store/prisma" in dev
+    assert "./services/capture/prisma" not in dev
+
+
+def test_dev_overlay_only_for_node_projects(tmp_path: Path):
+    """deploy/compose/dev.yaml drives Node's ``dev`` stage, so a project
+    without a Node backend gets none."""
+    cfg = ProjectConfig(
+        project_name="py_only",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name="api",
+                project_name="py_only",
+                language=BackendLanguage.PYTHON,
+                features=["items"],
+            )
+        ],
+        frontend=None,
+    )
+    from forge.generator import generate
+
+    root = generate(cfg, quiet=True, dry_run=True)
+    assert not (root / "deploy" / "compose" / "dev.yaml").exists()
 
 
 def test_two_stage_variant_renders_nonempty_app_title(tmp_path: Path):

@@ -59,13 +59,6 @@ RUN npx prisma generate
 COPY tsconfig.json ./
 COPY src ./src/
 RUN npm run build
-{%- if not (use_database | default(true)) %}
-
-# Nothing runs the Prisma CLI at start-up without a database, so the image
-# keeps only production dependencies: the compiler, linter and test runner
-# stay in the builder.
-RUN cd /workspace && npm prune --omit=dev --workspaces --include-workspace-root
-{%- endif %}
 
 # Ensure a per-service node_modules exists even when npm workspaces
 # hoists every dep to /workspace/node_modules (which happens for
@@ -73,6 +66,27 @@ RUN cd /workspace && npm prune --omit=dev --workspaces --include-workspace-root
 # runtime stage's ``COPY --from=builder .../services/{slug}/node_modules``
 # would otherwise fail BuildKit's checksum step with "not found".
 RUN mkdir -p node_modules
+
+# --- Development Stage ---
+# Built only by the development overlay (deploy/compose/dev.yaml): every
+# dependency, and `tsx watch` restarting the server when compose syncs a
+# change into src/. A plain build skips it.
+FROM builder AS dev
+
+COPY config ./config/
+ENV NODE_ENV=development
+EXPOSE {{ server_port }}
+CMD ["npm", "run", "dev"]
+{%- if not (use_database | default(true)) %}
+
+# --- Production Dependencies Stage ---
+# Nothing runs the Prisma CLI at start-up without a database, so the image
+# keeps only production dependencies: the compiler, linter and test runner
+# stay in the builder.
+FROM builder AS prod-deps
+
+RUN cd /workspace && npm prune --omit=dev --workspaces --include-workspace-root
+{%- endif %}
 
 # --- Runtime Stage ---
 FROM node:{{ node_version }}-slim
@@ -86,13 +100,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # verbatim from the builder rather than re-installed — workspace
 # packages live inside the workspace tree, not in a public registry.
 WORKDIR /workspace/services/{{ project_slug }}
+{%- set deps_stage = "builder" if (use_database | default(true)) else "prod-deps" %}
 
 COPY --from=builder /workspace/package.json /workspace/package-lock.json* /workspace/
-COPY --from=builder /workspace/node_modules /workspace/node_modules/
+COPY --from={{ deps_stage }} /workspace/node_modules /workspace/node_modules/
 {%- if include_platform_auth | default(false) %}
-COPY --from=builder /workspace/packages /workspace/packages/
+COPY --from={{ deps_stage }} /workspace/packages /workspace/packages/
 {%- endif %}
-COPY --from=builder /workspace/services/{{ project_slug }}/node_modules ./node_modules/
+COPY --from={{ deps_stage }} /workspace/services/{{ project_slug }}/node_modules ./node_modules/
 COPY --from=builder /workspace/services/{{ project_slug }}/dist ./dist/
 {%- if use_database | default(true) %}
 COPY --from=builder /workspace/services/{{ project_slug }}/prisma ./prisma/

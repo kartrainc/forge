@@ -1,0 +1,35 @@
+# Development overlay for the Node services: run them from source and restart
+# on change, behind the same Traefik, auth and network as the full stack.
+#
+#   docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch
+#
+# Each Node service builds its Dockerfile's `dev` stage (every dependency,
+# `tsx watch`). Compose syncs src/ into the running container and tsx restarts
+# the server; a config/ change restarts the container; a dependency change
+# rebuilds the image. Paths resolve from the project root, the first -f file.
+services:
+{% for be in backends %}
+  {{ be.name }}:
+    build:
+      target: dev
+    develop:
+      watch:
+        - action: sync
+          path: ./services/{{ be.name }}/src
+          target: /workspace/services/{{ be.name }}/src
+        - action: sync+restart
+          path: ./services/{{ be.name }}/config
+          target: /workspace/services/{{ be.name }}/config
+        - action: rebuild
+          path: ./services/{{ be.name }}/package.json
+        - action: rebuild
+          path: ./package-lock.json
+{% if be.uses_database %}
+        - action: rebuild
+          path: ./services/{{ be.name }}/prisma
+{% endif %}
+{% if has_project_sdks %}
+        - action: rebuild
+          path: ./packages
+{% endif %}
+{% endfor %}
