@@ -426,10 +426,18 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
         "src/worker",
     ):
         assert not (svc / rel).exists(), f"database, queue or worker file rendered: {rel}"
-    for rel in ("src/app.ts", "src/config/schema.ts", "src/routes/health.ts", "entrypoint.sh"):
-        text = (svc / rel).read_text(encoding="utf-8")
+    assert "prisma" not in (svc / "entrypoint.sh").read_text(encoding="utf-8").lower()
+    # Every rendered source and test, not a fixed list: a database file added to the
+    # template later without its exclusion fails here instead of in the generated build.
+    for path in sorted(svc.rglob("*.ts")):
+        if "node_modules" in path.parts:
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(svc).as_posix()
         assert "prisma" not in text.lower(), rel
-        assert "itemRoutes" not in text, rel
+        assert "item.schema" not in text and "item.service" not in text, rel
+        assert "itemRoutes" not in text and "data/repositories" not in text, rel
 
     package = json.loads((svc / "package.json").read_text(encoding="utf-8"))
     assert not [name for name in package["dependencies"] if "prisma" in name]
@@ -465,6 +473,77 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert "  store:\n    build:\n      target: dev" in dev
     assert "./services/store/prisma" in dev
     assert "./services/capture/prisma" not in dev
+    assert "./services/capture/tsconfig.json" in dev
+
+    # The dev stage branches before the compile, so a type error mid-edit never
+    # stops the dev image.
+    dockerfile = (svc / "Dockerfile").read_text(encoding="utf-8")
+    dev_stage = dockerfile[dockerfile.index("AS dev") : dockerfile.index("AS builder")]
+    assert "FROM deps AS dev" in dockerfile
+    assert "npm run build" not in dev_stage
+
+
+def _http_only_project(tmp_path: Path, names: list[str]) -> ProjectConfig:
+    return ProjectConfig(
+        project_name="http_only",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name=name,
+                project_name="http_only",
+                language=BackendLanguage.NODE,
+                app_template="http-service",
+                server_port=5100 + index,
+                features=[],
+            )
+            for index, name in enumerate(names)
+        ],
+        frontend=None,
+    )
+
+
+def test_stack_of_http_services_has_no_postgres(tmp_path: Path):
+    from forge.generator import generate
+
+    root = generate(_http_only_project(tmp_path, ["capture"]), quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "postgres:" not in compose
+    assert "POSTGRES_DB" not in compose
+
+
+def test_postgres_names_its_database_after_a_backend_that_owns_one(tmp_path: Path):
+    from forge.generator import generate
+
+    cfg = _http_only_project(tmp_path, ["capture"])
+    cfg.backends.append(
+        BackendConfig(
+            name="store",
+            project_name="http_only",
+            language=BackendLanguage.NODE,
+            server_port=5200,
+            features=["items"],
+        )
+    )
+    root = generate(cfg, quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "POSTGRES_DB: store" in compose
+
+
+def test_database_name_collision_ignores_backends_without_a_database(tmp_path: Path):
+    cfg = _http_only_project(tmp_path, ["my-svc"])
+    cfg.backends.append(
+        BackendConfig(
+            name="my_svc",
+            project_name="http_only",
+            language=BackendLanguage.NODE,
+            server_port=5200,
+            features=["items"],
+        )
+    )
+
+    cfg.validate()
 
 
 def test_dev_overlay_only_for_node_projects(tmp_path: Path):

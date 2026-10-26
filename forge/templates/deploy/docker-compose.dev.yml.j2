@@ -23,13 +23,21 @@ services:
         - action: rebuild
           path: ./services/{{ be.name }}/package.json
         - action: rebuild
+          path: ./services/{{ be.name }}/tsconfig.json
+        - action: rebuild
           path: ./package-lock.json
 {% if be.uses_database %}
         - action: rebuild
           path: ./services/{{ be.name }}/prisma
+        - action: rebuild
+          path: ./services/{{ be.name }}/prisma.config.ts
 {% endif %}
 {% if has_project_sdks %}
         - action: rebuild
           path: ./packages
+          # A host install or build of the SDKs is not a source change.
+          ignore:
+            - node_modules/
+            - dist/
 {% endif %}
 {% endfor %}

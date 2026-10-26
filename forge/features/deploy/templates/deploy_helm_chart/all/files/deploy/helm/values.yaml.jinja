@@ -34,7 +34,9 @@ workloads:
     # Deployment rolls (see templates/jobs.yaml).
     hasMigrations: {{ "true" if be.has_migrations else "false" }}
     migrateCommand:
-{%- if be.language == "python" %}
+{%- if not (be.uses_database | default(true)) %}
+      []
+{%- elif be.language == "python" %}
       ["python", "-m", "app", "db", "upgrade"]
 {%- elif be.language == "node" %}
       ["npx", "prisma", "migrate", "deploy"]

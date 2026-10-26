@@ -220,6 +220,11 @@ def _discover_manifests() -> None:
         requires_services = (
             tuple(str(s) for s in requires_raw) if isinstance(requires_raw, list) else ()
         )
+        uses_database = template.get("uses_database", True)
+        if not isinstance(uses_database, bool):
+            # A string such as "false" would read as true and wire a database: skip the
+            # manifest like any other malformed one rather than guess.
+            continue
         register_backend_application_template(
             BackendApplicationTemplate(
                 language=language,
@@ -229,7 +234,7 @@ def _discover_manifests() -> None:
                 supported=bool(template.get("supported", True)),
                 base_template_dir=str(template.get("base", "")),
                 requires_services=requires_services,
-                uses_database=bool(template.get("uses_database", True)),
+                uses_database=uses_database,
             )
         )
 

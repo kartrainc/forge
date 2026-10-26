@@ -57,8 +57,8 @@
       "sha256": "77ac9733140f48bb"
     },
     "deploy/compose/dev.yaml": {
-      "size": 1062,
-      "sha256": "38488e1eba3ca84b"
+      "size": 1217,
+      "sha256": "270a9b767f237fcb"
     },
     "deploy/compose/init-db.sh": {
       "size": 343,
@@ -85,16 +85,16 @@
       "sha256": "f732bc7a0ec23d5e"
     },
     "services/api-node/.env.example": {
-      "size": 154,
-      "sha256": "f49991fada5d317b"
+      "size": 162,
+      "sha256": "c838017c12f1e647"
     },
     "services/api-node/.gitignore": {
       "size": 50,
       "sha256": "1e5b3e6f3b0203aa"
     },
     "services/api-node/Dockerfile": {
-      "size": 4175,
-      "sha256": "eefcfd2a978be236"
+      "size": 4338,
+      "sha256": "c6ef72b72f311afa"
     },
     "services/api-node/OBSERVABILITY.md": {
       "size": 2091,

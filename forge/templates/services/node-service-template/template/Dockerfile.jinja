@@ -13,8 +13,8 @@
 #     packages/...                            (from packages context)
 #     services/{{ project_slug }}/         (this service — main context)
 
-# --- Builder Stage ---
-FROM node:{{ node_version }}-slim AS builder
+# --- Dependencies Stage ---
+FROM node:{{ node_version }}-slim AS deps
 
 WORKDIR /workspace
 
@@ -56,10 +56,6 @@ COPY prisma.config.ts ./
 RUN npx prisma generate
 {%- endif %}
 
-COPY tsconfig.json ./
-COPY src ./src/
-RUN npm run build
-
 # Ensure a per-service node_modules exists even when npm workspaces
 # hoists every dep to /workspace/node_modules (which happens for
 # minimal scenarios with no dep conflicts — e.g. node_svelte_min). The
@@ -70,20 +66,30 @@ RUN mkdir -p node_modules
 # --- Development Stage ---
 # Built only by the development overlay (deploy/compose/dev.yaml): every
 # dependency, and `tsx watch` restarting the server when compose syncs a
-# change into src/. A plain build skips it.
-FROM builder AS dev
+# change into src/. It skips the compile, so a type error mid-edit never
+# stops the image; a plain build skips this stage.
+FROM deps AS dev
 
+COPY tsconfig.json ./
+COPY src ./src/
 COPY config ./config/
 ENV NODE_ENV=development
 EXPOSE {{ server_port }}
 CMD ["npm", "run", "dev"]
+
+# --- Builder Stage ---
+FROM deps AS builder
+
+COPY tsconfig.json ./
+COPY src ./src/
+RUN npm run build
 {%- if not (use_database | default(true)) %}
 
 # --- Production Dependencies Stage ---
 # Nothing runs the Prisma CLI at start-up without a database, so the image
 # keeps only production dependencies: the compiler, linter and test runner
-# stay in the builder.
-FROM builder AS prod-deps
+# stay behind.
+FROM deps AS prod-deps
 
 RUN cd /workspace && npm prune --omit=dev --workspaces --include-workspace-root
 {%- endif %}

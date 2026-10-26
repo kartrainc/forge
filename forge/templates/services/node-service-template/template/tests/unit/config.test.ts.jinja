@@ -39,6 +39,10 @@ logging:
   level: "warn"
 server:
   port: 6000
+{%- if not (use_database | default(true)) %}
+app:
+  name: "svc-production"
+{%- endif %}
 `,
 			},
 			`

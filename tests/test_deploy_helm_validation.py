@@ -316,3 +316,20 @@ def test_notes_name_a_further_app_and_its_host_only_with_the_ingress(tmp_path: P
     notes = _notes(chart, tmp_path / "off", "--set", "ingress.enabled=false")
     assert "  - admin (nginx) on port 80" in notes
     assert "http(s)://" not in notes
+
+
+def test_http_service_workload_has_no_database_or_migration() -> None:
+    """The chart wires no database, migration or DB secret for an ``http-service``."""
+    import yaml
+
+    kw = dict(_scenarios())["node_http_service_beside_crud"]
+    values = yaml.safe_load((_gen_chart(**kw) / "values.yaml").read_text(encoding="utf-8"))
+    capture = values["workloads"]["capture"]
+    store = values["workloads"]["store"]
+
+    assert "dbName" not in capture
+    assert capture["hasMigrations"] is False
+    assert capture["migrateCommand"] == []
+    assert not capture["secretEnv"]
+    assert store["dbName"] == "store"
+    assert store["migrateCommand"] == ["npx", "prisma", "migrate", "deploy"]
