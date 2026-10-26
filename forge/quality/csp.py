@@ -2,11 +2,19 @@
 
 With ``security.csp`` on, nginx serves the production build under the policy
 of :mod:`forge.frontend_csp`. This check builds the app, serves ``dist/`` the
-same way (``scripts/serve-csp.mjs`` reads the policy from ``nginx.conf`` and
-replaces the nonce placeholder per response), runs the Playwright suites
-against it and fails on any violation the browser reports. A connect-src
-violation also catches an icon fetched from the Iconify API at runtime instead
-of bundled.
+same way (``scripts/serve-csp.mjs`` reads the policy from ``nginx.conf``, or
+from the file a project names in ``csp-check.json``, and replaces the nonce
+placeholder per response), runs the Playwright suites against it and fails on
+any violation the browser reports. A connect-src violation also catches an
+icon fetched from the Iconify API at runtime instead of bundled. The build
+keeps the project's authentication setting; the suites answer the session in
+the page. Which suites run, and with which builds, is the project's
+``playwright.csp.config.ts`` to say.
+
+The check also proves that reports reach it: until the first one arrives, the
+script serves each page with a canary, a script from a host that cannot
+resolve, which any working policy blocks. Without the canary's report the
+check fails, since an empty report file would otherwise pass.
 
 Two reports are admitted for a ``nuxt-ui`` project, each a ``<style>`` element a
 Nuxt UI 4.12 dependency inserts without the nonce in Vue mode. The browser
@@ -35,6 +43,9 @@ ADMITTED_STYLE_SAMPLES = {
     "*,*::before,*::after{-webkit-transition:": "VueUse's colour-mode transition guard",
 }
 
+#: The script ``serve-csp.mjs`` puts on pages until the first report arrives.
+CANARY = "https://csp-canary.invalid/forge.js"
+
 
 def admitted(report: dict, ui_kit: str) -> str | None:
     """Name the known upstream element a report is about, or ``None``."""
@@ -47,12 +58,18 @@ def admitted(report: dict, ui_kit: str) -> str | None:
     return ADMITTED_STYLE_SAMPLES.get(report.get("script-sample", ""))
 
 
+def is_canary(report: dict) -> bool:
+    """True for the report of the canary script that proves reports arrive."""
+    return str(report.get("blocked-uri", "")).startswith(CANARY)
+
+
 def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn") -> dict:
     """Build ``service``, run its browser suites under the policy, judge the reports.
 
     Passes only when Playwright exits cleanly with tests run, no failed or flaky
-    test and no global error, and every report is admitted for ``ui_kit``.
-    Returns ``{"passed", "tests", "violations", "admitted"}``. A service without
+    test and no global error, the canary's report arrived, and every other
+    report is admitted for ``ui_kit``. Returns ``{"passed", "tests",
+    "violations", "admitted", "canary"}``. A service without
     ``playwright.csp.config.ts`` (the option off) is reported as skipped.
     """
     if not (service / "playwright.csp.config.ts").is_file():
@@ -63,8 +80,8 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
     env = os.environ.copy()
     env.pop("FORGE_BROWSER_COVERAGE", None)
     env.pop("FORGE_COVERAGE", None)
-    # No gateway serves /auth/* here; the suites mock the API in the browser.
-    env["VITE_AUTH_DISABLED"] = "true"
+    # The build keeps the project's authentication setting, as the browser
+    # suites run it (forge.quality.runner.run_browser).
     env["FORGE_CSP_REPORT"] = str(reports)
     subprocess.run(
         ["npm", "run", "build"],
@@ -100,8 +117,12 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
     lines = reports.read_text(encoding="utf-8").splitlines() if reports.is_file() else []
     violations: list[dict] = []
     known: dict[str, int] = {}
+    canary = 0
     for line in lines:
         report = json.loads(line)
+        if is_canary(report):
+            canary += 1
+            continue
         why = admitted(report, ui_kit)
         if why:
             known[why] = known.get(why, 0) + 1
@@ -119,12 +140,16 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
                     )
                 }
             )
-    return {
-        "passed": passed_tests and not violations,
+    outcome = {
+        "passed": passed_tests and canary > 0 and not violations,
         "tests": statistics.get("expected", 0),
         "failed_tests": statistics.get("unexpected", 0),
         "exit_code": completed.returncode,
         "errors": len(errors),
         "violations": violations,
         "admitted": known,
+        "canary": canary,
     }
+    if not canary:
+        outcome["error"] = "no report reached the check: the canary script went unreported"
+    return outcome

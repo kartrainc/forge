@@ -344,6 +344,25 @@ was inlined into the served bundle. Every frontend now ships
   file: it is scaffold, so later updates keep your edit or propose a
   `.forge-merge` sidecar.
 
+### Browser suites keep the project's authentication setting (unreleased)
+
+`forge --quality test` and the rendered lanes used to run the Vue and Svelte
+browser suites with `VITE_AUTH_DISABLED=true` forced, whatever the project's
+`.env` said. They now run the app as the project configures it, as the unit
+and integration suites always did; so does the content-security check.
+
+- Nothing serves `/auth/*` in the browser suites, so a suite of a project with
+  authentication on answers the session in the page. The template's specs call
+  `mockSession(page)` from the new `tests/e2e/session.ts`, which answers
+  `/auth/userinfo` with the development user's details; a spec that routes
+  `/auth/*` itself after it takes precedence.
+- Untouched `application.spec.ts` and `crud.ts` are updated in place; edited
+  ones receive a sidecar. A spec of your own that reached a signed-in page
+  only because authentication was forced off calls `mockSession` too.
+- A project whose specs already mock the session, signed in or out, runs them
+  as written again: forcing authentication off had made the app skip those
+  mocks.
+
 ### Frontend content-security policy (unreleased)
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,
@@ -370,17 +389,32 @@ kit it uses, unless the project has the AI chat:
   `FORGE_BROWSER_COVERAGE` is set.
 - Code of your own that inserts `<style>` elements or writes `style`
   attributes as markup is blocked from now on; Vue's `:style` bindings are not.
-  Add the origins your frontend calls, such as an error tracker, to
-  `connect-src` in `nginx.conf`. To serve without the policy, set
+  Add the origins your frontend calls, such as an error tracker or a
+  WebSocket server, to `connect-src` in `nginx.conf`: the policy admits the
+  page's own origin and an external API's, not `ws:` or `wss:` at large, which
+  would admit every host. To serve without the policy, set
   `"security.csp" = false` under `[forge.options]` in `forge.toml`, and
   `"security.csp" = "user"` under `[forge.option_origins]`, then update: the
   update takes options from `forge.toml`, not from the recipe.
 - `scripts/serve-csp.mjs` and `playwright.csp.config.ts` run the browser suites
-  against the production build under the policy, with auth disabled since
-  nothing serves `/auth/*` there:
-  `VITE_AUTH_DISABLED=true npm run build && npx playwright test -c playwright.csp.config.ts`.
-  The sign-in flow, a same-origin `fetch` of `/auth/userinfo` and navigations
-  to `/auth/login` and `/logout`, is not run under the policy.
+  against the production build under the policy, with the project's
+  authentication setting: `npm run build && npx playwright test -c playwright.csp.config.ts`.
+  Nothing serves `/auth/*` there, so the suites answer the session in the page
+  (above). The policy is read from `nginx.conf`; a project that keeps its own
+  policy in a header template names that file in `csp-check.json` beside the
+  config, with the values of its `${NAME}` variables
+  (`{"policy": "security-headers.conf", "variables": {"MEDIA_ORIGINS": "…"}}`);
+  an undeclared variable, a missing source or two different policies stop the
+  check. Until the first report arrives, the script serves each page with a
+  canary script the policy blocks, and the check fails without its report, so
+  a policy that reports nowhere cannot pass. Both scripts are written only
+  when absent and are the project's afterwards: give the config the specs,
+  projects and builds a production run can serve (a development-only route or
+  a second build is the project's to arrange); to take a later version,
+  delete yours before updating.
+- A project that keeps its own policy and adopts the nonce rewrites the
+  placeholder in `index.html` wherever the page is served: in `nginx.conf` and
+  in the Helm chart's server block, or every script is blocked.
 - Svelte, Flutter and plugin frontends, and Vue projects with the AI chat, are
   served as before, without a policy. The chat's MCP panels load remote
   origins in frames, which the policy would block.

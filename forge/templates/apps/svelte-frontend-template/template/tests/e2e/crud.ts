@@ -1,4 +1,5 @@
 import { mockHealth, expectHealthyDashboard } from './health';
+import { mockSession } from './session';
 import { expect, test } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -33,6 +34,7 @@ export function testCrud(plural: string, singular: string, backend: string) {
     const field = (name: string) => page.locator(`[data-test="${singular}-${name}"], [data-testid="${singular}-${name}"]`);
     try {
       await mockHealth(page);
+      await mockSession(page);
       await page.goto('/');
       await expectHealthyDashboard(page);
       await expect.poll(() => page.evaluate(() => Boolean((window as Window & { __coverage__?: Record<string, unknown> }).__coverage__))).toBe(true);

@@ -57,7 +57,12 @@ def csp_enabled(config: ProjectConfig) -> bool:
 
 
 def _connect_sources(config: ProjectConfig) -> list[str]:
-    """``'self'``, the external API's origin when the frontend calls one, websockets."""
+    """``'self'``, plus the external API's origin when the frontend calls one.
+
+    No ``ws:`` or ``wss:``: the template opens no WebSocket (its event streams
+    are ``fetch`` requests, which ``'self'`` admits), and either scheme alone
+    admits every host. A project that opens one adds its origin in ``nginx.conf``.
+    """
     from forge.variable_mapper import external_api_url  # noqa: PLC0415
 
     sources = ["'self'"]
@@ -66,7 +71,6 @@ def _connect_sources(config: ProjectConfig) -> list[str]:
         parts = urlsplit(url)
         if parts.scheme and parts.netloc:
             sources.append(f"{parts.scheme}://{parts.netloc}")
-    sources += ["ws:", "wss:"]
     return sources
 
 

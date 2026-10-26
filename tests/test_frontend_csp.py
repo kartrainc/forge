@@ -11,9 +11,14 @@ Vue lanes prove both kits run under the policy without a violation
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
+import socket
 import subprocess
+import time
+import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -91,7 +96,9 @@ def test_the_policy_admits_scripts_and_styles_by_nonce_only() -> None:
         "https://fonts.googleapis.com",
     ]
     assert policy["font-src"].split() == ["'self'", "data:", "https://fonts.gstatic.com"]
-    assert policy["connect-src"].split() == ["'self'", "ws:", "wss:"]
+    # No WebSocket wildcard: either scheme alone admits every host, and the
+    # template opens no WebSocket (its event streams are fetch requests).
+    assert policy["connect-src"].split() == ["'self'"]
     assert policy["frame-ancestors"] == "'none'" and policy["object-src"] == "'none'"
     # Nuxt UI 4.12 writes its temporary palette element through innerHTML in
     # Vue mode, so Trusted Types is not enforced (ADR-011, open point).
@@ -108,7 +115,7 @@ def test_an_external_api_is_admitted_by_its_origin() -> None:
     connect = next(
         d for d in content_security_policy(config).split("; ") if d.startswith("connect-src")
     )
-    assert connect == "connect-src 'self' https://api.example.com ws: wss:"
+    assert connect == "connect-src 'self' https://api.example.com"
 
 
 @pytest.mark.parametrize(
@@ -191,9 +198,16 @@ def test_the_default_project_builds_for_the_policy(render) -> None:
         "import './providers/csp'"
     )
     assert _SERVED_POLICY.search((app / "nginx.conf").read_text(encoding="utf-8"))
-    # The browser suites run against the build under the policy.
+    # The browser suites run against the build under the policy, with the
+    # project's authentication setting: each answers the session in the page.
     assert (app / "scripts" / "serve-csp.mjs").is_file()
     assert (app / "playwright.csp.config.ts").is_file()
+    assert "export async function mockSession" in (app / "tests/e2e/session.ts").read_text(
+        encoding="utf-8"
+    )
+    for spec in ("application.spec.ts", "crud.ts"):
+        text = (app / "tests/e2e" / spec).read_text(encoding="utf-8")
+        assert text.index("await mockHealth(page);") < text.index("await mockSession(page);")
     # The standalone snippet, which nothing included, is gone.
     assert not (root / "deploy" / "infra" / "nginx-csp.conf").exists()
 
@@ -266,3 +280,138 @@ def test_the_charts_default_server_sends_what_nginx_conf_sends(render, csp: bool
     assert 'add_header Cache-Control "no-store" always;' in nginx
     for name, value in security_headers(_config()):
         assert nginx.count(f'add_header {name} "{value}" always;') == 2
+
+
+# --- scripts/serve-csp.mjs -------------------------------------------------------
+
+_SERVE_CSP = Path(__file__).resolve().parents[1] / "forge/templates/_common/serve-csp.mjs"
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _serve(app: Path, env: dict[str, str]) -> tuple[subprocess.Popen, int]:
+    port = _free_port()
+    server = subprocess.Popen(
+        ["node", "scripts/serve-csp.mjs", str(port)],
+        cwd=app,
+        env={**os.environ, **env},
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return server, port
+
+
+def _get(port: int) -> tuple[str, str]:
+    for _ in range(50):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/checkouts", timeout=2) as res:
+                return res.headers["Content-Security-Policy"], res.read().decode()
+        except OSError:
+            time.sleep(0.1)
+    raise AssertionError("serve-csp.mjs did not answer")
+
+
+def _app(tmp_path: Path, nginx: str, files: dict[str, str] | None = None) -> Path:
+    """A built app as the check sees it: dist/, nginx.conf, the serve script."""
+    app = tmp_path / "frontend"
+    (app / "scripts").mkdir(parents=True)
+    (app / "dist").mkdir()
+    shutil.copy(_SERVE_CSP, app / "scripts" / "serve-csp.mjs")
+    (app / "dist" / "index.html").write_text(
+        f'<html><head><script type="module" nonce="{NONCE_PLACEHOLDER}" src="/a.js"></script>'
+        "</head><body></body></html>",
+        encoding="utf-8",
+    )
+    (app / "nginx.conf").write_text(nginx, encoding="utf-8")
+    for name, text in (files or {}).items():
+        (app / name).write_text(text, encoding="utf-8")
+    return app
+
+
+_KEPT_POLICY = (
+    "add_header Content-Security-Policy \"default-src 'self'; "
+    "script-src 'self' 'nonce-$request_id'; img-src 'self' ${MEDIA_ORIGINS}; "
+    'report-to csp" always;\n'
+)
+_INCLUDING = "server {\n    include /etc/nginx/snippets/security-headers.conf;\n}\n"
+
+
+def _report(port: int, report: dict) -> None:
+    body = json.dumps({"csp-report": report}).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/__csp-report",
+        data=body,
+        headers={"Content-Type": "application/csp-report"},
+    )
+    urllib.request.urlopen(req, timeout=5).close()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_the_check_serves_the_policy_file_a_project_names(tmp_path: Path) -> None:
+    """A consumer's own header template, as kartra-ai keeps it, is what the check serves."""
+    app = _app(
+        tmp_path,
+        _INCLUDING,
+        {
+            "security-headers.conf": _KEPT_POLICY,
+            "csp-check.json": json.dumps(
+                {
+                    "policy": "security-headers.conf",
+                    "variables": {"MEDIA_ORIGINS": "https://media.example"},
+                }
+            ),
+        },
+    )
+    server, port = _serve(app, {})
+    try:
+        policy, page = _get(port)
+        nonce = re.search(r'nonce="([0-9a-f]{32})"', page)
+        assert nonce is not None and f"'nonce-{nonce.group(1)}'" in policy
+        assert "img-src 'self' https://media.example;" in policy
+        # The policy's own report directive gives way to the check's collector:
+        # a browser that knows report-to would ignore a report-uri beside it.
+        assert "report-to" not in policy and policy.endswith("; report-uri /__csp-report")
+        # Until a report arrives, each page carries the canary the policy blocks.
+        assert '<script src="https://csp-canary.invalid/forge.js"></script></head>' in page
+        _report(port, {"blocked-uri": "https://csp-canary.invalid/forge.js"})
+        assert "csp-canary" not in _get(port)[1]
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize(
+    ("nginx", "files", "error"),
+    [
+        (_INCLUDING, {}, "csp-check.json names no policy file"),
+        (
+            _INCLUDING,
+            {
+                "security-headers.conf": _KEPT_POLICY,
+                "csp-check.json": json.dumps({"policy": "security-headers.conf"}),
+            },
+            "uses ${MEDIA_ORIGINS}, which csp-check.json does not declare",
+        ),
+        (
+            "server {\n"
+            "    add_header Content-Security-Policy \"default-src 'self'\" always;\n"
+            "    add_header Content-Security-Policy \"default-src 'none'\" always;\n}\n",
+            {},
+            "sends 2 different Content-Security-Policy headers",
+        ),
+    ],
+    ids=["no-source", "undeclared-variable", "two-policies"],
+)
+def test_the_check_refuses_a_policy_it_cannot_pin_down(
+    tmp_path: Path, nginx: str, files: dict[str, str], error: str
+) -> None:
+    app = _app(tmp_path, nginx, files)
+    done = subprocess.run(
+        ["node", "scripts/serve-csp.mjs", "0"], cwd=app, capture_output=True, text=True, timeout=30
+    )
+    assert done.returncode != 0 and error in done.stderr
