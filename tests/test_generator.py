@@ -207,7 +207,7 @@ class TestGenerateE2eTests:
         return ProjectConfig(
             project_name="Test App",
             backends=[bc],
-            frontends=[fc],
+            frontend=fc,
             include_keycloak=False,
         )
 

@@ -43,7 +43,7 @@ product names, hosts or count. Decision record:
    rebuilding every recorded app, template tasks per app and per backend, the
    recipe at version 2, and the owned update refusing a moved primary.
 5. `docs`: this plan, ADR-012, CHANGELOG, UPGRADING, the `multi-frontend.yaml`
-   example, the `multi_frontend` golden preset, the `py_vue_svelte_frontends`
+   example, the `py_vue_svelte_frontends`
    matrix scenario (port base 8220: two Vue apps and a Svelte app without
    pages) and a two-app generated-quality lane.
 
@@ -64,7 +64,9 @@ product names, hosts or count. Decision record:
   re-stamper suites: v5 records, update and plan-update, template tasks.
 - Goldens: the one-frontend presets change only in the recorded recipe
   (every preset) and, in `full_feature_max`, the gatekeeper's `config.py` and
-  `tenant_config.py`; `multi_frontend` added.
+  `tenant_config.py`.
+- Follow-up PR: drop the `ProjectConfig(frontend=...)` shorthand, move the
+  remaining tests to `frontends=`, and add a `multi_frontend` golden preset.
 - `tests/matrix/test_runner_diagnostics.py`: the verify lane builds and labels
   every app.
 

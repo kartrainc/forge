@@ -47,16 +47,14 @@ def _generate(
                 features=["items"],
             )
         ],
-        frontends=[
-            FrontendConfig(
-                project_name="lt",
-                framework=framework,
-                layout=layout,
-                include_chat=include_chat,
-                include_auth=include_auth,
-                include_openapi=True,
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="lt",
+            framework=framework,
+            layout=layout,
+            include_chat=include_chat,
+            include_auth=include_auth,
+            include_openapi=True,
+        ),
     )
     return Path(generate(cfg, quiet=True, dry_run=True))
 

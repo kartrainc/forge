@@ -32,16 +32,14 @@ def _config_with_keycloak() -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontends=[
-            FrontendConfig(
-                framework=FrontendFramework.VUE,
-                project_name="Realm Demo",
-                server_port=5173,
-                include_auth=True,
-                keycloak_realm="my-realm",
-                keycloak_client_id="my-client",
-            )
-        ],
+        frontend=FrontendConfig(
+            framework=FrontendFramework.VUE,
+            project_name="Realm Demo",
+            server_port=5173,
+            include_auth=True,
+            keycloak_realm="my-realm",
+            keycloak_client_id="my-client",
+        ),
         include_keycloak=True,
         keycloak_port=18080,
     )
@@ -70,13 +68,11 @@ class TestForgeTomlStamp:
                     server_port=5001,
                 ),
             ],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="Stamped",
-                    server_port=5173,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="Stamped",
+                server_port=5173,
+            ),
         )
         _write_forge_toml(config, tmp_path)
         toml_path = tmp_path / "forge.toml"

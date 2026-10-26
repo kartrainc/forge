@@ -571,9 +571,7 @@ class TestEndToEndAgainstGenerator:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="copierupdate")
-            ],
+            frontend=FrontendConfig(framework=FrontendFramework.NONE, project_name="copierupdate"),
             options={},
             output_dir=str(tmp_path),
         )

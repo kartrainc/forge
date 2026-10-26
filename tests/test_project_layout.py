@@ -183,16 +183,14 @@ def _gatekeeper_project(framework: FrontendFramework) -> ProjectConfig:
         project_name=f"layout-{framework.value}",
         # 5000 is the Gatekeeper's port.
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)],
-        frontends=[
-            FrontendConfig(
-                project_name=f"layout-{framework.value}",
-                framework=framework,
-                include_auth=True,
-                include_chat=False,
-                # Flutter's home feature needs the generated OpenAPI client.
-                include_openapi=framework == FrontendFramework.FLUTTER,
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name=f"layout-{framework.value}",
+            framework=framework,
+            include_auth=True,
+            include_chat=False,
+            # Flutter's home feature needs the generated OpenAPI client.
+            include_openapi=framework == FrontendFramework.FLUTTER,
+        ),
         include_keycloak=True,
         options={"auth.provider": "gatekeeper", "platform.mcp": True},
     )

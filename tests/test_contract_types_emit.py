@@ -49,7 +49,7 @@ def _config() -> ProjectConfig:
     return ProjectConfig(
         project_name="App",
         backends=[BackendConfig(project_name="App")],
-        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
+        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
         components=["EntityList"],
     )
 
@@ -74,7 +74,7 @@ def test_noop_when_component_has_no_contract(tmp_path: Path) -> None:
     cfg = ProjectConfig(
         project_name="App",
         backends=[BackendConfig(project_name="App")],
-        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
+        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
         components=["Plain"],
     )
     proj = tmp_path / "proj"
@@ -132,7 +132,7 @@ def test_production_discovery_finds_seed_entitylist_contract(tmp_path: Path) -> 
         cfg = ProjectConfig(
             project_name="App",
             backends=[BackendConfig(project_name="App")],
-            frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
+            frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
             components=["EntityList"],
         )
         proj = tmp_path / "proj"

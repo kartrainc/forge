@@ -37,7 +37,7 @@ def _make_config(tmp_path: Path, framework: FrontendFramework) -> ProjectConfig:
     config = ProjectConfig(
         project_name="Test App",
         backends=[bc],
-        frontends=[fc],
+        frontend=fc,
         include_keycloak=False,
     )
     config.output_dir = str(tmp_path)

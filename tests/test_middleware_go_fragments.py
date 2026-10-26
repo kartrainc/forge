@@ -21,7 +21,7 @@ def _go_service(options: dict[str, object]) -> Path:
                 name="api", project_name="P", language=BackendLanguage.GO, server_port=8100
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=False,
         options={"auth.mode": "none", **options},
     )

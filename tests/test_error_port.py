@@ -290,7 +290,7 @@ def _python_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options or {},
     )
 

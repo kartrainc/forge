@@ -221,8 +221,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `frontends`; every app is a quality subject;
   `scripts/check_generated_quality.py` takes `--extra-frontend NAME[:KIT]` and
   a two-app Vue lane runs it.
-- `ProjectConfig(frontend=...)` is replaced by `frontends=[...]`; `frontend`
-  stays a property, as `backend` is.
+- `ProjectConfig` takes `frontends=[...]`; `frontend=x` is still accepted as
+  shorthand for `frontends=[x]`, and `frontend` stays a property, as `backend`
+  is.
 
 ### Breaking — manifest schema v4 → v5
 

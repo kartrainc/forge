@@ -143,7 +143,7 @@ def test_scenario_baseline_full_stack(tmp_path: Path, monkeypatch: pytest.Monkey
         project_name="demo",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[_build_frontend(FrontendFramework.VUE, features=["widgets"])],
+        frontend=_build_frontend(FrontendFramework.VUE, features=["widgets"]),
     )
     config.validate()
 
@@ -180,7 +180,7 @@ def test_scenario_frontend_only_external_api(tmp_path: Path, monkeypatch: pytest
         project_name="proxy",
         output_dir=str(tmp_path),
         backends=[],
-        frontends=[_build_frontend(FrontendFramework.SVELTE)],
+        frontend=_build_frontend(FrontendFramework.SVELTE),
         options={
             "backend.mode": "none",
             "frontend.api_target.url": "https://api.upstream.example.com",
@@ -226,7 +226,7 @@ def test_scenario_stateless_python_backend(tmp_path: Path):
         project_name="stateless",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[],
+        frontend=None,
         options={"database.mode": "none"},
     )
     config.validate()
@@ -302,7 +302,7 @@ def test_scenario_external_api_type_with_local_backend(
         project_name="hybrid",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[_build_frontend(FrontendFramework.VUE)],
+        frontend=_build_frontend(FrontendFramework.VUE),
         options={
             "frontend.api_target.type": "external",
             "frontend.api_target.url": "https://staging.api.example.com",
@@ -348,7 +348,7 @@ def test_scenario_stateless_python_plus_svelte(
         project_name="full",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[_build_frontend(FrontendFramework.SVELTE)],
+        frontend=_build_frontend(FrontendFramework.SVELTE),
         options={
             "database.mode": "none",
             "frontend.api_target.url": "https://api.cloud.example.com",
@@ -399,7 +399,7 @@ def test_scenario_stripped_python_compiles(tmp_path: Path):
         project_name="compile-check",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[],
+        frontend=None,
         options={"database.mode": "none"},
     )
     config.validate()
@@ -444,7 +444,7 @@ def test_scenario_multi_backend_stateless(tmp_path: Path):
         project_name="multi",
         output_dir=str(tmp_path),
         backends=[bc_a, bc_b],
-        frontends=[],
+        frontend=None,
         options={"database.mode": "none"},
     )
     config.validate()
@@ -488,7 +488,7 @@ def test_scenario_stateless_with_keycloak(tmp_path: Path, monkeypatch: pytest.Mo
         project_name="kc",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontends=[_build_frontend(FrontendFramework.VUE, include_auth=True)],
+        frontend=_build_frontend(FrontendFramework.VUE, include_auth=True),
         include_keycloak=True,
         options={"database.mode": "none"},
     )
@@ -531,7 +531,7 @@ def test_scenario_codemod_roundtrip_on_generated_toml(
         project_name="legacy",
         output_dir=str(tmp_path),
         backends=[],
-        frontends=[_build_frontend(FrontendFramework.SVELTE)],
+        frontend=_build_frontend(FrontendFramework.SVELTE),
         options={
             "backend.mode": "none",
             "frontend.api_target.url": "https://api.example.com",

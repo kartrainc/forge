@@ -216,7 +216,7 @@ class TestIntegrationAgainstGenerator:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="updatable")],
+            frontend=FrontendConfig(framework=FrontendFramework.NONE, project_name="updatable"),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -270,9 +270,7 @@ class TestIntegrationAgainstGenerator:
                     language=BackendLanguage.NODE,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="node_update")
-            ],
+            frontend=FrontendConfig(framework=FrontendFramework.NONE, project_name="node_update"),
             # No user options — every persisted option is a default.
             options={},
             output_dir=str(tmp_path),
@@ -326,9 +324,9 @@ class TestIntegrationAgainstGenerator:
         cfg = ProjectConfig(
             project_name="alias_origin",
             backends=[],  # frontend-only project
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.VUE, project_name="alias_origin")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE, project_name="alias_origin"
+            ),
             options={
                 "backend.mode": "none",
                 "frontend.api_target_url": "http://localhost:9999",  # alias
@@ -390,7 +388,9 @@ class TestUpdateModeMatrix:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="merge-test")],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="merge-test"
+            ),
             options={
                 "middleware.rate_limit": True,
                 "middleware.correlation_id": "always-on",
@@ -489,9 +489,9 @@ class TestUpdateModeConflict:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="conflict-test")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="conflict-test"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -580,9 +580,9 @@ class TestUpdateModeUserDeleted:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="deleted-test")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="deleted-test"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -629,7 +629,9 @@ class TestUpdateModeUserModifiedOutput:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="usermod")],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="usermod"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -670,9 +672,9 @@ class TestUpdateModeUserModifiedOutput:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="usermod-skip")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="usermod-skip"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -711,9 +713,9 @@ class TestUpdateModeUserModifiedOutput:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="usermod-over")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="usermod-over"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )
@@ -762,7 +764,9 @@ class TestUpdateUninstallPath:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="uninst")],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="uninst"
+            ),
             options={"middleware.rate_limit": True, "platform.webhooks": True},
             output_dir=str(tmp_path),
         )

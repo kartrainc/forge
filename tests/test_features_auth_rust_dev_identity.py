@@ -30,7 +30,7 @@ def _rust_cfg(tmp_path: Path, *, include_keycloak: bool) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=include_keycloak,
     )
 

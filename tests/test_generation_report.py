@@ -245,7 +245,7 @@ class TestGeneratorPopulatesReport:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
         )
 
         report = GenerationReport()
@@ -302,7 +302,7 @@ class TestGeneratorPopulatesReport:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
         )
         project_root = generate(config, quiet=True, dry_run=True)
         assert project_root.is_dir()
@@ -334,7 +334,7 @@ class TestGeneratorPopulatesReport:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
             options={"auth.mode": "none", "rag.backend": "qdrant"},
             # Simulate the CLI's bookkeeping: auth.mode was injected
             # (default), rag.backend is a real user choice.

@@ -75,7 +75,7 @@ class TestBuildPreview:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
         )
         plan = resolve(config)
         preview = _build_preview(config, plan)
@@ -95,7 +95,7 @@ class TestBuildPreview:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
             options={"middleware.rate_limit": True},
         )
         plan = resolve(config)
@@ -209,7 +209,7 @@ class TestDryRun:
                     features=["items"],
                 )
             ],
-            frontends=[],
+            frontend=None,
         )
         # Snapshot the configured output dir before the dry run.
         before = set(tmp_path.iterdir())

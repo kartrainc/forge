@@ -224,7 +224,7 @@ def test_worker_variant_renders_distinctive_files(tmp_path: Path):
                 features=[],
             )
         ],
-        frontends=[],
+        frontend=None,
         options={},
     )
     from forge.generator import generate
@@ -286,7 +286,7 @@ def test_user_selected_excluded_option_rejected_on_worker_only_project():
                     features=[],
                 )
             ],
-            frontends=[],
+            frontend=None,
             options={"middleware.rate_limit": True},
             option_origins=origins,
         )
@@ -320,7 +320,7 @@ def test_user_selected_excluded_option_allowed_with_compatible_backend():
                 features=[],
             ),
         ],
-        frontends=[],
+        frontend=None,
         options={"middleware.rate_limit": True},
         option_origins={"middleware.rate_limit": "user"},
     )
@@ -345,7 +345,7 @@ def test_crud_service_renders_baseline_shape(tmp_path: Path):
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
     )
     from forge.generator import generate
 
@@ -381,7 +381,7 @@ def test_two_stage_variant_renders_nonempty_app_title(tmp_path: Path):
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
     )
     from forge.generator import generate
 

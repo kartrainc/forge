@@ -72,7 +72,7 @@ def _python_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5010,
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=needs_auth,
         options=options,
     )
@@ -156,14 +156,12 @@ class TestAgentModeCrossLayer:
         config = ProjectConfig(
             project_name="P",
             backends=[],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="P",
-                    features=[],
-                    server_port=3000,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="P",
+                features=[],
+                server_port=3000,
+            ),
             options={
                 "backend.mode": "none",
                 "frontend.api_target.url": "https://api.example.com",
@@ -188,14 +186,12 @@ class TestAgentModeCrossLayer:
         config = ProjectConfig(
             project_name="P",
             backends=[],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="P",
-                    features=[],
-                    server_port=3000,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="P",
+                features=[],
+                server_port=3000,
+            ),
             options={
                 "backend.mode": "none",
                 "frontend.api_target.url": "https://api.example.com",

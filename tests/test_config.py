@@ -156,12 +156,10 @@ class TestProjectConfig:
         defaults = dict(
             project_name="My Platform",
             backends=[BackendConfig(project_name="My Platform")],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="My Platform",
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="My Platform",
+            ),
         )
         defaults.update(overrides)
         return ProjectConfig(**defaults)
@@ -187,13 +185,11 @@ class TestProjectConfig:
     def test_port_collision(self):
         cfg = self._make_config(
             backends=[BackendConfig(project_name="Test", server_port=5173)],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="Test",
-                    server_port=5173,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="Test",
+                server_port=5173,
+            ),
         )
         with pytest.raises(ValueError, match="used by both"):
             cfg.validate()
@@ -228,14 +224,12 @@ class TestProjectConfig:
         """Flutter doesn't use host ports in Docker, so no collision."""
         cfg = self._make_config(
             backends=[BackendConfig(project_name="Test", server_port=5000)],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.FLUTTER,
-                    project_name="Test",
-                    server_port=5000,
-                    include_openapi=True,  # Flutter requires it — see FrontendConfig.validate
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.FLUTTER,
+                project_name="Test",
+                server_port=5000,
+                include_openapi=True,  # Flutter requires it — see FrontendConfig.validate
+            ),
         )
         cfg.validate()  # should not raise
 
@@ -271,7 +265,7 @@ class TestProjectConfig:
         """Backend reserved feature is fine when no frontend is configured."""
         cfg = self._make_config(
             backends=[BackendConfig(project_name="Test", features=["auth"])],
-            frontends=[],
+            frontend=None,
         )
         cfg.validate()  # should not raise
 
@@ -315,7 +309,7 @@ class TestGeneratorPathContainment:
         return ProjectConfig(
             project_name="../../escape",
             backends=[BackendConfig(project_name="svc")],
-            frontends=[],
+            frontend=None,
         )
 
     def test_generate_rejects_traversal_dry_run(self):

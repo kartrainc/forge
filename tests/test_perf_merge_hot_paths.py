@@ -179,7 +179,9 @@ class TestPlanUpdateWalkSpeed:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="bench")],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="bench"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )

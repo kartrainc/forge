@@ -105,7 +105,7 @@ def _make_config(framework=FrontendFramework.VUE, **fe_overrides):
     return ProjectConfig(
         project_name="Test App",
         backends=[bc],
-        frontends=[fc],
+        frontend=fc,
         include_keycloak=True,
         keycloak_port=8080,
     )

@@ -51,7 +51,7 @@ def _stateless_config(**options_overrides: object) -> ProjectConfig:
     return ProjectConfig(
         project_name="Stateless",
         backends=[bc],
-        frontends=[fc],
+        frontend=fc,
         options=options,
     )
 

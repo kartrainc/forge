@@ -301,7 +301,7 @@ def _project(
     return ProjectConfig(
         project_name="P",
         backends=backends,
-        frontends=[],
+        frontend=None,
         options=options or {},
     )
 

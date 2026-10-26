@@ -34,7 +34,7 @@ def _config(tmp_path: Path) -> ProjectConfig:
                 name="orders", project_name="shop", language=BackendLanguage.GO, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
     )
 
 

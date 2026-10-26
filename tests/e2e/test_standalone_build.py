@@ -101,7 +101,7 @@ def _minimal_config(tmp_path: Path) -> ProjectConfig:
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
     )
 
 
@@ -118,7 +118,7 @@ def _auth_config(tmp_path: Path) -> ProjectConfig:
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=True,
         options={"auth.mode": "generate", "auth.provider": "gatekeeper"},
     )
@@ -160,7 +160,7 @@ def _max_config(tmp_path: Path) -> ProjectConfig:
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=True,
         options={
             "auth.mode": "generate",
@@ -209,7 +209,7 @@ def _airlock_config(tmp_path: Path) -> ProjectConfig:
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
         options={"airlock.client": True},
     )
 
@@ -232,7 +232,7 @@ def _feature_config(tmp_path: Path, name: str, options: dict[str, object]) -> Pr
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options,
     )
 

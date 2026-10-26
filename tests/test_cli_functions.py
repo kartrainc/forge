@@ -167,13 +167,11 @@ class TestPrintSummary:
                     project_name="Shop", server_port=8000, features=["products", "orders"]
                 )
             ],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="Shop",
-                    server_port=3000,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="Shop",
+                server_port=3000,
+            ),
         )
         out = self._capture(config)
         assert "Vue" in out
@@ -184,14 +182,12 @@ class TestPrintSummary:
         config = ProjectConfig(
             project_name="App",
             backends=[BackendConfig(project_name="App")],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.FLUTTER,
-                    project_name="App",
-                    features=["items"],
-                    server_port=5173,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.FLUTTER,
+                project_name="App",
+                features=["items"],
+                server_port=5173,
+            ),
         )
         out = self._capture(config)
         assert "Flutter" in out

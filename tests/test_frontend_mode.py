@@ -43,7 +43,7 @@ def _vue_config_with_backend(**options_overrides: object) -> ProjectConfig:
     return ProjectConfig(
         project_name="Local",
         backends=[bc],
-        frontends=[fc],
+        frontend=fc,
         options=dict(options_overrides),
     )
 
@@ -69,7 +69,7 @@ class TestFlatPathAlias:
         config = ProjectConfig(
             project_name="Legacy",
             backends=[],
-            frontends=[fc],
+            frontend=fc,
             options={
                 "backend.mode": "none",
                 "frontend.api_target_url": "https://legacy.example.com",
@@ -95,7 +95,7 @@ class TestFlatPathAlias:
         config = ProjectConfig(
             project_name="New",
             backends=[],
-            frontends=[fc],
+            frontend=fc,
             options={
                 "backend.mode": "none",
                 "frontend.api_target.url": "https://new.example.com",
@@ -120,7 +120,7 @@ class TestFlatPathAlias:
         alias_cfg = ProjectConfig(
             project_name="P",
             backends=[],
-            frontends=[fc],
+            frontend=fc,
             options={
                 "backend.mode": "none",
                 "frontend.api_target_url": "https://a.example.com",
@@ -129,7 +129,7 @@ class TestFlatPathAlias:
         canonical_cfg = ProjectConfig(
             project_name="P",
             backends=[],
-            frontends=[fc],
+            frontend=fc,
             options={
                 "backend.mode": "none",
                 "frontend.api_target.url": "https://a.example.com",
@@ -260,7 +260,7 @@ class TestFrontendModeCoherence:
         config = ProjectConfig(
             project_name="X",
             backends=[bc],
-            frontends=[fc],
+            frontend=fc,
             options={"frontend.mode": "none"},
         )
         with pytest.raises(ValueError, match=r"contradicts"):
@@ -283,7 +283,7 @@ class TestFrontendModeCoherence:
         config = ProjectConfig(
             project_name="X",
             backends=[bc],
-            frontends=[fc],
+            frontend=fc,
             options={"frontend.mode": "external"},
         )
         with pytest.raises(ValueError, match=r"requires a frontend framework"):

@@ -17,9 +17,9 @@ from forge.errors import GeneratorError
 def _config(framework):
     return ProjectConfig(
         project_name="frontend-checks",
-        frontends=[
-            FrontendConfig(framework=framework, project_name="frontend-checks", features=["items"])
-        ],
+        frontend=FrontendConfig(
+            framework=framework, project_name="frontend-checks", features=["items"]
+        ),
     )
 
 

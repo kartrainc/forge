@@ -108,7 +108,7 @@ def _make_project(
         )
         for lang in languages
     ]
-    config = ProjectConfig(project_name="demo", backends=backends, frontends=[])
+    config = ProjectConfig(project_name="demo", backends=backends, frontend=None)
     if database_mode == "none":
         # ``ProjectConfig.options`` is the canonical mutable store; the
         # typed projection is rebuilt on demand from it, so setting

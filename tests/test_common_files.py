@@ -15,7 +15,7 @@ class TestApplyCommonFiles:
             backends=[
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.PYTHON)
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         assert (tmp_path / ".editorconfig").is_file()
@@ -28,7 +28,7 @@ class TestApplyCommonFiles:
             backends=[
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.PYTHON)
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         ci = tmp_path / ".github" / "workflows" / "ci.yml"
@@ -41,7 +41,7 @@ class TestApplyCommonFiles:
             backends=[
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.PYTHON)
             ],
-            frontends=[],
+            frontend=None,
         )
         existing = tmp_path / ".editorconfig"
         existing.write_text("# user-owned editorconfig\n")
@@ -55,7 +55,7 @@ class TestApplyCommonFiles:
             backends=[
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.NODE)
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         ci = tmp_path / ".github" / "workflows" / "ci.yml"
@@ -69,7 +69,7 @@ class TestApplyCommonFiles:
             backends=[
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.RUST)
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         ci = tmp_path / ".github" / "workflows" / "ci.yml"
@@ -85,7 +85,7 @@ class TestApplyCommonFiles:
                 BackendConfig(name="api-py", project_name="demo", language=BackendLanguage.PYTHON),
                 BackendConfig(name="api-node", project_name="demo", language=BackendLanguage.NODE),
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         workflows = tmp_path / ".github" / "workflows"
@@ -105,7 +105,7 @@ class TestApplyCommonFiles:
                 BackendConfig(name="api", project_name="demo", language=BackendLanguage.PYTHON),
                 BackendConfig(name="worker", project_name="demo", language=BackendLanguage.PYTHON),
             ],
-            frontends=[],
+            frontend=None,
         )
         apply_common_files(config, tmp_path)
         workflows = tmp_path / ".github" / "workflows"

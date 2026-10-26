@@ -296,7 +296,7 @@ def _rust_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options or {},
     )
 
@@ -327,7 +327,7 @@ def test_three_backend_project_with_openai_targets_all_three() -> None:
                 name="rust", project_name="P", language=BackendLanguage.RUST, server_port=5003
             ),
         ],
-        frontends=[],
+        frontend=None,
         options={"llm.provider": "openai"},
     )
     plan = resolve(config)

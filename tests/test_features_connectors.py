@@ -24,7 +24,7 @@ def _render(tmp_path: Path, options: dict) -> Path:
                 sdk_consumption="none",
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options,
     )
     return Path(generate(cfg, quiet=True, dry_run=True)) / "services" / "api"

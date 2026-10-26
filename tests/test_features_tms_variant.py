@@ -84,7 +84,7 @@ def _render_tms(tmp_path: Path, name: str = "tms") -> Path:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
     )
     from forge.generator import generate
 

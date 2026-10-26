@@ -78,7 +78,7 @@ def _py_cfg(*, multitenancy: str = "none", **kw) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options,
         **kw,
     )
@@ -88,7 +88,7 @@ def _cfg_lang(lang: BackendLanguage, multitenancy: str) -> ProjectConfig:
     return ProjectConfig(
         project_name="mt",
         backends=[BackendConfig(name="api", project_name="mt", language=lang, features=["items"])],
-        frontends=[],
+        frontend=None,
         options={"database.multitenancy": multitenancy},
     )
 
@@ -230,7 +230,7 @@ def test_default_value_does_not_trip_allowed_backends() -> None:
                 name="api", project_name="mt", language=BackendLanguage.NODE, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
         options={"database.multitenancy": "none"},
         option_origins={"database.multitenancy": "default"},
     )
@@ -341,7 +341,7 @@ def test_render_lands_rls_files_and_injections(tmp_path: Path) -> None:
                 name="api", project_name="mtr", language=BackendLanguage.PYTHON, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
         options={
             "database.multitenancy": "shared_rls",
             "database.tenant_resolution": "header",
@@ -394,7 +394,7 @@ def test_shared_rls_excludes_tenant_management_service_backend(tmp_path: Path) -
                 features=["items"],
             ),
         ],
-        frontends=[],
+        frontend=None,
         options={"database.multitenancy": "shared_rls"},
     )
     root = Path(generate(cfg, quiet=True, dry_run=True))
@@ -424,7 +424,7 @@ def test_render_default_none_no_tenancy_files(tmp_path: Path) -> None:
                 name="api", project_name="mtn", language=BackendLanguage.PYTHON, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
         options={},  # database.multitenancy defaults to none
     )
     root = Path(generate(cfg, quiet=True, dry_run=True))
@@ -547,7 +547,7 @@ def test_render_lands_schema_files_and_injections(tmp_path: Path) -> None:
                 name="api", project_name="mts", language=BackendLanguage.PYTHON, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
         options={
             "database.multitenancy": "schema_per_tenant",
             "database.tenant_resolution": "subdomain",
@@ -672,7 +672,7 @@ def test_shared_rls_composes_with_auth_provider(provider: str, keycloak: bool) -
                 name="api", project_name="mt", language=BackendLanguage.PYTHON, features=["items"]
             )
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=keycloak,
         options={
             "database.multitenancy": "shared_rls",

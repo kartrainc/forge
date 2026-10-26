@@ -69,17 +69,15 @@ def app() -> Iterator[Path]:
                 features=["items", "orders"],
             )
         ],
-        frontends=[
-            FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_auth=True,
-                include_chat=False,
-                include_openapi=False,
-                ui_kit="nuxt-ui",
-                default_color_scheme="deepPurple",
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_auth=True,
+            include_chat=False,
+            include_openapi=False,
+            ui_kit="nuxt-ui",
+            default_color_scheme="deepPurple",
+        ),
     )
     config.validate()
     root = Path(generate(config, quiet=True, dry_run=True))
@@ -243,16 +241,14 @@ def test_fragments_render_and_update_from_the_kits_tree(
         project_name="nuxt-auth",
         # 5000 is the Gatekeeper's port.
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)],
-        frontends=[
-            FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_auth=True,
-                include_chat=False,
-                include_openapi=False,
-                ui_kit="nuxt-ui",
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_auth=True,
+            include_chat=False,
+            include_openapi=False,
+            ui_kit="nuxt-ui",
+        ),
         include_keycloak=True,
         options={"auth.provider": "gatekeeper"},
     )
@@ -358,14 +354,12 @@ def test_a_shadcn_project_gets_no_nuxt_ui_tooling() -> None:
         backends=[
             BackendConfig(name="api", project_name="shadcn", language=BackendLanguage.PYTHON)
         ],
-        frontends=[
-            FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_chat=False,
-                include_openapi=False,
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_chat=False,
+            include_openapi=False,
+        ),
     )
     root = Path(generate(config, quiet=True, dry_run=True))
     try:
@@ -386,16 +380,14 @@ def test_upgrading_names_what_only_nuxt_ui_emits() -> None:
         config = ProjectConfig(
             project_name="switch",
             backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-            frontends=[
-                FrontendConfig(
-                    project_name="frontend",
-                    framework=FrontendFramework.VUE,
-                    include_auth=True,
-                    include_chat=False,
-                    include_openapi=False,
-                    ui_kit=kit,
-                )
-            ],
+            frontend=FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                include_openapi=False,
+                ui_kit=kit,
+            ),
         )
         root = Path(generate(config, quiet=True, dry_run=True))
         try:
@@ -434,16 +426,14 @@ def test_switching_back_to_shadcn_and_again_follows_upgrading(tmp_path: Path) ->
     config = ProjectConfig(
         project_name="switch",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontends=[
-            FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_auth=True,
-                include_chat=False,
-                include_openapi=False,
-                ui_kit="nuxt-ui",
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=FrontendFramework.VUE,
+            include_auth=True,
+            include_chat=False,
+            include_openapi=False,
+            ui_kit="nuxt-ui",
+        ),
     )
     rendered = Path(generate(config, quiet=True, dry_run=True))
     root = tmp_path / "project"

@@ -45,7 +45,7 @@ def _config(
             )
             for i, lang in enumerate(langs)
         ],
-        frontends=[],
+        frontend=None,
         include_keycloak=keycloak,
         options={"database.multitenancy": "shared_rls", **options},
     )

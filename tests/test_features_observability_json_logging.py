@@ -36,7 +36,7 @@ def _generate(tmp_path: Path, enabled: bool) -> Path:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
         options={"observability.json_logging": enabled},
     )
     return generate(config, quiet=True, dry_run=True)

@@ -31,9 +31,9 @@ def generated_project(tmp_path: Path) -> Path:
                 language=BackendLanguage.PYTHON,
             ),
         ],
-        frontends=[
-            FrontendConfig(framework=FrontendFramework.NONE, project_name="plan-update-test")
-        ],
+        frontend=FrontendConfig(
+            framework=FrontendFramework.NONE, project_name="plan-update-test"
+        ),
         options={"middleware.rate_limit": True},
         output_dir=str(tmp_path),
     )
@@ -73,9 +73,9 @@ class TestPlanUpdate:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontends=[
-                FrontendConfig(framework=FrontendFramework.NONE, project_name="planu-conflict")
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.NONE, project_name="planu-conflict"
+            ),
             options={"middleware.rate_limit": True},
             output_dir=str(tmp_path),
         )

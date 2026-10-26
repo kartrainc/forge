@@ -146,7 +146,7 @@ def test_python_vue_scaffolds_and_pytest_passes(
         project_name="E2E Project",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE)],
+        frontend=_make_frontend(FrontendFramework.VUE),
         include_keycloak=False,
     )
     config.validate()
@@ -177,7 +177,7 @@ def test_node_svelte_scaffolds_and_vitest_passes(
         project_name="E2E Project",
         output_dir=str(tmp_path),
         backends=[_make_node_backend()],
-        frontends=[_make_frontend(FrontendFramework.SVELTE)],
+        frontend=_make_frontend(FrontendFramework.SVELTE),
         include_keycloak=False,
     )
     config.validate()
@@ -214,7 +214,7 @@ def test_rust_no_frontend_compiles(tmp_path: Path, require_cargo: None, require_
         project_name="E2E Project",
         output_dir=str(tmp_path),
         backends=[_make_rust_backend()],
-        frontends=[],
+        frontend=None,
         include_keycloak=False,
     )
     config.validate()
@@ -238,7 +238,7 @@ def test_go_no_frontend_builds_and_tests(
         project_name="E2E Project",
         output_dir=str(tmp_path),
         backends=[_make_go_backend()],
-        frontends=[],
+        frontend=None,
         include_keycloak=False,
     )
     config.validate()
@@ -275,7 +275,7 @@ def test_multi_backend_with_keycloak_scaffolds(
             _make_node_backend(name="api-node", port=5011),
             _make_rust_backend(name="api-rust", port=5012),
         ],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=True)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=True),
         include_keycloak=True,
     )
     config.validate()
@@ -319,7 +319,7 @@ def test_vue_auth_off_typechecks(
         project_name="E2E Vue NoAuth",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         include_keycloak=False,
     )
     config.validate()
@@ -350,7 +350,7 @@ def test_console_template_greenfield_typechecks(
         project_name="E2E Console Template",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         components=["Console"],
         include_keycloak=False,
     )
@@ -384,7 +384,7 @@ def test_datatable_component_builds_and_preserves_state(
         project_name="E2E DataTable",
         output_dir=str(tmp_path),
         backends=[],
-        frontends=[_make_frontend(FrontendFramework.VUE)],
+        frontend=_make_frontend(FrontendFramework.VUE),
         components=["DataTable"],
         options={"backend.mode": "none", "frontend.api_target.url": "http://localhost:5000"},
         include_keycloak=False,
@@ -407,7 +407,7 @@ def test_entitylist_component_contract_types_typecheck(
         project_name="E2E EntityList",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         components=["EntityList"],
         include_keycloak=False,
     )
@@ -480,7 +480,7 @@ def test_entitylist_brownfield_binding_typechecks(
         project_name="E2E EntityList Brownfield",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         components=["EntityList"],
         options={"frontend.openapi_spec_url": str(spec)},
         include_keycloak=False,
@@ -592,7 +592,7 @@ def test_entitylist_brownfield_runtime_adapter(
         project_name="E2E EntityList Runtime",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         components=["EntityList"],
         options={"frontend.openapi_spec_url": str(spec)},
         include_keycloak=False,
@@ -653,7 +653,7 @@ def test_chatfirst_template_greenfield_typechecks(
         project_name="E2E ChatFirst Template",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[_make_frontend(FrontendFramework.VUE, with_auth=False)],
+        frontend=_make_frontend(FrontendFramework.VUE, with_auth=False),
         components=["ChatFirst"],
         include_keycloak=False,
     )
@@ -705,11 +705,9 @@ def test_vue_chat_on_typechecks(
         project_name="E2E Vue Chat",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[
-            _make_frontend(
-                FrontendFramework.VUE, with_auth=True, with_chat=True, with_openapi=with_openapi
-            )
-        ],
+        frontend=_make_frontend(
+            FrontendFramework.VUE, with_auth=True, with_chat=True, with_openapi=with_openapi
+        ),
         include_keycloak=False,
     )
     if with_openapi:
@@ -758,11 +756,9 @@ def test_svelte_chat_on_typechecks(
         project_name="E2E Svelte Chat",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[
-            _make_frontend(
-                FrontendFramework.SVELTE, with_auth=True, with_chat=True, with_openapi=with_openapi
-            )
-        ],
+        frontend=_make_frontend(
+            FrontendFramework.SVELTE, with_auth=True, with_chat=True, with_openapi=with_openapi
+        ),
         include_keycloak=False,
     )
     if with_openapi:
@@ -801,14 +797,12 @@ def test_flutter_minimal_analyzes(
         project_name="E2E Flutter Min",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[
-            _make_frontend(
-                FrontendFramework.FLUTTER,
-                with_auth=False,
-                with_chat=False,
-                with_openapi=True,
-            )
-        ],
+        frontend=_make_frontend(
+            FrontendFramework.FLUTTER,
+            with_auth=False,
+            with_chat=False,
+            with_openapi=True,
+        ),
         include_keycloak=False,
     )
     config.validate()
@@ -841,14 +835,12 @@ def test_flutter_full_analyzes(
         project_name="E2E Flutter Full",
         output_dir=str(tmp_path),
         backends=[_make_python_backend()],
-        frontends=[
-            _make_frontend(
-                FrontendFramework.FLUTTER,
-                with_auth=True,
-                with_chat=True,
-                with_openapi=True,
-            )
-        ],
+        frontend=_make_frontend(
+            FrontendFramework.FLUTTER,
+            with_auth=True,
+            with_chat=True,
+            with_openapi=True,
+        ),
         include_keycloak=False,
     )
     config.validate()

@@ -73,14 +73,12 @@ class TestDockerComposeConfig:
             project_name="smoke-test",
             output_dir=str(tmp_path),
             backends=[BackendConfig(project_name="smoke-test", server_port=5000)],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="smoke-test",
-                    server_port=5173,
-                    features=["items"],
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="smoke-test",
+                server_port=5173,
+                features=["items"],
+            ),
         )
         project_root = generate(config, quiet=True)
         _assert_compose_valid(
@@ -180,13 +178,11 @@ class TestComposeValidatorPortParity:
             project_name="smoke-test",
             output_dir=str(tmp_path),
             backends=[BackendConfig(project_name="smoke-test", server_port=5010)],
-            frontends=[
-                FrontendConfig(
-                    framework=FrontendFramework.VUE,
-                    project_name="smoke-test",
-                    server_port=5173,
-                )
-            ],
+            frontend=FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="smoke-test",
+                server_port=5173,
+            ),
             include_keycloak=True,
             keycloak_port=18080,
         )

@@ -34,14 +34,12 @@ def _config(framework: FrontendFramework) -> ProjectConfig:
     return ProjectConfig(
         project_name="context",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontends=[
-            FrontendConfig(
-                project_name="frontend",
-                framework=framework,
-                include_chat=False,
-                include_openapi=framework == FrontendFramework.FLUTTER,
-            )
-        ],
+        frontend=FrontendConfig(
+            project_name="frontend",
+            framework=framework,
+            include_chat=False,
+            include_openapi=framework == FrontendFramework.FLUTTER,
+        ),
     )
 
 

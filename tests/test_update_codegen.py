@@ -22,14 +22,12 @@ def _vue_chat_project(tmp_path: Path) -> Path:
         project_name="UpdCodegen",
         output_dir=str(tmp_path),
         backends=[BackendConfig(project_name="UpdCodegen", features=["items"])],
-        frontends=[
-            FrontendConfig(
-                framework=FrontendFramework.VUE,
-                project_name="UpdCodegen",
-                include_chat=True,
-                include_auth=False,
-            )
-        ],
+        frontend=FrontendConfig(
+            framework=FrontendFramework.VUE,
+            project_name="UpdCodegen",
+            include_chat=True,
+            include_auth=False,
+        ),
         options={"agent.tools": True},
     )
     cfg.validate()

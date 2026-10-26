@@ -61,7 +61,7 @@ def _agent_llm_cfg(*, output_dir: str | None = None) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
         options=options,
         **kwargs,
     )
@@ -134,7 +134,7 @@ def test_agent_agui_absent_without_agent_llm() -> None:
                 features=["items"],
             )
         ],
-        frontends=[],
+        frontend=None,
         options={"agent.tools": True},
     )
     plan = resolve(cfg)
