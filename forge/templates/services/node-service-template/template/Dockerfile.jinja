@@ -59,6 +59,13 @@ RUN npx prisma generate
 COPY tsconfig.json ./
 COPY src ./src/
 RUN npm run build
+{%- if not (use_database | default(true)) %}
+
+# Nothing runs the Prisma CLI at start-up without a database, so the image
+# keeps only production dependencies: the compiler, linter and test runner
+# stay in the builder.
+RUN cd /workspace && npm prune --omit=dev --workspaces --include-workspace-root
+{%- endif %}
 
 # Ensure a per-service node_modules exists even when npm workspaces
 # hoists every dep to /workspace/node_modules (which happens for

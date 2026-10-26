@@ -80,7 +80,9 @@ def register_all(api: ForgeAPI) -> None:
                 ),
                 BackendLanguage.NODE: FragmentImplSpec(
                     fragment_dir=_impl("reliability_circuit_breaker", "node"),
-                    dependencies=("opossum@10.0.0",),
+                    # opossum ships no types; without them the strict tsconfig
+                    # stops ``tsc`` (and the image build) with TS7016.
+                    dependencies=("opossum@10.0.0", "@types/opossum@8.1.9"),
                     env_vars=(
                         ("CIRCUIT_BREAKER_TIMEOUT_MS", "10000"),
                         ("CIRCUIT_BREAKER_ERROR_THRESHOLD_PCT", "50"),

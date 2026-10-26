@@ -249,9 +249,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   sample `items` entity, for stateless services. Compose, `init-db.sh` and the
   Helm chart wire no database, DB URL or migration for it. The connection
   pool, background tasks, queue and cache fragments skip it, as the HTTP
-  middleware skips `worker`. `crud-service` output is unchanged.
+  middleware skips `worker`. Its image keeps only production dependencies.
+  `crud-service` output is unchanged.
 - Let an app-template manifest declare `uses_database = false` for a service
   shape without a database of its own.
+- Render a `.dockerignore` into every Node service, so a host install, build
+  output and local env files stay out of the image's build context.
 
 ### Fixed
 
@@ -261,6 +264,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   moves only when each of its re-renders applied (or left sidecars).
 - `frontend.features` in a stack file is read; it was dropped.
 - The Svelte template accepts an empty `features` list.
+- Add `@types/opossum` with the Node circuit breaker. opossum ships no types,
+  so the strict tsconfig stopped `tsc` and the image build with TS7016.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

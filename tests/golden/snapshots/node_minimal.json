@@ -57,7 +57,7 @@
       "sha256": "6a5b8740cc1c34fe"
     },
     "forge.toml": {
-      "size": 29134,
+      "size": 29419,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -67,6 +67,10 @@
     "services/api/.copier-answers.yml": {
       "size": 538,
       "sha256": "<version-dependent>"
+    },
+    "services/api/.dockerignore": {
+      "size": 346,
+      "sha256": "f732bc7a0ec23d5e"
     },
     "services/api/.env.example": {
       "size": 154,

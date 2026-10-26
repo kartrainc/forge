@@ -1,0 +1,11 @@
+# What `docker build` leaves out of the service image's build context.
+#
+# The Dockerfile installs from the workspace lockfile and copies only the
+# paths it names, so a host install and build output would only slow every
+# build down, and local environment files would be sent to the builder.
+node_modules
+dist
+coverage
+.env
+.secrets.yaml
+*.log

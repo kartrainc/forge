@@ -441,6 +441,13 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert "migrate" not in package["scripts"]
     assert "use_database: false" in (svc / ".copier-answers.yml").read_text(encoding="utf-8")
 
+    # Only the database-free image drops dev dependencies: crud-service's
+    # entrypoint still runs the Prisma CLI.
+    prune = "npm prune --omit=dev"
+    assert prune in (svc / "Dockerfile").read_text(encoding="utf-8")
+    assert prune not in (root / "services" / "store" / "Dockerfile").read_text(encoding="utf-8")
+    assert "node_modules" in (svc / ".dockerignore").read_text(encoding="utf-8")
+
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "capture-migrate:" not in compose
     assert "store-migrate:" in compose
