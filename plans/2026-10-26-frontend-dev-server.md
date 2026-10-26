@@ -2,7 +2,7 @@
 
 Base: c2e41854 (`kartrainc/forge` main, PR #4).
 
-Date: 2026-10-26. Status: proposed; no code written. Decision record:
+Date: 2026-10-26. Status: implemented on `feat/frontend-dev-server` (Vue); in review. Decision record:
 [ADR-013](../docs/architecture-decisions/ADR-013-a-dev-server-overlay-for-the-compose-frontend.md).
 First consumer: kartra-ai, which plans its own adoption in its repository.
 
@@ -19,13 +19,13 @@ change. Tracked as KR-59.
 | Option | `FrontendConfig.dev_server`, boolean, default `false`, Vue first, Flutter refused; carried like `ui_kit` |
 | Dockerfile | with the field on: `deps → source → dev` and `source → builder → nginx`; off: unchanged |
 | Runtime user | `dev` runs non-root; the tree and Vite's cache directories are writable by it; `COPY --chown` |
-| Overlay | generated `docker-compose.dev.yaml`; `volumes: !reset []`, `labels` and `healthcheck: !override`; Compose ≥ 2.40.0 (`initial_sync`) |
+| Overlay | generated `docker-compose.dev.yaml`; `volumes: !reset []`, `labels` and `healthcheck: !override`; Compose ≥ 2.39.4 (`initial_sync`) |
 | Sync | Compose Watch: one `sync` rule over the app directory with `initial_sync: true`, and separate `rebuild` rules for `package.json` and the lockfile; Vite restarts itself on config changes |
-| Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; exact `allowedHosts` (`app.localhost`); `strictPort`; no polling unless measured |
+| Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; `allowedHosts` set to `app.localhost` after the project's config (Vite still admits localhost, `*.localhost` and IPs); `strictPort`; no polling unless measured |
 | Auth | dev behaves like the built stack: the gatekeeper's browser paths are not routed; `VITE_AUTH_DISABLED` is not overridden; the Vite port is not published, so the origin, cookie and realm redirect URIs are unchanged |
 | Multi-frontend | not assumed; if kartrainc/forge#6 lands first, the overlay gains one override per enabled frontend |
 | Boot | with the field on, forge skips its automatic `docker compose up` and prints the Watch command |
-| Fallback | documented bind mount for Watch performance or filesystem problems on Compose ≥ 2.40.0; best effort, existing paths only |
+| Fallback | documented bind mount for Watch performance or filesystem problems on Compose ≥ 2.39.4; best effort, existing paths only |
 
 ## Grounding — forge at the base
 
@@ -39,7 +39,7 @@ Read at the base on 2026-10-26.
 | Build context | `.dockerignore` (`dockerignore.node.j2`) keeps `node_modules`, build output and `.env.*.local` out of the context. |
 | Ownership | `ownership()` in `forge/quality/model.py`: non-source files (YAML, Dockerfile) and base-template `.ts` outside the generated paths are `scaffold`; an edited scaffold gets a `.forge-merge` sidecar on update, an untouched one is rewritten, a vanished one is left on disk. |
 | Auth routes | the generated gatekeeper defines only the ForwardAuth middleware and no router; no browser path is routed on the frontend host. |
-| Compose floor | `tests/e2e/test_platform_compose_boot.py` already requires `!reset` (2.24+); `!override` needs 2.24.4 and `develop.watch.initial_sync` 2.40.0 (docker/compose#13232), which sets the floor. |
+| Compose floor | `tests/e2e/test_platform_compose_boot.py` already requires `!reset` (2.24+); `!override` needs 2.24.4 and `develop.watch.initial_sync` 2.39.4 (docker/compose#13232), which sets the floor. |
 | Browser tooling | `forge/quality/dependencies.py` installs Chromium for Vue and Svelte; CI has Docker-capable jobs. |
 
 ## Changes
@@ -67,7 +67,7 @@ the Kartra adoption is a change in kartra-ai.
    the Node health check; the watch rules, with only paths that exist.
    `tsconfig.node.json` includes the wrapper.
 4. **Doctor and boot.** `forge/doctor.py` reports a Docker Compose older than
-   2.40.0 when a project enables the field, with tests in the doctor's suite;
+   2.39.4 when a project enables the field, with tests in the doctor's suite;
    `boot()` and its call in `forge/cli/main.py` skip the automatic start for a
    project with the field on and print the Watch command, tested for `--yes` and
    for the interactive path.
@@ -100,10 +100,10 @@ gatekeeper overlay as its own concern.
 | render, off | Dockerfile, Compose and `.dockerignore` byte-identical to the base for every package manager; the recipe gains `dev_server = false`; `forge.toml` and every other file are unchanged |
 | render, on | stages `deps → source → dev`, `source → builder → nginx`; nginx last; one `COPY . .`; `dev` non-root with `COPY --chown` |
 | merged Compose | `docker compose config` with both files: the dev service has no nginx volume, the labels equal the base's except the service port, a Node health check, `develop.watch` with `initial_sync` and the expected rules |
-| wrapper | object, function and promise exports resolve; the guarded keys are set after the project's config, not merged; at run time a project's `allowedHosts: true` still refuses `evil.example` |
+| wrapper | object, function and promise exports resolve; the guarded keys are set after the project's config, not merged; at run time a project's `allowedHosts: true` still refuses `evil.example` (external names; `*.localhost` is Vite's own allowance) |
 | updates | false → true, true → false (no stale files), edited overlay and edited Dockerfile give sidecars |
 | options | `--dev-server`, the stack key and the interactive prompt (Vue only) reach the config; asking for it without a Vue frontend is an error; Svelte is not asked |
-| doctor and boot | `forge doctor` flags Compose below 2.40.0 when the field is on; `--yes`, the interactive confirm and a frontend-only project do not run `docker compose up`, and print the Watch command |
+| doctor and boot | `forge doctor` flags Compose below 2.39.4 when the field is on; `--yes`, the interactive confirm and a frontend-only project do not run `docker compose up`, and print the Watch command |
 | readme | the generated app README gains the Compose section only with the field on |
 | ownership | the dev server writes nothing into the checkout as a different uid; Vite's cache directory is writable |
 | runtime HMR | Playwright through Traefik, started with `up --watch --build`: edit a watched source component, the DOM changes, and the document did not navigate or reload (a `window` marker survives, no new main-frame navigation); a `package.json` change rebuilds |

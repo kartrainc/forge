@@ -364,7 +364,7 @@ Traefik router and host as the built app. From the project root:
 {command}
 ```
 
-- Needs Docker Compose 2.40 or newer.
+- Needs Docker Compose 2.39.4 or newer.
 - Edits under `apps/{slug}` sync into the container; a change to `package.json` or the
   lockfile rebuilds the image.
 - No content-security policy applies and nginx is not in the path, so check security

@@ -352,7 +352,7 @@ Turning it on with `forge --update`:
 Turning it off removes the two new files when you have not changed them. A file you
 changed stays on disk and is listed as `left_in_place` in the update report.
 
-Needs Docker Compose 2.40 or newer; `forge doctor` checks it. `forge` no longer
+Needs Docker Compose 2.39.4 or newer; `forge doctor` checks it. `forge` no longer
 runs `docker compose up` for a project with the option on, because that would
 start nginx: it prints the command that starts the dev stack.
 

@@ -174,7 +174,7 @@ class TestOverlay:
     def test_the_header_names_the_command_the_floor_and_what_dev_leaves_out(self, on: Path) -> None:
         text = (on / "docker-compose.dev.yaml").read_text(encoding="utf-8")
         assert "up --build --watch" in text
-        assert "Compose 2.40" in text
+        assert "Compose 2.39.4" in text
         assert "content-security policy" in text
 
 
@@ -186,7 +186,7 @@ class TestReadme:
             "docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch"
             in section
         )
-        assert "Docker Compose 2.40" in section
+        assert "Docker Compose 2.39.4" in section
         assert "content-security policy" in section and "/auth/" in section
         assert "apps/frontend" in section
 
@@ -208,7 +208,9 @@ class TestWrapper:
         assert wrapper.index("...resolved.server") < wrapper.index("allowedHosts")
         assert wrapper.index("...resolved,") < wrapper.index("server: {")
 
-    def test_it_allows_only_the_routed_host_and_never_moves_the_port(self, on: Path) -> None:
+    def test_it_lists_the_routed_host_never_all_hosts_and_never_moves_the_port(
+        self, on: Path
+    ) -> None:
         wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
         assert "allowedHosts: ['app.localhost']" in wrapper
         assert "allowedHosts: true" not in wrapper

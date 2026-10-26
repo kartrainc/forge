@@ -1850,7 +1850,7 @@ def _populate_report(
                     command=DEV_STACK_COMMAND,
                     description=(
                         "Start the generated stack with the frontend as a Vite dev server "
-                        "(hot reload; needs Docker Compose 2.40+)."
+                        "(hot reload; needs Docker Compose 2.39.4+)."
                     ),
                     cwd=".",
                 )

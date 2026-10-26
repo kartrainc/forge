@@ -249,7 +249,7 @@ def _collect_inputs() -> ProjectConfig | None:
         if framework == FrontendFramework.VUE:
             include_openapi = _ask_confirm("Enable OpenAPI code generation?", default=False)
             dev_server = _ask_confirm(
-                "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.40+)?",
+                "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.39.4+)?",
                 default=False,
             )
         elif framework == FrontendFramework.FLUTTER:

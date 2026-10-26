@@ -163,8 +163,8 @@ def check_docker_reachable() -> CheckResult:
     )
 
 
-# ``develop.watch.initial_sync`` first shipped in Docker Compose 2.40.0 (ADR-013).
-MIN_COMPOSE_FOR_DEV_SERVER = (2, 40, 0)
+# ``develop.watch.initial_sync`` is first listed in the Docker Compose 2.39.4 release notes (ADR-013).
+MIN_COMPOSE_FOR_DEV_SERVER = (2, 39, 4)
 
 
 def parse_compose_version(output: str) -> tuple[int, ...] | None:

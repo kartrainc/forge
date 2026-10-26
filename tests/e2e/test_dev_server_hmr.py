@@ -11,7 +11,7 @@ does (see the plan's risks), so a runtime case for them would not test this feat
 
 Traefik reads every container on the Docker daemon, so this test constrains its own to the
 test's Compose project and publishes it on a free loopback port. Heavy and opt-in (``e2e``);
-needs Docker Compose 2.40 or newer (``develop.watch.initial_sync``).
+needs Docker Compose 2.39.4 or newer (``develop.watch.initial_sync``).
 
 Run explicitly::
 
@@ -155,7 +155,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     ).stdout
     have = parse_compose_version(version)
     assert have is not None and have >= MIN_COMPOSE_FOR_DEV_SERVER, (
-        f"Docker Compose {version.strip()!r} cannot run the dev overlay (needs 2.40+)"
+        f"Docker Compose {version.strip()!r} cannot run the dev overlay (needs 2.39.4+)"
     )
 
     stack = tmp_path / "stack.yaml"
@@ -222,7 +222,8 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         up_log = tmp_path / "up.log"
         healthy = lambda: _statuses(compose, root).get("frontend") == "healthy"  # noqa: E731
 
-        # Only the routed host is admitted, whatever the project's own config says.
+        # External names are refused whatever the project's own config says (Vite itself
+        # always admits localhost, *.localhost and IP addresses).
         assert _http_status(compose, root, "app.localhost") == "200"
         assert _http_status(compose, root, "evil.example") == "403"
 

@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch
 #
 # Replaces the nginx `frontend` service with a Vite dev server behind the same
-# Traefik router and host. Needs Docker Compose 2.40 or newer. It serves no
+# Traefik router and host. Needs Docker Compose 2.39.4 or newer. It serves no
 # content-security policy and does not route the gatekeeper's sign-in paths:
 # check both on the built image.
 services:

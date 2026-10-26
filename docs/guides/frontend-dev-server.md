@@ -29,7 +29,10 @@ It adds three things:
 - `docker-compose.dev.yaml` at the project root;
 - `apps/<frontend>/vite.dev.config.ts`, which wraps your own `vite.config.ts`
   (an object, a promise or a function of `ConfigEnv`), listens on all
-  interfaces, refuses to move off its port, and admits only `app.localhost`.
+  interfaces, refuses to move off its port, and lists `app.localhost` as its host.
+  Vite refuses other external hostnames but always admits `localhost`, `*.localhost`
+  and IP addresses; the router sends only `app.localhost` here and the port is not
+  published. A project's own `allowedHosts` cannot widen the list.
 
 ## Run it
 
@@ -37,7 +40,7 @@ It adds three things:
 docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch
 ```
 
-Needs Docker Compose **2.40 or newer** (`forge doctor` checks it). Forge never
+Needs Docker Compose **2.39.4 or newer** (`forge doctor` checks it). Forge never
 starts this stack for you: its automatic boot runs `docker-compose.yml` alone,
 which serves nginx, so with the option on it prints the command above instead.
 
@@ -74,6 +77,22 @@ come from a host install or build, not from the running container.
   the daemon. Another stack that routes `Host(app.localhost)` collides with this
   one on the router name `frontend`. Stop it, or point this stack's Traefik at its
   own Compose project with `TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS`.
+
+## What has been run
+
+The end-to-end test (`tests/e2e/test_dev_server_hmr.py`) runs npm with the shadcn kit
+and sign-in off: it hot-reloads a component through Traefik, refuses an external
+Host header, checks that Vite's cache is writable, and that a `package.json` change
+replaces the container. It ran on Linux (WSL2 with Docker Desktop), and a project on
+a Windows drive was driven by hand with the Windows `docker.exe` (edits, CRLF files,
+new and deleted files, a `package.json` rebuild). macOS and a native Windows install
+of forge itself are unverified.
+
+pnpm and yarn render correctly (stages, `CMD`, corepack location) but have not run:
+the image's install step for pnpm, which the production build shares, is rejected by
+the newest pnpm for a lockfile generated on the host, and yarn project generation can
+fail at the lint step on some hosts. Both predate this option; until they are fixed,
+treat the dev server as verified with npm.
 
 ## Aliases outside the app
 

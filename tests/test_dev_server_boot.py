@@ -128,20 +128,20 @@ class TestDoctorCheck:
     def test_a_directory_without_a_manifest_is_not_checked(self, tmp_path: Path) -> None:
         assert doctor.check_compose_for_dev_server(tmp_path) is None
 
-    @pytest.mark.parametrize("version", ["2.40.0", "2.41.1", "5.3.0", "v5.6.1\n"])
+    @pytest.mark.parametrize("version", ["2.39.4", "2.40.0", "5.3.0", "v5.6.1\n"])
     def test_a_compose_that_can_watch_passes(self, tmp_path: Path, version: str) -> None:
         with patch("forge.doctor.shutil.which", return_value="/usr/bin/docker"), _compose(version):
             result = doctor.check_compose_for_dev_server(_project(tmp_path, dev_server=True))
         assert result is not None and result.status == "ok"
 
-    @pytest.mark.parametrize("version", ["2.39.4", "2.24.4", "1.29.2"])
+    @pytest.mark.parametrize("version", ["2.39.3", "2.24.4", "1.29.2"])
     def test_an_older_compose_fails_with_the_floor_in_the_fix(
         self, tmp_path: Path, version: str
     ) -> None:
         with patch("forge.doctor.shutil.which", return_value="/usr/bin/docker"), _compose(version):
             result = doctor.check_compose_for_dev_server(_project(tmp_path, dev_server=True))
         assert result is not None and result.status == "fail"
-        assert "2.40.0" in result.detail and "2.40.0" in (result.fix or "")
+        assert "2.39.4" in result.detail and "2.39.4" in (result.fix or "")
 
     def test_an_unreadable_version_fails(self, tmp_path: Path) -> None:
         with patch("forge.doctor.shutil.which", return_value="/usr/bin/docker"), _compose("", 1):

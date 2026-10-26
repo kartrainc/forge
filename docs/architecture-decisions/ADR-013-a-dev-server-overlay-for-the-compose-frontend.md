@@ -39,7 +39,8 @@ What it learned shapes this decision:
   volumes by target and labels by entry, so omission deletes nothing.
 - The base `frontend` service has **no** health check. The overlay adds one;
   a slim Node image has no `wget` or `curl`.
-- Vite rejects the stack's hostnames unless `server.allowedHosts` lists them.
+- Vite rejects the stack's hostnames unless `server.allowedHosts` lists them (it
+  always admits `localhost`, `*.localhost` and IP addresses).
 - No Content-Security-Policy applies, because nginx is not in the path.
 
 ## Decision
@@ -81,9 +82,9 @@ What it learned shapes this decision:
    overlay writes out every label the frontend router still needs, from the same
    values the base Compose template reads (`app.localhost`, the router name
    `frontend`), with the service port set to the frontend's `server_port`; a
-   test compares the two. The minimum is **Docker Compose 2.40.0**:
-   `develop.watch.initial_sync` first shipped there (docker/compose#13232), and
-   it is later than `!override` (2.24.4) and `!reset` (2.24), which forge's
+   test compares the two. The minimum is **Docker Compose 2.39.4**:
+   `develop.watch.initial_sync` is listed in that release's notes
+   (docker/compose#13232), and it is later than `!override` (2.24.4) and `!reset` (2.24), which forge's
    Compose boot test already needs. `forge doctor` reports an older Compose.
 4. **Compose Watch is the sync mechanism, not a bind mount.** The overlay
    declares `develop.watch`:
@@ -105,13 +106,19 @@ What it learned shapes this decision:
 5. **A wrapper Vite config, never an edit of the project's own.**
    `apps/<frontend_slug>/vite.dev.config.ts` resolves the base `vite.config.ts` whether
    it exports an object, a function of `ConfigEnv`, or a promise, spreads it, and
-   then sets `server.host` to `0.0.0.0`, `strictPort`, and `allowedHosts` to the frontend's exact generated Traefik hostname,
+   then sets `server.host` to `0.0.0.0`, `strictPort`, and `allowedHosts` to the frontend's generated Traefik hostname,
    `app.localhost`, read from the same place the Compose template reads it. It
    never sets `allowedHosts: true`. The three keys are set after the project's
    config and not merged into it: `mergeConfig` concatenates host lists and keeps
    `true`, so a project's own `allowedHosts` would otherwise widen the list (the
    e2e test sets `allowedHosts: true` in the project and expects `evil.example`
-   refused). File polling is off: Compose writes the
+   refused). The guarantee is that arbitrary external hostnames are refused and
+   that the project's config cannot widen the list. It is not that only
+   `app.localhost` answers: Vite always admits `localhost`, every `*.localhost`
+   name and IP addresses, and adds hosts named in its
+   `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable. That is
+   enough here because Traefik routes only `app.localhost` to this service and
+   the Vite port is not published. File polling is off: Compose writes the
    synced files inside the container, where Vite's watcher sees them (measured:
    an edit reaches the browser in under a second). It imports the project's
    config with its `.ts` extension, which Vite 8's native config loader asks for.
@@ -146,7 +153,7 @@ What it learned shapes this decision:
    wrapper on that transition when they are unmodified since generation, and
    reports one that was edited. The Dockerfile falls back to the single-stage
    form through the normal sidecar path.
-8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.40.0
+8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.39.4
    or newer, where Watch's sync is too slow or a filesystem does not suit it,
    generated docs say how to mount `src/` into the `dev` target instead. An older
    Compose cannot use the overlay at all.
@@ -205,7 +212,7 @@ Rejected. It is the second-origin setup the Context describes.
   `dev_server = false` on the next update, so the recipe and the golden
   snapshots that hash it change; `forge.toml` records `dev_server = true` only
   for a project that enables it.
-- Projects on Docker Compose older than 2.40.0 cannot use the overlay.
+- Projects on Docker Compose older than 2.39.4 cannot use the overlay.
 - A change under `package.json` or a lockfile rebuilds the image and restarts
   the service; a change to the Vite config restarts it without a rebuild.
 - The host does not see the generated declaration files the dev server writes.

@@ -171,7 +171,7 @@ class TestWizard:
         assert config is not None
         return config, asked
 
-    _QUESTION = "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.40+)?"
+    _QUESTION = "Run the frontend as a Vite dev server with hot reload (Docker Compose 2.39.4+)?"
     _VUE = [
         "Python (FastAPI)",
         "3.13",
