@@ -189,7 +189,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/admin/.copier-answers.yml": {
-      "size": 1331,
+      "size": 1339,
       "sha256": "<version-dependent>"
     },
     "apps/admin/.dockerignore": {
@@ -229,16 +229,16 @@
       "sha256": "4bc9412b9888a71f"
     },
     "apps/admin/nginx.conf": {
-      "size": 1755,
-      "sha256": "35a70c54af8f1e5a"
+      "size": 1746,
+      "sha256": "c00a25cf996153d5"
     },
     "apps/admin/package.json": {
       "size": 1869,
       "sha256": "0325159c7e707f0b"
     },
     "apps/admin/playwright.csp.config.ts": {
-      "size": 532,
-      "sha256": "c046df6900b69404"
+      "size": 859,
+      "sha256": "49bd83a59187126c"
     },
     "apps/admin/playwright.quality.config.ts": {
       "size": 385,
@@ -261,8 +261,8 @@
       "sha256": "078da64f2ee555a7"
     },
     "apps/admin/scripts/serve-csp.mjs": {
-      "size": 2963,
-      "sha256": "3b60a856400ea628"
+      "size": 7087,
+      "sha256": "1299f04f59d3a6df"
     },
     "apps/admin/src/app/App.vue": {
       "size": 557,
@@ -661,16 +661,20 @@
       "sha256": "f49fe0e3aff99dab"
     },
     "apps/admin/tests/e2e/application.spec.ts": {
-      "size": 2291,
-      "sha256": "44c2dd3b9c782853"
+      "size": 2361,
+      "sha256": "83dd3284baacde40"
     },
     "apps/admin/tests/e2e/crud.ts": {
-      "size": 4566,
-      "sha256": "c3516784c8a63a53"
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
     },
     "apps/admin/tests/e2e/health.ts": {
       "size": 817,
       "sha256": "063adfff636cfecf"
+    },
+    "apps/admin/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
     },
     "apps/admin/tests/integration/crud.ts": {
       "size": 9416,
@@ -717,7 +721,7 @@
       "sha256": "121f68f0347a5788"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 1347,
+      "size": 1355,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -761,16 +765,16 @@
       "sha256": "3194c866e53def81"
     },
     "apps/frontend/nginx.conf": {
-      "size": 1755,
-      "sha256": "35a70c54af8f1e5a"
+      "size": 1746,
+      "sha256": "c00a25cf996153d5"
     },
     "apps/frontend/package.json": {
       "size": 2124,
       "sha256": "c3b057c2d0716d36"
     },
     "apps/frontend/playwright.csp.config.ts": {
-      "size": 532,
-      "sha256": "c046df6900b69404"
+      "size": 859,
+      "sha256": "49bd83a59187126c"
     },
     "apps/frontend/playwright.quality.config.ts": {
       "size": 385,
@@ -793,8 +797,8 @@
       "sha256": "078da64f2ee555a7"
     },
     "apps/frontend/scripts/serve-csp.mjs": {
-      "size": 2963,
-      "sha256": "3b60a856400ea628"
+      "size": 7087,
+      "sha256": "1299f04f59d3a6df"
     },
     "apps/frontend/src/app/App.vue": {
       "size": 462,
@@ -1633,12 +1637,12 @@
       "sha256": "e309286e33878d5e"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 2058,
-      "sha256": "c1eb97a76e473daf"
+      "size": 2128,
+      "sha256": "07edb98af8299473"
     },
     "apps/frontend/tests/e2e/crud.ts": {
-      "size": 4566,
-      "sha256": "c3516784c8a63a53"
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1651,6 +1655,10 @@
     "apps/frontend/tests/e2e/orders.spec.ts": {
       "size": 71,
       "sha256": "cc281f01080a837f"
+    },
+    "apps/frontend/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
     },
     "apps/frontend/tests/integration/button.test.ts": {
       "size": 504,
@@ -2033,7 +2041,7 @@
       "sha256": "bdb8deaf173bef47"
     },
     "forge.toml": {
-      "size": 186139,
+      "size": 186570,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -2157,7 +2165,7 @@
       "sha256": "459f95079ae5c647"
     },
     "services/api/.copier-answers.yml": {
-      "size": 535,
+      "size": 543,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -2761,7 +2769,7 @@
       "sha256": "f35106d8d70d3f4c"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 582,
+      "size": 590,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {
