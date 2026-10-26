@@ -327,6 +327,8 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
         context = {
             "package_manager": fc.package_manager,
             "build_dir": build_dir,
+            "dev_server": fc.dev_server,
+            "server_port": fc.server_port,
         }
 
     output = template.render(context)

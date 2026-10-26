@@ -1,8 +1,18 @@
+{% if dev_server %}
+# -- Dependencies stage --
+FROM node:22-slim AS deps
+{% else %}
 # -- Build stage --
 FROM node:22-slim AS builder
+{% endif %}
 WORKDIR /app
 
 {% if package_manager == "pnpm" %}
+{% if dev_server %}
+# The dev stage runs as an unprivileged user, which cannot read root's corepack
+# cache: keep pnpm where every user can.
+ENV COREPACK_HOME=/usr/local/share/corepack
+{% endif %}
 RUN corepack enable && corepack prepare pnpm@latest --activate
 {% elif package_manager == "yarn" %}
 RUN corepack enable
@@ -27,8 +37,38 @@ COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 {% endif %}
 
+{% if dev_server %}
+# The dev server writes Vite's cache and its bundled config into node_modules
+# at startup; those directories (and /app) belong to the unprivileged user, the
+# installed packages stay root's.
+RUN mkdir -p node_modules/.vite node_modules/.vite-temp \
+ && chown node:node /app node_modules node_modules/.vite node_modules/.vite-temp
+
+# -- Source stage --
+# The one place the application is copied, so the dev and production images
+# cannot differ in what they hold.
+FROM deps AS source
+COPY --chown=node:node . .
+
+# -- Dev stage --
+# docker-compose.dev.yaml builds this target; sync keeps /app in step with the
+# project (docker compose up --watch).
+FROM source AS dev
+USER node
+EXPOSE {{ server_port }}
+{% if package_manager == "npm" %}
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
+{% else %}
+CMD ["{{ package_manager }}", "run", "dev", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
+{% endif %}
+
+# -- Build stage --
+FROM source AS builder
+RUN {{ package_manager }} run build
+{% else %}
 COPY . .
 RUN {{ package_manager }} run build
+{% endif %}
 
 # -- Runtime stage --
 FROM nginx:alpine
