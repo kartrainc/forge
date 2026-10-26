@@ -100,6 +100,13 @@ def apply_common_files(
             project_root / "apps" / config.frontend_slug / "scripts/remap-browser.mjs",
             collector,
         )
+    if (
+        config.frontend
+        and config.frontend.framework.value == "vue"
+        and config.frontend.ui_kit == "nuxt-ui"
+    ):
+        _copy_nuxt_ui_agent_tooling(project_root, collector)
+
     from forge.frontend_csp import csp_enabled  # noqa: PLC0415
 
     if csp_enabled(config):
@@ -112,6 +119,29 @@ def apply_common_files(
             frontend / "playwright.csp.config.ts",
             collector,
         )
+
+
+def _copy_nuxt_ui_agent_tooling(project_root: Path, collector: ProvenanceCollector | None) -> None:
+    """Give a ``nuxt-ui`` project the official Nuxt UI skill and its MCP server.
+
+    The skill (``forge.ui_kits.NUXT_UI_SKILL_TAG``) goes to both agent
+    discovery locations, like the forge-platform skill. ``.mcp.json`` names
+    the server for Claude Code, ``.codex/config.toml`` for Codex, which reads
+    it only in a project the user trusts.
+    """
+    skill_source = COMMON_DIR / "skills" / "nuxt-ui"
+    for agent in (".agents", ".claude"):
+        for source in sorted(skill_source.rglob("*")):
+            if source.is_file():
+                _copy_if_absent(
+                    source,
+                    project_root / agent / "skills" / "nuxt-ui" / source.relative_to(skill_source),
+                    collector,
+                )
+    _copy_if_absent(COMMON_DIR / "mcp.json", project_root / ".mcp.json", collector)
+    _copy_if_absent(
+        COMMON_DIR / "codex-config.toml", project_root / ".codex" / "config.toml", collector
+    )
 
 
 def _ci_source_for(bc: BackendConfig) -> Path | None:

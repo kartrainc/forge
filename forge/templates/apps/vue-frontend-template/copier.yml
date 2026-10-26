@@ -169,6 +169,10 @@ default_color_scheme:
     - zinc
     - neutral
     - stone
+    - mauve
+    - olive
+    - mist
+    - taupe
     - orange
     - yellow
     - lime

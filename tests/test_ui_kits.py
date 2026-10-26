@@ -166,12 +166,20 @@ class TestFrontendRefusals:
             _frontend(ui_kit="nuxt-ui", include_chat=True).validate()
 
     def test_nuxt_ui_accepts_template_schemes_and_tailwind_palettes(self) -> None:
-        for scheme in ("deepPurple", "violet", "emerald", "zinc"):
+        # Tailwind CSS 4.3 added mauve, olive, mist and taupe.
+        for scheme in ("deepPurple", "violet", "emerald", "zinc", "mauve", "taupe"):
             _frontend(ui_kit="nuxt-ui", default_color_scheme=scheme).validate()
         with pytest.raises(
-            ValueError, match="Colour scheme 'mauve' is not available with UI kit 'nuxt-ui'"
+            ValueError, match="Colour scheme 'chartreuse' is not available with UI kit 'nuxt-ui'"
         ):
-            _frontend(ui_kit="nuxt-ui", default_color_scheme="mauve").validate()
+            _frontend(ui_kit="nuxt-ui", default_color_scheme="chartreuse").validate()
+
+    def test_copier_offers_exactly_the_schemes_the_kits_accept(self) -> None:
+        import yaml
+
+        copier = Path(ui_kits.__file__).parent / "templates/apps/vue-frontend-template/copier.yml"
+        choices = yaml.safe_load(copier.read_text(encoding="utf-8"))["default_color_scheme"]
+        assert choices["choices"] == list(ui_kits.COLOR_SCHEME_CHOICES)
 
 
 # --- layouts ----------------------------------------------------------------

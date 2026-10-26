@@ -186,6 +186,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   with authentication and two CRUD features.
 - Let a fragment ship a `files-<kit>/` tree whose files replace the same paths
   of `files/` for that kit; the session-timeout dialog uses it for Nuxt UI.
+- Give a `nuxt-ui` project the official Nuxt UI agent skill, vendored from the
+  `@nuxt/ui` release forge pins, in `.agents/skills` and `.claude/skills`, and
+  the Nuxt UI MCP server in `.mcp.json` (Claude Code) and `.codex/config.toml`
+  (Codex). `scripts/vendor_nuxt_ui_skill.py` vendors a later release, and the
+  recorded upstream blob hashes let a test check the copy offline. The
+  forge-platform skill tells agents that the project's Nuxt UI setup takes
+  precedence over the skill's general setup and theming steps.
+- Accept Tailwind CSS 4.3's `mauve`, `olive`, `mist` and `taupe` as the
+  `nuxt-ui` colour scheme.
 
 ### Fixed
 

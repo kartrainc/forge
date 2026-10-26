@@ -17,7 +17,7 @@ This index preserves the reasoning and implementation evidence behind it.
 | Subject | Implementation evidence | Current guide |
 | --- | --- | --- |
 | Generated ownership, quality gates, recommendations, agent skill | [October 2026 implementation plan](../../plans/2026-10-07-generated-quality.md) | [Generated-code quality](../operations/generated-code-quality.md) |
-| Vue UI kit option (Nuxt UI) and the content-security repair | [Nuxt UI kit plan](../../plans/2026-10-22-vue-ui-kit-nuxt-ui.md), accepted | [Frontend layouts](../guides/frontend-layouts.md); ADR-011 and the kit guides arrive with the work |
+| Vue UI kit option (Nuxt UI) and the content-security repair | [Nuxt UI kit plan](../../plans/2026-10-22-vue-ui-kit-nuxt-ui.md), accepted | [UI kits](../guides/frontend-layouts.md#ui-kits), [Nuxt UI projects](../guides/agentic-usage.md#nuxt-ui-projects), [ADR-011](../architecture-decisions/ADR-011-ui-kit-option-for-the-vue-template.md) |
 | Layered UI components | [Component model plan](../../plans/2026-06-02-layered-component-model-plan.md) | [Generator architecture](../architecture/generator.md), [ADR-010](../architecture-decisions/ADR-010-layered-component-model.md) |
 | Multi-service generation | [Platform backport plan](../../plans/2026-06-08-platform-backport-plan.md) | [Platform presets](../guides/platforms.md) |
 | Tenant claim isolation | [Token claim multitenancy plan](../../plans/2026-06-09-token-claim-multitenancy.md) | [Platform overview](../architecture/overview.md#tenant-data-isolation) |
