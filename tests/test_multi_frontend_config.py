@@ -66,9 +66,9 @@ class TestConfigShape:
         assert "frontends" in dataclasses.asdict(cfg) and "frontend" not in dataclasses.asdict(cfg)
 
     def test_frontend_kwarg_is_gone_like_backend(self):
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'frontend'"):
             ProjectConfig(project_name="Test", frontend=_vue())  # type: ignore[call-arg]
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'backend'"):
             ProjectConfig(project_name="Test", backend=BackendConfig(project_name="Test"))  # type: ignore[call-arg]
 
     def test_frontend_setter_mirrors_backend(self):
