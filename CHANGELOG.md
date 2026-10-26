@@ -277,6 +277,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   integration suite (`tests/integration/setup-env.ts`), so a service with
   platform auth no longer fails at `buildApp()` outside the stack. Values the
   environment sets still win.
+- Ignore Finder's `.DS_Store` in the generator fingerprint and the quality
+  scans, as the built package does. Opening an installed generator in Finder
+  made it fail "generator differs from recorded source".
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth
