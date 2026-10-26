@@ -403,7 +403,7 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
                 features=["items"],
             ),
         ],
-        frontend=None,
+        frontends=[],
         options={
             "reliability.connection_pool": True,
             "async.task_queue": True,
@@ -555,7 +555,7 @@ def test_authenticated_e2e_verifies_a_minted_token(tmp_path: Path):
                     server_port=5100,
                 )
             ],
-            frontend=None,
+            frontends=[],
             include_keycloak=auth,
             options={"auth.provider": "gatekeeper"} if auth else {},
         )
@@ -590,7 +590,7 @@ def _http_only_project(tmp_path: Path, names: list[str]) -> ProjectConfig:
             )
             for index, name in enumerate(names)
         ],
-        frontend=None,
+        frontends=[],
     )
 
 
@@ -653,7 +653,7 @@ def test_dev_overlay_only_for_node_projects(tmp_path: Path):
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
     )
     from forge.generator import generate
 
