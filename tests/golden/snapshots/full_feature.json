@@ -56,6 +56,10 @@
       "size": 1363,
       "sha256": "<version-dependent>"
     },
+    "apps/frontend/.dockerignore": {
+      "size": 510,
+      "sha256": "35cfb7ec48840d8f"
+    },
     "apps/frontend/.env": {
       "size": 82,
       "sha256": "3bb1abcd1c14c736"

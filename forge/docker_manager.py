@@ -335,6 +335,28 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
     return dockerfile_path
 
 
+def render_frontend_dockerignore(config: ProjectConfig, frontend_dir: Path) -> Path:
+    """Render the ``.dockerignore`` of the frontend image's build context.
+
+    The build context is the whole application directory, and ``COPY . .``
+    merges a directory file by file over what the image already holds. The
+    Dockerfile installs from the lockfile and builds from source, so a host
+    install, build output and ``.env.*.local`` files (which ``vite build``
+    reads) stay out of the context.
+    """
+    env = _jinja_env()
+    fc = config.frontend
+    if fc is None:
+        raise ValueError("render_frontend_dockerignore called without a frontend configured")
+
+    flavour = "flutter" if fc.framework == FrontendFramework.FLUTTER else "node"
+    template = env.get_template(f"deploy/dockerignore.{flavour}.j2")
+    output = template.render({})
+    dockerignore_path = frontend_dir / ".dockerignore"
+    dockerignore_path.write_text(output, encoding="utf-8")
+    return dockerignore_path
+
+
 def render_keycloak_realm(
     config: ProjectConfig,
     project_root: Path,
