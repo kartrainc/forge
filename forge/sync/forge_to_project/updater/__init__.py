@@ -183,19 +183,14 @@ def _update_locked(
         current_version = "0.0.0+unknown"
 
     backends = _infer_backends(project_root, manifest_frontend=data.frontend)
-    # cast: a plugin frontend resolves to a _PluginFramework sentinel that
-    # behaves like a FrontendFramework member at runtime (==, .value) but isn't
-    # statically one; downstream consumers treat it uniformly.
-    frontend_framework = cast("FrontendFramework", _frontend_framework_from_manifest(data.frontend))
-    # ``has_recorded_frontend`` covers both the built-in framework
-    # case (Vue / Svelte / Flutter — ``frontend_framework`` lights up)
-    # and plugin frontends (``frontend.framework`` is set but doesn't
-    # map onto the :class:`FrontendFramework` enum). An explicit
+    # ``has_recorded_frontend`` covers both the built-in frameworks
+    # (Vue / Svelte / Flutter) and plugin frontends (``framework`` is set
+    # but doesn't map onto the :class:`FrontendFramework` enum). An explicit
     # ``framework = "none"`` reading is treated as no-frontend (the
     # manifest documents ``"none"`` as the explicit "no frontend
     # layer" marker).
-    has_recorded_frontend = bool(data.frontend.framework) and (
-        data.frontend.framework != FrontendFramework.NONE.value
+    has_recorded_frontend = any(
+        fe.framework and fe.framework != FrontendFramework.NONE.value for fe in data.frontends
     )
     if not backends and not has_recorded_frontend:
         # Genuinely empty project — no services/<backend>/ AND no
@@ -239,14 +234,14 @@ def _update_locked(
             )
         )
 
-    # The recorded frontend is attached before resolving, so the resolver gates
+    # The recorded frontends are attached before resolving, so the resolver gates
     # frontend-targeted fragments and checks UI kits exactly as generate does;
-    # the topology-aware Helm chart and codegen below need it too.
-    recorded = _recorded_frontend(project_root, data, frontend_framework)
+    # the topology-aware Helm chart and codegen below need them too.
+    recorded = _recorded_frontends(project_root, data)
     config = ProjectConfig(
         project_name=data.project_name or project_root.name,
         backends=resolver_backends,
-        frontends=[recorded] if recorded is not None else [],
+        frontends=[fc for fc, _ in recorded],
         options=dict(data.options),
         # Carry origins through so the resolver can distinguish user-set
         # options from defaulted-but-persisted ones. Without this, a
@@ -588,7 +583,7 @@ def _update_locked(
         frontends=frontend_targets(
             config,
             project_root,
-            app_dirs=_recorded_app_dirs(project_root, data, recorded, frontend_framework),
+            app_dirs={fc.name: app_dir for fc, app_dir in recorded},
         ),
         # Keep the topology-aware Helm chart current on --update: per-backend
         # ports flow through ``topology``; ``primary_server_port`` covers any
@@ -677,10 +672,9 @@ def _update_locked(
     # manifest's ``[forge.template_versions]`` so a subsequent update
     # sees no delta (until the next bump). Failed / skipped tasks leave
     # the project's recorded version untouched.
-    next_template_versions: dict[str, str] = dict(data.template_versions)
-    for entry in template_update_outcomes:
-        if entry["status"] in ("applied", "conflict"):
-            next_template_versions[str(entry["language"])] = str(entry["current_version"])
+    next_template_versions = _next_template_versions(
+        data.template_versions, template_update_outcomes
+    )
 
     # Preserve user-set origins from the existing manifest; any path
     # the resolver introduces this run (new options added to the
@@ -730,7 +724,7 @@ def _update_locked(
         provenance=collector.as_dict(),
         merge_blocks=collector.merge_blocks_as_dict(),
         template_versions=next_template_versions,
-        frontend=data.frontend,
+        frontends=data.frontends,
     )
 
     return {
@@ -1147,49 +1141,43 @@ def frontend_app_dir(
     return project_root / (frontend.app_dir or "apps/frontend")
 
 
-def _recorded_frontend(
+def _recorded_frontends(
     project_root: Path,
     data: ForgeTomlData,
-    framework: FrontendFramework | _PluginFramework,
-) -> FrontendConfig | None:
-    """The frontend ``forge.toml`` records, as a :class:`FrontendConfig`, or ``None``.
+) -> list[tuple[FrontendConfig, Path]]:
+    """Every frontend ``forge.toml`` records, with its app directory, the primary first.
 
-    It carries the manifest's framework and UI kit and, from the app's Copier
-    answers, whether it has the AI chat; the app directory is passed alongside
-    (:func:`_recorded_app_dirs`). Shared by
-    ``forge --update`` and ``--plan-update`` so both see the frontend the
+    Each :class:`FrontendConfig` carries the manifest's framework and UI kit,
+    the name of its app directory and, from the app's Copier answers, whether
+    it has the AI chat. A framework this forge does not know is skipped, as
+    :func:`_frontend_framework_from_manifest` describes. Shared by
+    ``forge --update`` and ``--plan-update`` so both see the frontends the
     generator rendered.
     """
-    if framework == FrontendFramework.NONE:
-        return None
-    # cast: a plugin frontend's sentinel behaves like a member (see update_project).
-    frontend = FrontendConfig(
-        framework=cast("FrontendFramework", framework),
-        project_name=data.project_name or project_root.name,
-    )
-    if framework == FrontendFramework.VUE:
-        # The recorded Vue UI kit selects fragments' files-<kit>/ trees.
-        if data.frontend.ui_kit:
-            frontend.ui_kit = data.frontend.ui_kit
-        # A Vue project with the chat is served without the content-security
-        # policy (forge.frontend_csp), which the Helm chart's values carry.
-        frontend.include_chat = _recorded_include_chat(
-            frontend_app_dir(project_root, data.frontend, framework)
+    recorded: list[tuple[FrontendConfig, Path]] = []
+    for i, entry in enumerate(data.frontends):
+        framework = _frontend_framework_from_manifest(entry)
+        app_dir = frontend_app_dir(project_root, entry, framework)
+        if app_dir is None:
+            continue
+        # cast: a plugin frontend's sentinel behaves like a member (see update_project).
+        frontend = FrontendConfig(
+            framework=cast("FrontendFramework", framework),
+            project_name=data.project_name or project_root.name,
+            name=app_dir.name,
+            # Distinct ports, as the builder gives each entry; nothing on the
+            # update path renders them.
+            server_port=5173 + i,
         )
-    return frontend
-
-
-def _recorded_app_dirs(
-    project_root: Path,
-    data: ForgeTomlData,
-    recorded: FrontendConfig | None,
-    framework: FrontendFramework | _PluginFramework,
-) -> dict[str, Path]:
-    """Frontend name → the app directory the manifest records for it."""
-    app_dir = frontend_app_dir(project_root, data.frontend, framework)
-    if recorded is None or app_dir is None:
-        return {}
-    return {recorded.name: app_dir}
+        if framework == FrontendFramework.VUE:
+            # The recorded Vue UI kit selects fragments' files-<kit>/ trees.
+            if entry.ui_kit:
+                frontend.ui_kit = entry.ui_kit
+            # A Vue app with the chat is served without the content-security
+            # policy (forge.frontend_csp), which the Helm chart's values carry.
+            frontend.include_chat = _recorded_include_chat(app_dir)
+        recorded.append((frontend, app_dir))
+    return recorded
 
 
 def _recorded_include_chat(app_dir: Path | None) -> bool:
@@ -1239,6 +1227,26 @@ def _frontend_framework_from_manifest(
         return FrontendFramework.NONE
 
 
+def _next_template_versions(
+    recorded: dict[str, str],
+    outcomes: list[dict[str, object]],
+) -> dict[str, str]:
+    """The template versions to record after this run's re-renders.
+
+    A template renders every app or service of its framework or language; its
+    version moves only when each re-render that ran ended ``applied`` (or
+    ``conflict``, with sidecars to resolve), never on a partial result.
+    """
+    versions = dict(recorded)
+    by_template: dict[str, list[dict[str, object]]] = {}
+    for entry in outcomes:
+        by_template.setdefault(str(entry["language"]), []).append(entry)
+    for template, entries in by_template.items():
+        if all(entry["status"] in ("applied", "conflict") for entry in entries):
+            versions[template] = str(entries[0]["current_version"])
+    return versions
+
+
 def _restamp_forge_toml(
     manifest: Path,
     *,
@@ -1250,7 +1258,7 @@ def _restamp_forge_toml(
     provenance: dict[str, dict[str, str]] | None = None,
     merge_blocks: dict[str, dict[str, str]] | None = None,
     template_versions: dict[str, str] | None = None,
-    frontend: ForgeFrontendData | None = None,
+    frontends: tuple[ForgeFrontendData, ...] = (),
 ) -> None:
     """Write forge.toml with the current version + options + provenance + merge blocks.
 
@@ -1266,13 +1274,13 @@ def _restamp_forge_toml(
     stamps every entry as "user" (legacy callers; the in-tree updater
     populates this explicitly post-WS2b).
 
-    ``frontend`` (Initiative #3, v4) carries the project's frontend
-    framework + app_dir forward across re-stamps. Built-in frontends
-    (Vue / Svelte / Flutter) also get their template_dir added to the
-    ``[forge.templates]`` map so the next read-time inference fallback
-    has a v4-compatible source even if the explicit table is dropped
-    by an unrelated write path. ``None`` and the empty-framework
-    record both omit the ``[forge.frontend]`` table.
+    ``frontends`` (Initiative #3, v4; a list from v5) carries every
+    recorded frontend's framework + app_dir forward across re-stamps,
+    the primary first. Each frontend framework (Vue / Svelte / Flutter or a
+    plugin) also gets its template_dir added to the ``[forge.templates]``
+    map so the next read-time inference fallback has a source even if the
+    explicit table is dropped by an unrelated write path. Empty omits
+    ``[forge.frontend]``.
     """
     templates: dict[str, str] = {}
     for lang in sorted({bc.language for bc in backends}, key=lambda L: L.value):
@@ -1287,12 +1295,14 @@ def _restamp_forge_toml(
     # round-tripping would create a circular import); the mapping
     # below mirrors that table for the built-in frameworks and the
     # ``FRONTEND_SPECS`` registry for plugins.
-    if frontend is not None and frontend.framework:
-        builtin_dirs = {
-            FrontendFramework.VUE: "apps/vue-frontend-template",
-            FrontendFramework.SVELTE: "apps/svelte-frontend-template",
-            FrontendFramework.FLUTTER: "apps/flutter-frontend-template",
-        }
+    builtin_dirs = {
+        FrontendFramework.VUE: "apps/vue-frontend-template",
+        FrontendFramework.SVELTE: "apps/svelte-frontend-template",
+        FrontendFramework.FLUTTER: "apps/flutter-frontend-template",
+    }
+    for frontend in frontends:
+        if not frontend.framework:
+            continue
         try:
             framework_enum = FrontendFramework(frontend.framework)
         except ValueError:
@@ -1319,7 +1329,7 @@ def _restamp_forge_toml(
         provenance=provenance,
         merge_blocks=merge_blocks,
         template_versions=template_versions,
-        frontend=frontend,
+        frontends=frontends,
     )
 
 

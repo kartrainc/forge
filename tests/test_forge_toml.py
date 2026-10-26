@@ -232,8 +232,8 @@ class TestSchemaV3OptionOrigins:
             templates={"python": "p"},
             options={"middleware.rate_limit": True},
         )
-        # The constant moved (was 2 pre-WS2, was 3 pre-Initiative-#3).
-        assert CURRENT_SCHEMA_VERSION == 4
+        # The constant moved (was 2 pre-WS2, 3 pre-Initiative-#3, 4 before several frontends).
+        assert CURRENT_SCHEMA_VERSION == 5
         data = read_forge_toml(path)
         assert data.schema_version == CURRENT_SCHEMA_VERSION
 

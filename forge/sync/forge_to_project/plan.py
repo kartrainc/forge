@@ -39,8 +39,7 @@ from forge.sync.forge_to_project.uninstaller import disabled_fragments
 from forge.sync.forge_to_project.updater import (
     _frontend_framework_from_manifest,
     _infer_backends,
-    _recorded_app_dirs,
-    _recorded_frontend,
+    _recorded_frontends,
 )
 from forge.sync.forge_to_project.updater._merge_driver import (
     frontend_targets,
@@ -144,14 +143,14 @@ def plan_update(
             context={"project_root": str(project_root)},
         )
 
-    # Attach the recorded frontend before resolving, exactly as the update does.
+    # Attach the recorded frontends before resolving, exactly as the update does.
     # cast: a plugin frontend's sentinel behaves like a member (see the updater).
     frontend_framework = cast("FrontendFramework", _frontend_framework_from_manifest(data.frontend))
-    recorded = _recorded_frontend(project_root, data, frontend_framework)
+    recorded = _recorded_frontends(project_root, data)
     config = ProjectConfig(
         project_name=data.project_name or project_root.name,
         backends=list(backends),
-        frontends=[recorded] if recorded is not None else [],
+        frontends=[fc for fc, _ in recorded],
         options=dict(data.options),
     )
     plan = resolve(config)
@@ -166,7 +165,7 @@ def plan_update(
     targets = frontend_targets(
         config,
         project_root,
-        app_dirs=_recorded_app_dirs(project_root, data, recorded, frontend_framework),
+        app_dirs={fc.name: app_dir for fc, app_dir in recorded},
     )
     # The recorded Vue UI kit selects fragments' files-<kit>/ trees, as on update.
     ui_kit = (

@@ -1168,13 +1168,14 @@ def _write_forge_toml(
         spec = BACKEND_REGISTRY[resolve_backend_language(lang)]
         templates[lang] = spec.template_dir
         template_versions[lang] = _resolve_template_version_for(spec.template_dir, spec.version)
-    if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-        fw = config.frontend.framework
+    # Every frontend framework of the project, as for backend languages: a
+    # Svelte app beside a Vue primary is update-checked against its own template.
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+
+    for fw in sorted({fc.framework for fc in config.active_frontends}, key=lambda f: f.value):
         # Built-in frontends dispatch via TEMPLATE_DIRS; plugin frontends carry
         # their template_dir on the registered FrontendSpec. Resolve either so
         # the frontend is recorded in [forge.templates] (required for --update).
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
-
         frontend_spec = FRONTEND_SPECS.get(fw.value)
         template_dir = TEMPLATE_DIRS.get(fw) or (
             frontend_spec.template_dir if frontend_spec is not None else None
@@ -1243,7 +1244,7 @@ def _write_forge_toml(
     # That inference can be wrong (matrix sandboxes with stale
     # ``apps/`` subdirs, monorepos that ship multiple frontends side-
     # by-side), so populate it from the typed config at write time.
-    frontend_data = _frontend_manifest_data(config)
+    frontends_data = _frontend_manifest_data(config)
 
     write_forge_toml(
         project_root / "forge.toml",
@@ -1255,31 +1256,31 @@ def _write_forge_toml(
         provenance=provenance,
         merge_blocks=merge_blocks,
         template_versions=template_versions,
-        frontend=frontend_data,
+        frontends=frontends_data,
         platform_template=config.platform_template,
     )
 
 
 def _frontend_manifest_data(config: ProjectConfig):
-    """Return the v4 ``[forge.frontend]`` manifest payload for ``config``.
+    """Return the manifest records of every rendered frontend, the primary first.
 
-    Returns ``None`` when the project is backend-only (no frontend
-    framework, or framework set to ``NONE``) so ``write_forge_toml``
-    omits the table — matches the read-side contract that "no frontend"
-    is expressed by absent table OR ``framework == "none"``.
+    Empty when the project is backend-only (no frontend, or framework
+    ``NONE``) so ``write_forge_toml`` omits ``[forge.frontend]`` — matches
+    the read-side contract that "no frontend" is expressed by an absent
+    table OR ``framework == "none"``.
     """
     from forge.sync.manifest import ForgeFrontendData  # noqa: PLC0415
-
-    if config.frontend is None or config.frontend.framework == FrontendFramework.NONE:
-        return None
     from forge.ui_kits import applies_to  # noqa: PLC0415
 
-    return ForgeFrontendData(
-        framework=config.frontend.framework.value,
-        app_dir=f"apps/{config.frontend_slug}",
-        layout=config.frontend.layout,
-        # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
-        ui_kit=config.frontend.ui_kit if applies_to(config.frontend.framework) else "",
+    return tuple(
+        ForgeFrontendData(
+            framework=fc.framework.value,
+            app_dir=f"apps/{fc.name}",
+            layout=fc.layout,
+            # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
+            ui_kit=fc.ui_kit if applies_to(fc.framework) else "",
+        )
+        for fc in config.active_frontends
     )
 
 

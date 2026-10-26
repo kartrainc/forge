@@ -55,6 +55,7 @@ def _scaffold_project_with_file(
     rel_in_backend: str = "config.yml",
     origin: str = "fragment",
     frontend: ForgeFrontendData | None = None,
+    frontends: tuple[ForgeFrontendData, ...] | None = None,
 ) -> dict:
     """Build a project tree with one tracked file under [forge.provenance].
 
@@ -93,6 +94,7 @@ def _scaffold_project_with_file(
         options={},
         provenance=provenance,
         frontend=frontend,
+        frontends=frontends,
     )
 
     # Apply the user edit AFTER recording the baseline so the manifest
@@ -357,6 +359,34 @@ class TestReapplyBaselineFiles:
         data = read_forge_toml(tmp_path / "forge.toml")
         assert data.frontend.framework == "vue"
         assert data.frontend.layout == "topnav"
+
+    def test_reapply_preserves_every_frontend(self, tmp_path: Path) -> None:
+        """A reset must keep every recorded frontend, not only the primary."""
+        fragment_name = "test_frontends_preserved"
+        body = "fragment shipped content\n"
+        frontends = (
+            ForgeFrontendData(framework="vue", app_dir="apps/frontend", layout="topnav"),
+            ForgeFrontendData(framework="vue", app_dir="apps/admin", ui_kit="nuxt-ui"),
+        )
+        _scaffold_project_with_file(
+            tmp_path,
+            fragment_content=body,
+            user_content="user edited this\n",
+            fragment_name=fragment_name,
+            rel_in_backend="config.yml",
+            frontends=frontends,
+        )
+        fragment_dir = _make_fragment_dir_with_file(
+            tmp_path, fragment_name=fragment_name, rel_path="config.yml", content=body
+        )
+        _register_fragment(fragment_name, fragment_dir)
+        try:
+            report = reapply_baseline(project_root=tmp_path, quiet=True)
+        finally:
+            _unregister_fragment(fragment_name)
+
+        assert report.reset_count == 1
+        assert read_forge_toml(tmp_path / "forge.toml").frontends == frontends
 
     def test_skip_user_authored_record(self, tmp_path: Path) -> None:
         """``origin="user"`` rows are never touched."""
