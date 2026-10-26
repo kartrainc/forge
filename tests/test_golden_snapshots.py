@@ -320,6 +320,40 @@ PRESETS = {
             "platform.agents_md": True,
         },
     ),
+    # Several frontends: a shadcn primary and a Nuxt UI app without CRUD
+    # pages beside it, with Keycloak so the gatekeeper's host labels and the
+    # sign-in wiring of both apps are in the snapshot. The byte-level
+    # inventory of a two-frontend project.
+    "multi_frontend": ProjectConfig(
+        project_name="snap_mf",
+        backends=[
+            BackendConfig(
+                name="api",
+                project_name="snap_mf",
+                language=BackendLanguage.PYTHON,
+                features=["items", "orders"],
+            )
+        ],
+        frontends=[
+            FrontendConfig(
+                project_name="snap_mf",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+            ),
+            FrontendConfig(
+                project_name="snap_mf",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                name="admin",
+                server_port=5174,
+                ui_kit="nuxt-ui",
+                features=[],
+            ),
+        ],
+        include_keycloak=True,
+    ),
 }
 
 

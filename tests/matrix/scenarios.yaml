@@ -530,3 +530,47 @@ scenarios:
         queue.backend: asynq
         reliability.cache: memory
         platform.webhooks: true
+
+  - name: py_vue_svelte_frontends
+    description: >-
+      Python + three apps: the shadcn Vue primary, a Nuxt UI app and a Svelte
+      app, the last two without CRUD pages on hosts of their own, with
+      Keycloak; every app builds.
+    lanes: [generate, verify]
+    port_base: 8220
+    expected_files:
+      - services/api/pyproject.toml
+      - apps/frontend/package.json
+      - apps/admin/package.json
+      - apps/portal/package.json
+      - docker-compose.yml
+      - forge.toml
+    config:
+      project_name: "Py Vue Svelte Frontends"
+      include_keycloak: true
+      keycloak_port: 18088
+      backends:
+        - name: api
+          language: python
+          features: ["items"]
+          server_port: 8220
+          python_version: "3.13"
+      frontends:
+        - name: frontend
+          framework: vue
+          include_auth: true
+          include_chat: false
+          server_port: 5186
+        - name: admin
+          framework: vue
+          ui_kit: nuxt-ui
+          features: []
+          include_auth: true
+          include_chat: false
+          server_port: 5187
+        - name: portal
+          framework: svelte
+          features: []
+          include_auth: true
+          include_chat: false
+          server_port: 5188

@@ -34,7 +34,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.matrix.runner import Scenario, run_lane_smoke
+from tests.matrix.runner import Scenario, run_lane_smoke, run_lane_verify
 
 
 def _make_scenario() -> Scenario:
@@ -900,3 +900,63 @@ def test_compose_up_failure_writes_full_output(tmp_path, monkeypatch):
     assert "-compose-up.log" in branch
     assert "up_result.stderr" in branch and "up_result.stdout" in branch
     assert "[-20:]" in branch and "[-5:]" not in branch.split("return LaneResult")[0]
+
+
+def test_verify_builds_every_frontend_and_labels_each(tmp_path, monkeypatch):
+    """Lane B builds each app in its own ``apps/<name>``; further apps are
+    labelled by name in skips and failures, the primary as ``frontend``."""
+    from types import SimpleNamespace
+
+    import tests.matrix.runner as runner
+    from forge.config import BackendLanguage
+    from forge.toolchains import Check
+
+    scenario = Scenario(
+        name="two_apps",
+        description="",
+        lanes=("verify",),
+        port_base=9990,
+        expected_files=(),
+        config={
+            "project_name": "Two Apps",
+            "backends": [{"name": "api", "language": "python", "server_port": 9990}],
+            "frontends": [
+                {"name": "frontend", "framework": "vue", "include_auth": False},
+                {"name": "portal", "framework": "svelte", "features": [], "include_auth": False},
+            ],
+        },
+    )
+    monkeypatch.setattr("forge.generator.generate", _fake_generate(tmp_path))
+    monkeypatch.setattr(runner, "_inject_weld_stubs", lambda _root: None)
+    toolchain = SimpleNamespace(
+        install=lambda *_a, **_k: None, verify=lambda *_a, **_k: [Check("lint", "ok")]
+    )
+    monkeypatch.setattr(
+        "forge.config.BACKEND_REGISTRY",
+        {lang: SimpleNamespace(toolchain=toolchain) for lang in BackendLanguage},
+    )
+    built: list[str] = []
+
+    def verify(fe_cfg, fe_dir):
+        built.append(fe_dir.relative_to(tmp_path / "stub-project").as_posix())
+        return outcomes[fe_cfg.name]
+
+    monkeypatch.setattr(runner, "_verify_frontend", verify)
+
+    outcomes = {
+        "frontend": runner._FrontendVerifyOutcome("ok"),
+        "portal": runner._FrontendVerifyOutcome("skip", skip_reason="no npm"),
+    }
+    result = run_lane_verify(scenario)
+    assert built == ["apps/frontend", "apps/portal"]
+    assert result.status == "ok"
+    assert result.skipped_subchecks == ["frontend[portal]: no npm"]
+
+    outcomes = {
+        "frontend": runner._FrontendVerifyOutcome("fail", error="vite build"),
+        "portal": runner._FrontendVerifyOutcome("fail", error="svelte-check"),
+    }
+    result = run_lane_verify(scenario)
+    assert result.status == "fail"
+    assert "frontend:vite build" in result.details
+    assert "frontend[portal]:svelte-check" in result.details

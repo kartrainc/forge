@@ -181,7 +181,9 @@ shop/
 ```
 
 Selected features add infrastructure, schema output, shared packages, or SDKs at
-project or service scope. Continue with [getting started](docs/guides/getting-started.md)
+project or service scope. Several backends and several frontends are lists in
+the same file: see [`multi-backend.yaml`](multi-backend.yaml) and
+[`multi-frontend.yaml`](multi-frontend.yaml). Continue with [getting started](docs/guides/getting-started.md)
 and [customization](docs/guides/customization.md).
 
 ## Platform presets

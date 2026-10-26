@@ -1,0 +1,30 @@
+project_name: "Multi Frontend Demo"
+
+backends:
+  - name: "api"
+    language: "python"
+    features: ["items", "orders"]
+    server_port: 5010
+    python_version: "3.13"
+
+# The first frontend is the primary: apps/frontend on app.localhost.
+# Each further one gets apps/<name> on <name>.localhost, with the
+# project's Keycloak realm and client.
+frontends:
+  - name: "frontend"
+    framework: "vue"
+    include_auth: true
+    include_chat: false
+    server_port: 5173
+  - name: "admin"
+    framework: "vue"
+    ui_kit: "nuxt-ui"
+    features: []          # no CRUD pages; omit the key for every backend feature
+    include_auth: true
+    include_chat: false
+    server_port: 5174
+
+keycloak:
+  port: 18080
+  realm: "app"
+  client_id: "multi-frontend-demo"

@@ -196,8 +196,53 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Accept Tailwind CSS 4.3's `mauve`, `olive`, `mist` and `taupe` as the
   `nuxt-ui` colour scheme.
 
+### Several frontends per project
+
+- A project can declare several frontends: `frontends:` in the stack file, as
+  `backends:` is ([ADR-012](docs/architecture-decisions/ADR-012-a-list-of-frontends.md)).
+  The first is the primary and keeps the compose service `frontend`, the host
+  `app.localhost` and every Helm name it had; its folder is `apps/<name>`, with
+  the name `frontend` by default. Each further one (named `frontend-<i>` by
+  default) renders into `apps/<name>` and is served on `<name>.localhost`
+  (Helm: `<name>.<ingress.host>`). Every frontend takes its pages from
+  `features`: absent is every backend feature, `[]` none, a list those pages.
+  See `multi-frontend.yaml`.
+- Fragments and components land in every app whose framework and UI kit can
+  take them; a component only where its whole closure renders.
+  The Nuxt UI agent tooling (skill, `.mcp.json`, `.codex/config.toml`) comes
+  with any app on Nuxt UI.
+- Compose and Helm deploy every app; backend routes answer on every app host.
+  The Helm chart gains `templates/frontends.yaml`, which renders nothing for one
+  frontend, and a `frontends:` values map, written only with further apps. The
+  gatekeeper resolves the first label of each further app's host
+  (`GATEKEEPER_FRONTEND_HOST_LABELS`) to its admin realm and default tenant, as
+  it does for `app`, instead of a realm of that name.
+- The quality recipe moves to version 2 and records `frontends`; `--json` adds
+  `frontends`; every app is a quality subject;
+  `scripts/check_generated_quality.py` takes `--extra-frontend NAME[:KIT]` and
+  a two-app Vue lane runs it.
+- `ProjectConfig(frontend=...)` is replaced by `frontends=[...]`; `frontend`
+  stays a property, as `backend` is.
+
+### Breaking — manifest schema v4 → v5
+
+- `forge.toml` records several frontends in a `[[forge.frontends]]` array,
+  primary first, beside `[forge.frontend]`, which keeps the primary. A project
+  with one frontend writes no array. V4 manifests read as a list of one; the
+  re-stamp is automatic. Callers that pin the manifest schema version must
+  update; forge itself needs no action.
+
 ### Fixed
 
+- Template updates re-render every app of a framework and every backend of a
+  language, not only the first match; a recorded app that is gone is skipped
+  instead of being replaced by another app. A template's recorded version
+  moves only when each of its re-renders applied (or left sidecars).
+- Unit flags (`--frontend`, `--backend-name`, `--features`, ...) beside a
+  `frontends:` or `backends:` list, a `--platform` preset's included, are
+  refused instead of silently ignored.
+- `frontend.features` in a stack file is read; it was dropped.
+- The Svelte template accepts an empty `features` list.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

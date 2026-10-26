@@ -385,6 +385,58 @@ kit it uses, unless the project has the AI chat:
   served as before, without a policy. The chat's MCP panels load remote
   origins in frames, which the policy would block.
 
+### Several frontends per project (unreleased)
+
+A project can list several frontends under `frontends:`
+([ADR-012](docs/architecture-decisions/ADR-012-a-list-of-frontends.md)). A
+project with one frontend keeps its apps, services and routes. On the next
+`forge --update` the recipe gains `frontends`, `forge.toml` is re-stamped to
+v5, the generated gatekeeper's `config.py` and `tenant_config.py` gain the
+host-label setting, and a Kubernetes chart gains two pieces that render
+nothing with one frontend.
+
+- **`forge.toml` moves to schema v5.** A v4 manifest reads as a list of one
+  frontend and is re-stamped to v5, unchanged apart from the version number.
+  With two or more frontends a `[[forge.frontends]]` array lists them, the
+  primary first; `[forge.frontend]` keeps the primary. Tools that read
+  `[forge.frontend]` keep working; tools that pin `schema_version = 4` must
+  accept 5. An older forge refuses a recipe written now ("Unsupported quality
+  recipe version"); on a project without a recipe it reads a v5
+  manifest but sees only the primary, re-renders only that app and re-stamps
+  the manifest as v4 without the array. Run one forge version on a project.
+- **The recipe moves to version 2.** `.forge/quality.json` lists every app under
+  `frontends`, beside `frontend`, and records each frontend's `name`. Edit the
+  primary under `config.frontend`, as before (its copy in `frontends` follows on
+  the next update), and further apps under `config.frontends`. A version 1
+  recipe reads as one frontend, and its `features: []` reads as "every backend
+  feature", the meaning it had; the next update writes version 2.
+- **`features` on a frontend is now read.** In a stack file, an absent key
+  means every backend feature, `[]` no CRUD pages and a list those pages; each
+  listed page must be a backend feature or the file is refused. The builder
+  used to drop the key, so a stack file that sets it to a non-empty list now
+  generates only those pages.
+- **Unit flags beside a list are refused.** `--backend-name`, `--features` and
+  the other backend flags beside a `backends:` list, and the frontend flags
+  beside a `frontends:` list, used to be ignored; they now stop with an error.
+  A `--platform` preset brings its own `backends:` list, so a backend flag beside
+  a preset stops too; set the value in a config file. A `backends:` or
+  `frontends:` key holding a mapping instead of a list is refused too, where
+  `backends:` used to fall back to one default backend.
+- **Every Kubernetes project's chart gains two inert pieces.**
+  `templates/frontends.yaml` renders the further apps from a `frontends:` values
+  map, and the gatekeeper container takes `GATEKEEPER_FRONTEND_HOST_LABELS` from
+  their hosts; with one frontend the map is absent and both render nothing.
+- **The generated gatekeeper reads `GATEKEEPER_FRONTEND_HOST_LABELS`.** Empty
+  (the default) keeps its behaviour. A gatekeeper you run yourself in front of
+  several apps needs the first label of each further app's host listed there.
+- **Python API.** `ProjectConfig(frontend=...)` is replaced by
+  `ProjectConfig(frontends=[...])`; `config.frontend` still returns the primary
+  and can still be assigned. `FrontendConfig.features` defaults to `None`
+  (every backend feature), and an app's pages are
+  `fc.page_features(config.all_features)`.
+- **Template updates reach every backend.** A template bump now re-renders each
+  backend of that language, not only the first one.
+
 ## 1.0 → 1.1
 
 The 1.1 series opens the 12-month post-1.0 roadmap. Early alphas are additive except where called out below.
