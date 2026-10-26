@@ -221,10 +221,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `frontends`; every app is a quality subject;
   `scripts/check_generated_quality.py` takes `--extra-frontend NAME[:KIT]` and
   a two-app Vue lane runs it.
-- `ProjectConfig(frontend=...)` is replaced by `frontends=[...]`; `frontend`
-  stays a property, as `backend` is.
+- `ProjectConfig` takes `frontends=[...]` only, as it takes `backends=[...]`;
+  `frontend` stays a property for the primary. `ProjectConfig` is internal,
+  outside the plugin API that SemVer covers (`forge/api.py`), and forge's own
+  callers and stack files are unaffected (UPGRADING).
 
-### Breaking — manifest schema v4 → v5
+### Changed — manifest schema v4 → v5
 
 - `forge.toml` records several frontends in a `[[forge.frontends]]` array,
   primary first, beside `[forge.frontend]`, which keeps the primary. A project
@@ -232,16 +234,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   re-stamp is automatic. Callers that pin the manifest schema version must
   update; forge itself needs no action.
 
-### Breaking — unit flags beside a list
+### Fixed
 
 - Unit flags (`--frontend`, `--backend-name`, `--features`, `--backend-port`,
   ...) beside a `frontends:` or `backends:` list, a `--platform` preset's
-  included, stop with an error; they used to be ignored silently. A
-  `backends:` or `frontends:` key holding a mapping is refused too, where
-  `backends:` fell back to one default backend. Scripts that passed such flags
-  set the values in a config file instead (UPGRADING).
-
-### Fixed
+  included, stop with an error instead of being ignored, which generated a
+  project other than the one asked for. A `backends:` or `frontends:` key
+  holding a mapping is refused instead of being replaced by one default
+  backend. Set such values in the config file (UPGRADING).
 
 - Template updates re-render every app of a framework and every backend of a
   language, not only the first match; a recorded app that is gone is skipped
