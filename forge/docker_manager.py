@@ -343,6 +343,8 @@ DEV_STACK_COMMAND = (
     "docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch"
 )
 
+DEV_OVERLAY = "docker-compose.dev.yaml"
+
 # The lockfile each package manager writes, which a dependency change rebuilds.
 _LOCKFILES = {
     "npm": "package-lock.json",
@@ -350,6 +352,11 @@ _LOCKFILES = {
     "yarn": "yarn.lock",
     "bun": "bun.lockb",
 }
+
+
+def dev_server_files(app_dir: str) -> tuple[str, ...]:
+    """The files ``frontend.dev_server`` makes forge write, relative to the project root."""
+    return (DEV_OVERLAY, f"{app_dir.strip('/') or 'apps/frontend'}/vite.dev.config.ts")
 
 
 def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
@@ -371,7 +378,7 @@ def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
             "lockfile": _LOCKFILES.get(fc.package_manager, "package-lock.json"),
         }
     )
-    overlay_path = project_root / "docker-compose.dev.yaml"
+    overlay_path = project_root / DEV_OVERLAY
     overlay_path.write_text(output, encoding="utf-8")
     return overlay_path
 
