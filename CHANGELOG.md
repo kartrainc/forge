@@ -202,7 +202,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `backends:` is ([ADR-012](docs/architecture-decisions/ADR-012-a-list-of-frontends.md)).
   The first is the primary and keeps the compose service `frontend`, the host
   `app.localhost` and every Helm name it had; its folder is `apps/<name>`, with
-  the name `frontend` by default. Each further one (named `frontend-<i>` by
+  the name `frontend` by default (a name is set on a `frontends:` entry; the
+  single `frontend:` table keeps `apps/frontend`). Each further one (named `frontend-<i>` by
   default) renders into `apps/<name>` and is served on `<name>.localhost`
   (Helm: `<name>.<ingress.host>`). Every frontend takes its pages from
   `features`: absent is every backend feature, `[]` none, a list those pages.

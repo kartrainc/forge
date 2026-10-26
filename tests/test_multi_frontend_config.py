@@ -297,15 +297,13 @@ class TestBuilder:
         flagged = _build_config(_args(platform="monolithic", features="items,orders"), {})
         assert [bc.features for bc in flagged.backends] == [bc.features for bc in plain.backends]
 
-    def test_the_single_table_and_a_list_of_one_name_the_app_alike(self):
-        for cfg in (
-            {"project_name": "demo", "frontend": {"framework": "vue", "name": "web"}},
-            {"project_name": "demo", "frontends": [{"framework": "vue", "name": "web"}]},
-        ):
-            frontend = _build_config(_args(), cfg).frontend
-            assert frontend.name == "web"
-        default = _build_config(_args(), {"project_name": "demo", "frontend": {"framework": "vue"}})
-        assert default.frontend.name == "frontend"
+    def test_a_name_is_read_from_a_list_entry_only(self):
+        # The single frontend: table keeps the app at apps/frontend, as it
+        # always has; frontends: is new and names its entries.
+        single = {"project_name": "demo", "frontend": {"framework": "vue", "name": "web"}}
+        assert _build_config(_args(), single).frontend.name == "frontend"
+        listed = {"project_name": "demo", "frontends": [{"framework": "vue", "name": "web"}]}
+        assert _build_config(_args(), listed).frontend.name == "web"
 
     def test_flags_still_override_the_single_table(self):
         cfg = _build_config(

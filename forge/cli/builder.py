@@ -134,8 +134,6 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "layout": "layout",
     "ui_kit": "ui_kit",
 }
-# CLI flags that describe the single frontend / backend. Beside a ``frontends:``
-# / ``backends:`` list there is no single unit for them to describe.
 
 
 def _backend_language(value: object) -> BackendLanguage:
@@ -319,9 +317,11 @@ def _build_frontend_from_cfg(
     table = r.cfg.get("frontend")
     table = table if isinstance(table, dict) else {}
     features = _explicit_features(table)
-    # ``name`` has no CLI flag; the table names the app as a list entry does.
-    name = PRIMARY_FRONTEND_NAME if table.get("name") is None else str(table["name"])
-    frontend = _frontend_config(framework, name, get, project_name, description, features=features)
+    # The single table keeps the app at apps/frontend, as it always has; a
+    # name is set on an entry of the frontends: list.
+    frontend = _frontend_config(
+        framework, PRIMARY_FRONTEND_NAME, get, project_name, description, features=features
+    )
     return frontend, frontend.include_auth
 
 

@@ -448,12 +448,14 @@ nothing with one frontend.
   the next update), and further apps under `config.frontends`. A version 1
   recipe reads as one frontend, and its `features: []` reads as "every backend
   feature", the meaning it had; the next update writes version 2.
-- **`features` and `name` on a frontend are now read.** In a stack file, an
-  absent `features` means every backend feature, `[]` no CRUD pages and a list
-  those pages; each listed page must be a backend feature or the file is
-  refused. `name` sets the app's folder (`apps/<name>`). Both keys were ignored
-  before, so a `frontend:` table that already set one of them now takes it into
-  account: check such a stack file before updating.
+- **`features` on a frontend is now read.** In a stack file, an absent key
+  means every backend feature, `[]` no CRUD pages and a list those pages; each
+  listed page must be a backend feature or the file is refused. The builder
+  used to drop the key, so a `frontend:` table that already set it now takes it
+  into account: check such a stack file before updating.
+- **`name` exists on `frontends:` entries only.** It sets the app's folder
+  (`apps/<name>`). The single `frontend:` table ignores it, as before, and keeps
+  the app at `apps/frontend`.
 - **A `frontends:` list reads like a `backends:` list.** Its entries give every
   value, so frontend CLI flags beside it have no effect, as backend flags have
   none beside `backends:`; a `frontends:` value that is not a list falls back to

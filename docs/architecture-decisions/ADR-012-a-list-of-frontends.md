@@ -42,8 +42,10 @@ the generator's provenance and update path.
    apps, services and routes; only its records and two inert chart pieces
    change (UPGRADING).
 3. **One new key, `name`.** It names the app's folder (`apps/<name>`) and
-   package. The primary defaults to `frontend` and, renamed, moves its folder
-   but keeps its compose service `frontend` and its host `app.localhost`;
+   package. It is set on a `frontends:` entry; the single `frontend:` table
+   ignores it, as it always has, and keeps `apps/frontend`. The primary defaults
+   to `frontend` and, named otherwise in a list, moves its folder but keeps its
+   compose service `frontend` and its host `app.localhost`;
    further entries default to `frontend-<i>` (`frontend_<i>` for Flutter) on
    port `5173 + i`. The name's DNS form (`_` → `-`, for Flutter's snake-case
    names) names a further app's compose service and router, its Helm resources
