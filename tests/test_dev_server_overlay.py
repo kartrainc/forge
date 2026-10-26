@@ -100,19 +100,17 @@ class TestOverlay:
         frontend = _frontend(_load(on / "docker-compose.dev.yaml"))
         assert frontend["build"] == {"target": "dev"}
         assert frontend["volumes"] == {"__tag__": "reset", "value": []}
-        assert frontend["labels"]["__tag__"] == "override"
+        assert "__tag__" not in frontend["labels"]  # merged key by key, not replaced
         assert frontend["healthcheck"]["__tag__"] == "override"
         assert "ports" not in frontend
 
-    def test_the_labels_are_the_base_labels_with_only_the_port_changed(self, on: Path) -> None:
+    def test_the_only_label_it_sets_is_the_service_port(self, on: Path) -> None:
+        # Labels merge key by key, so the rule, the entrypoint and any host another
+        # overlay added to the router are inherited, not rewritten.
+        labels = _frontend(_load(on / "docker-compose.dev.yaml"))["labels"]
+        assert labels == {"traefik.http.services.frontend.loadbalancer.server.port": "5173"}
         base = _frontend(yaml.safe_load((on / "docker-compose.yml").read_text(encoding="utf-8")))
-        dev = _frontend(_load(on / "docker-compose.dev.yaml"))["labels"]["value"]
-        port = "traefik.http.services.frontend.loadbalancer.server.port="
-        assert [label for label in dev if not label.startswith(port)] == [
-            label for label in base["labels"] if not label.startswith(port)
-        ]
-        assert [label for label in dev if label.startswith(port)] == [f"{port}5173"]
-        assert [label for label in base["labels"] if label.startswith(port)] == [f"{port}80"]
+        assert "traefik.http.services.frontend.loadbalancer.server.port=80" in base["labels"]
 
     def test_the_health_check_is_node_on_the_dev_port(self, on: Path) -> None:
         test = _frontend(_load(on / "docker-compose.dev.yaml"))["healthcheck"]["value"]["test"]
@@ -228,12 +226,20 @@ def test_the_merged_compose_file_serves_vite_behind_the_same_router(on: Path) ->
     """``docker compose config`` with both files: nginx's mount and port are gone."""
     docker = shutil.which("docker")
     assert docker, "the Docker CLI is required for this test"
+    # A downstream overlay that adds a host to the router, applied before the dev overlay.
+    (on / "downstream.yaml").write_text(
+        "services:\n  frontend:\n    labels:\n"
+        '      traefik.http.routers.frontend.rule: "Host(`app.localhost`) || Host(`app.example.test`)"\n',
+        encoding="utf-8",
+    )
     result = subprocess.run(
         [
             docker,
             "compose",
             "-f",
             "docker-compose.yml",
+            "-f",
+            "downstream.yaml",
             "-f",
             "docker-compose.dev.yaml",
             "config",
@@ -251,7 +257,11 @@ def test_the_merged_compose_file_serves_vite_behind_the_same_router(on: Path) ->
     assert "volumes" not in frontend or not frontend["volumes"]
     labels = frontend["labels"]
     assert labels["traefik.http.services.frontend.loadbalancer.server.port"] == "5173"
-    assert labels["traefik.http.routers.frontend.rule"] == "Host(`app.localhost`)"
+    # the host another overlay added survives, and only the port moved
+    assert labels["traefik.http.routers.frontend.rule"] == (
+        "Host(`app.localhost`) || Host(`app.example.test`)"
+    )
+    assert labels["traefik.enable"] == "true"
     assert frontend["healthcheck"]["test"][:3] == ["CMD", "node", "-e"]
     assert [rule["action"] for rule in frontend["develop"]["watch"]] == [
         "sync",

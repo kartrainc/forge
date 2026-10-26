@@ -19,7 +19,7 @@ change. Tracked as KR-59.
 | Option | `FrontendConfig.dev_server`, boolean, default `false`, Vue first, Flutter refused; carried like `ui_kit` |
 | Dockerfile | with the field on: `deps → source → dev` and `source → builder → nginx`; off: unchanged |
 | Runtime user | `dev` runs non-root; the tree and Vite's cache directories are writable by it; `COPY --chown` |
-| Overlay | generated `docker-compose.dev.yaml`; `volumes: !reset []`, `labels` and `healthcheck: !override`; Compose ≥ 2.39.4 (`initial_sync`) |
+| Overlay | generated `docker-compose.dev.yaml`; `volumes: !reset []` and `healthcheck: !override`, and only the service-port label (labels merge by key, so a downstream overlay's hosts survive); Compose ≥ 2.39.4 (`initial_sync`) |
 | Sync | Compose Watch: one `sync` rule over the app directory with `initial_sync: true`, and separate `rebuild` rules for `package.json` and the lockfile; Vite restarts itself on config changes |
 | Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; `allowedHosts` set to `app.localhost` after the project's config (Vite still admits localhost, `*.localhost` and IPs); `strictPort`; no polling unless measured |
 | Auth | dev behaves like the built stack: the gatekeeper's browser paths are not routed; `VITE_AUTH_DISABLED` is not overridden; the Vite port is not published, so the origin, cookie and realm redirect URIs are unchanged |
@@ -99,7 +99,7 @@ gatekeeper overlay as its own concern.
 | --- | --- |
 | render, off | Dockerfile, Compose and `.dockerignore` byte-identical to the base for every package manager; the recipe gains `dev_server = false`; `forge.toml` and every other file are unchanged |
 | render, on | stages `deps → source → dev`, `source → builder → nginx`; nginx last; one `COPY . .`; `dev` non-root with `COPY --chown` |
-| merged Compose | `docker compose config` with both files: the dev service has no nginx volume, the labels equal the base's except the service port, a Node health check, `develop.watch` with `initial_sync` and the expected rules |
+| merged Compose | `docker compose config` with both files: the dev service has no nginx volume, only the service-port label is set and a downstream overlay's extra host survives, a Node health check, `develop.watch` with `initial_sync` and the expected rules |
 | wrapper | object, function and promise exports resolve; the guarded keys are set after the project's config, not merged; at run time a project's `allowedHosts: true` still refuses `evil.example` (external names; `*.localhost` is Vite's own allowance) |
 | updates | false → true, true → false (no stale files), edited overlay and edited Dockerfile give sidecars |
 | options | `--dev-server`, the stack key and the interactive prompt (Vue only) reach the config; asking for it without a Vue frontend is an error; Svelte is not asked |

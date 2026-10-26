@@ -39,8 +39,10 @@ What it learned shapes this decision:
   volumes by target and labels by entry, so omission deletes nothing.
 - The base `frontend` service has **no** health check. The overlay adds one;
   a slim Node image has no `wget` or `curl`.
-- Vite rejects the stack's hostnames unless `server.allowedHosts` lists them (it
-  always admits `localhost`, `*.localhost` and IP addresses).
+- Vite refuses an external hostname unless it is admitted. It admits `localhost`,
+  `*.localhost` (so `app.localhost` already passes) and IP addresses on its own, and
+  any host named in `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`; the wrapper lists
+  `app.localhost` anyway so the host Traefik routes here is stated in the project.
 - No Content-Security-Policy applies, because nginx is not in the path.
 
 ## Decision
@@ -73,19 +75,22 @@ What it learned shapes this decision:
    tree, including Vite's cache directories, is writable by that user; the
    files arrive with `COPY --chown`.
 3. **A generated `docker-compose.dev.yaml` overrides the `frontend` service.**
-   It sets the build target to `dev`, a Node-based health check, and the Traefik
-   labels. The `dev` stage's `CMD` runs the project's own `dev` script with
-   `--host 0.0.0.0` and `--config vite.dev.config.ts`, per package manager, so
-   the image runs without Compose too. The overlay replaces inherited values
-   explicitly: `volumes: !reset []`, `labels: !override`,
-   `healthcheck: !override`. Because `!override` replaces all labels, the
-   overlay writes out every label the frontend router still needs, from the same
-   values the base Compose template reads (`app.localhost`, the router name
-   `frontend`), with the service port set to the frontend's `server_port`; a
-   test compares the two. The minimum is **Docker Compose 2.39.4**:
-   `develop.watch.initial_sync` is listed in that release's notes
-   (docker/compose#13232), and it is later than `!override` (2.24.4) and `!reset` (2.24), which forge's
-   Compose boot test already needs. `forge doctor` reports an older Compose.
+   It sets the build target to `dev`, a Node-based health check, and the one
+   Traefik label that differs. The `dev` stage's `CMD` runs the project's own
+   `dev` script with `--host 0.0.0.0` and `--config vite.dev.config.ts`, per
+   package manager, so the image runs without Compose too. The overlay replaces
+   what nginx needed: `volumes: !reset []` and `healthcheck: !override`. It does
+   not replace the labels. Labels merge key by key, so the overlay sets only
+   `traefik.http.services.frontend.loadbalancer.server.port` to the frontend's
+   `server_port`, and the router's rule, entrypoint and any host another overlay
+   added stay as they are. (The first version overrode all labels and wrote
+   forge's own back; applied to Kartra it narrowed the router's
+   `Host(app.localtest.me) || Host(app.localhost)` to `Host(app.localhost)`.)
+   A test merges a downstream overlay's extra host and expects it to survive.
+   The minimum is **Docker Compose 2.39.4**: `develop.watch.initial_sync` is
+   listed in that release's notes (docker/compose#13232), and it is later than
+   `!override` (2.24.4) and `!reset` (2.24), which forge's Compose boot test
+   already needs. `forge doctor` reports an older Compose.
 4. **Compose Watch is the sync mechanism, not a bind mount.** The overlay
    declares `develop.watch`:
    - one `sync` rule, with `initial_sync: true`, from the frontend's directory

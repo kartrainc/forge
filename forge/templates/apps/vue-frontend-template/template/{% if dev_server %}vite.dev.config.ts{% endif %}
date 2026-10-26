@@ -18,10 +18,12 @@ export default async (env: ConfigEnv): Promise<UserConfig> => {
       host: '0.0.0.0',
       // The port is the one the router targets: fail rather than move.
       strictPort: true,
-      // The host Traefik routes to this service; other external names are refused
-      // (Vite also always admits localhost, *.localhost and IP addresses). Set
-      // after the project's config, not merged into it: a merge concatenates
-      // host lists and keeps `true`, so the project could widen the list.
+      // The host Traefik routes to this service. Set after the project's config, not
+      // merged into it: a merge concatenates host lists and keeps `true`, so the
+      // project could widen the list. The wrapper prevents the project's
+      // `allowedHosts` from widening the list; Vite's built-in allowances
+      // (localhost, *.localhost, IP addresses) and the ones from
+      // `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` still apply.
       allowedHosts: ['app.localhost'],
     },
   }

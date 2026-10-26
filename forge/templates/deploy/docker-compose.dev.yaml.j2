@@ -11,11 +11,10 @@ services:
     build:
       target: dev
     volumes: !reset []
-    labels: !override
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`app.localhost`)"
-      - "traefik.http.routers.frontend.entrypoints=web"
-      - "traefik.http.services.frontend.loadbalancer.server.port={{ frontend_port }}"
+    # Only the port the router targets changes. Labels merge key by key, so the rule,
+    # the entrypoint and any host another overlay added to the router stay as they are.
+    labels:
+      traefik.http.services.frontend.loadbalancer.server.port: "{{ frontend_port }}"
     healthcheck: !override
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:{{ frontend_port }}/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 5s

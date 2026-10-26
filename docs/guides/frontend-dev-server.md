@@ -30,9 +30,10 @@ It adds three things:
 - `apps/<frontend>/vite.dev.config.ts`, which wraps your own `vite.config.ts`
   (an object, a promise or a function of `ConfigEnv`), listens on all
   interfaces, refuses to move off its port, and lists `app.localhost` as its host.
-  Vite refuses other external hostnames but always admits `localhost`, `*.localhost`
-  and IP addresses; the router sends only `app.localhost` here and the port is not
-  published. A project's own `allowedHosts` cannot widen the list.
+  The wrapper prevents your own `allowedHosts` from widening the list; Vite's
+  built-in allowances (`localhost`, `*.localhost`, IP addresses) and any host in the
+  `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable still apply. The
+  router sends only `app.localhost` here and the port is not published.
 
 ## Run it
 
