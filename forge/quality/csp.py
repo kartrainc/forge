@@ -2,11 +2,20 @@
 
 With ``security.csp`` on, nginx serves the production build under the policy
 of :mod:`forge.frontend_csp`. This check builds the app, serves ``dist/`` the
-same way (``scripts/serve-csp.mjs`` reads the policy from ``nginx.conf`` and
-replaces the nonce placeholder per response), runs the Playwright suites
-against it and fails on any violation the browser reports. A connect-src
-violation also catches an icon fetched from the Iconify API at runtime instead
-of bundled.
+same way (``scripts/serve-csp.mjs`` reads the policy from ``nginx.conf``, or
+from the file a project names in ``csp-check.json``, and replaces the nonce
+placeholder per response), runs the Playwright suites against it and fails on
+any violation the browser reports. A connect-src violation also catches an
+icon fetched from the Iconify API at runtime instead of bundled. The build
+keeps the project's authentication setting; the suites answer the session in
+the page. Which suites run, and with which builds, is the project's
+``playwright.csp.config.ts`` to say.
+
+The check also proves that reports reach it, since an empty report file
+would otherwise pass: the script opens a canary page of its own once, under a
+fixed policy that blocks the page's one script, whatever the project's policy
+admits. The app's pages are served untouched. Without the canary's report the
+check fails.
 
 Two reports are admitted for a ``nuxt-ui`` project, each a ``<style>`` element a
 Nuxt UI 4.12 dependency inserts without the nonce in Vue mode. The browser
@@ -35,6 +44,9 @@ ADMITTED_STYLE_SAMPLES = {
     "*,*::before,*::after{-webkit-transition:": "VueUse's colour-mode transition guard",
 }
 
+#: The script of the canary page ``serve-csp.mjs`` opens to prove reporting.
+CANARY = "/__csp-canary.js"
+
 
 def admitted(report: dict, ui_kit: str) -> str | None:
     """Name the known upstream element a report is about, or ``None``."""
@@ -47,12 +59,29 @@ def admitted(report: dict, ui_kit: str) -> str | None:
     return ADMITTED_STYLE_SAMPLES.get(report.get("script-sample", ""))
 
 
+def is_canary(report: dict) -> bool:
+    """True for the report of the canary script that proves reports arrive."""
+    return str(report.get("blocked-uri", "")).endswith(CANARY)
+
+
+def _serves_the_canary(service: Path) -> bool:
+    """True when the project's ``scripts/serve-csp.mjs`` opens the canary page.
+
+    A script forge wrote before the canary existed does not; an update brings
+    the current one while the script is untouched, a sidecar when it is edited.
+    """
+    script = service / "scripts" / "serve-csp.mjs"
+    return script.is_file() and "/__csp-canary" in script.read_text(encoding="utf-8")
+
+
 def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn") -> dict:
     """Build ``service``, run its browser suites under the policy, judge the reports.
 
     Passes only when Playwright exits cleanly with tests run, no failed or flaky
-    test and no global error, and every report is admitted for ``ui_kit``.
-    Returns ``{"passed", "tests", "violations", "admitted"}``. A service without
+    test and no global error, the canary's report arrived (when the project's
+    serve script opens the canary; an older one is a warning), and every other
+    report is admitted for ``ui_kit``. Returns ``{"passed", "tests",
+    "violations", "admitted", "canary"}``. A service without
     ``playwright.csp.config.ts`` (the option off) is reported as skipped.
     """
     if not (service / "playwright.csp.config.ts").is_file():
@@ -63,8 +92,8 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
     env = os.environ.copy()
     env.pop("FORGE_BROWSER_COVERAGE", None)
     env.pop("FORGE_COVERAGE", None)
-    # No gateway serves /auth/* here; the suites mock the API in the browser.
-    env["VITE_AUTH_DISABLED"] = "true"
+    # The build keeps the project's authentication setting, as the browser
+    # suites run it (forge.quality.runner.run_browser).
     env["FORGE_CSP_REPORT"] = str(reports)
     subprocess.run(
         ["npm", "run", "build"],
@@ -100,8 +129,12 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
     lines = reports.read_text(encoding="utf-8").splitlines() if reports.is_file() else []
     violations: list[dict] = []
     known: dict[str, int] = {}
+    canary = 0
     for line in lines:
         report = json.loads(line)
+        if is_canary(report):
+            canary += 1
+            continue
         why = admitted(report, ui_kit)
         if why:
             known[why] = known.get(why, 0) + 1
@@ -119,12 +152,30 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
                     )
                 }
             )
-    return {
-        "passed": passed_tests and not violations,
+    # A script that predates the canary cannot prove collection; that is a
+    # warning naming the fix, not a failure, until the project takes the
+    # current script.
+    canary_required = _serves_the_canary(service)
+    outcome = {
+        "passed": passed_tests and (canary > 0 or not canary_required) and not violations,
         "tests": statistics.get("expected", 0),
         "failed_tests": statistics.get("unexpected", 0),
         "exit_code": completed.returncode,
         "errors": len(errors),
         "violations": violations,
         "admitted": known,
+        "canary": canary,
     }
+    if not canary and not canary_required:
+        outcome["warning"] = (
+            "scripts/serve-csp.mjs predates the canary, so the check cannot prove that reports "
+            "reach it: take forge's current script (merge its .forge-merge sidecar, or delete "
+            "it and run forge --update)"
+        )
+    elif not canary:
+        outcome["error"] = (
+            "no report reached the check: the canary page went unreported (Chromium did "
+            "not start for scripts/serve-csp.mjs, or its reports never reached the collector; "
+            "see the script's messages on stderr)"
+        )
+    return outcome

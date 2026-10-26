@@ -1,4 +1,5 @@
 import { mockHealth, expectHealthyDashboard } from './health';
+import { mockSession } from './session';
 import { expect, test } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -18,6 +19,7 @@ test('application boots and navigates preferences in a real browser', async ({ p
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
     await mockHealth(page);
+    await mockSession(page);
     await page.goto('/');
     await expectHealthyDashboard(page);
     // Nuxt UI's palette applies: under the content-security policy only its

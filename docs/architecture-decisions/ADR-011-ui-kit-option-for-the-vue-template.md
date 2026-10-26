@@ -77,12 +77,19 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
    Nuxt UI's palette, plus a `csp-nonce` meta tag with a `content` attribute
    for vaul-vue. zod parses without `eval`. Both Vue lanes run the browser
    suites against the production build under the policy and fail on any
-   violation, with two exceptions named below. They run with auth disabled,
-   like every browser suite of the lanes, since nothing serves `/auth/*`
-   there, so the sign-in flow is not run under the policy. That flow is a
-   same-origin `fetch`, which `connect-src 'self'` admits, and navigations,
-   which a policy does not govern. The policy covers the Vue template without
-   the AI chat, which is what the lanes prove under it.
+   violation, with two exceptions named below. They run with the project's
+   authentication setting, like every browser suite of the lanes; nothing
+   serves `/auth/*` there, so the suites answer the session in the page
+   (`tests/e2e/session.ts`). The sign-in flow through the gateway and Keycloak
+   is a consumer's live suite to run under its real policy. A project that
+   keeps its own policy in a header template names it in `csp-check.json`,
+   and the check fails unless a canary page of its own, under a fixed policy,
+   is reported.
+   `connect-src` admits the page's own origin and an external API's, not
+   `ws:` or `wss:` at large. The policy covers the Vue
+   template without the AI chat, which is what the lanes prove under it.
+   (Revised 2026-10-26: the browser suites ran with authentication forced off,
+   which broke a consumer's specs that mock the session.)
 
 ### What the policy leaves out
 

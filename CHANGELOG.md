@@ -258,6 +258,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   nothing included and which named an undefined nginx variable, is no longer
   emitted. Both Vue lanes run the browser suites against the production build
   under the policy and fail on any violation.
+- Run the Vue and Svelte browser suites, and the content-security check, with
+  the project's own authentication setting instead of forcing it off, which
+  made specs that mock the session, signed in or out, fail. The template's
+  specs answer `/auth/userinfo` in the page with `tests/e2e/session.ts`.
+- Stop admitting `ws:` and `wss:` in the frontend policy's `connect-src`: either
+  scheme alone admitted every host, and the template opens no WebSocket.
+- Let the content-security check serve a policy a project keeps in a header
+  template of its own, named in `csp-check.json` with the values of its
+  variables; both that and an inline policy in `nginx.conf` is an error. The
+  check replaces the policy's own report directives with its collector, so a
+  `report-to` cannot hide a violation from it, and fails unless a canary page
+  of its own, under a fixed policy, is reported: an empty report file used to
+  pass.
 - Generate `deploy/compose/init-db.sh` executable. Postgres runs an init script
   it sees as executable and sources the rest; Docker Desktop's file sharing
   reports a bind-mounted 0644 file as executable but refuses to run it, so on

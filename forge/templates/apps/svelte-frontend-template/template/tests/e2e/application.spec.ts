@@ -1,4 +1,5 @@
 import { mockHealth, expectHealthyDashboard } from './health';
+import { mockSession } from './session';
 import { expect, test } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +9,7 @@ test('application boots in a real browser', async ({ page }, testInfo) => {
   page.on('pageerror', error => errors.push(error.message));
   try {
     await mockHealth(page);
+    await mockSession(page);
     await page.goto('/');
     await expectHealthyDashboard(page);
     // SvelteKit can deliver server-rendered HTML before client hydration.

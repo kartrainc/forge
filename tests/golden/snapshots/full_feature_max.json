@@ -53,7 +53,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 1362,
+      "size": 1355,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -1233,12 +1233,12 @@
       "sha256": "e309286e33878d5e"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 2058,
-      "sha256": "c1eb97a76e473daf"
+      "size": 2128,
+      "sha256": "07edb98af8299473"
     },
     "apps/frontend/tests/e2e/crud.ts": {
-      "size": 4566,
-      "sha256": "c3516784c8a63a53"
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1251,6 +1251,10 @@
     "apps/frontend/tests/e2e/orders.spec.ts": {
       "size": 71,
       "sha256": "cc281f01080a837f"
+    },
+    "apps/frontend/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
     },
     "apps/frontend/tests/integration/button.test.ts": {
       "size": 504,
@@ -1633,7 +1637,7 @@
       "sha256": "1382f086b4a75dde"
     },
     "forge.toml": {
-      "size": 183752,
+      "size": 184179,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -1757,7 +1761,7 @@
       "sha256": "459f95079ae5c647"
     },
     "services/api/.copier-answers.yml": {
-      "size": 550,
+      "size": 543,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -2577,7 +2581,7 @@
       "sha256": "d3c7f25811409282"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 598,
+      "size": 591,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {
