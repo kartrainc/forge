@@ -20,3 +20,4 @@ proposals.
 | [007](ADR-007-separate-frontend-templates.md) | Three separate frontend templates instead of one with adapters | Accepted |
 | [008](ADR-008-codex-review-worktree.md) | Codex review runs in a separate git worktree | Accepted |
 | [011](ADR-011-ui-kit-option-for-the-vue-template.md) | A UI kit option for the Vue template | Accepted |
+| [012](ADR-012-a-list-of-frontends.md) | A list of frontends | Accepted |

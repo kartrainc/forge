@@ -1,0 +1,170 @@
+{{- /* Frontends beside the primary (.Values.frontends, keyed by name; absent
+       for a project with one frontend, which renders nothing here).
+
+       Each app is built like the primary in frontend.yaml: an nginx ConfigMap,
+       a Deployment and a Service named <release>-<name>. Each is served on its
+       own host, <name>.<ingress.host> unless the entry sets `host`, by two
+       Ingresses: <release>-<name>-api routes the /api/<backend> paths of
+       ingress.paths with ingress.annotations, and <release>-<name>-web routes
+       / to the app without them, since nginx-ingress applies an Ingress's
+       rewrite-target to every one of its paths.
+
+       Every name of an app starts from <release>-<name>. Longer than 57
+       characters, it is cut to 48 and given the first 8 characters of its
+       SHA-256, so two apps never share a name, and the -nginx, -api and -web
+       suffixes still fit Kubernetes' 63-character limit. */ -}}
+{{- range $name, $fe := .Values.frontends }}
+{{- $fullname := printf "%s-%s" $.Release.Name $name }}
+{{- if gt (len $fullname) 57 }}
+{{- $fullname = printf "%s-%s" ($fullname | trunc 48 | trimSuffix "-") ($fullname | sha256sum | trunc 8) }}
+{{- end }}
+{{- $nginx := printf "%s-nginx" $fullname }}
+{{- $host := $fe.host | default (printf "%s.%s" $name $.Values.ingress.host) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $nginx }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+data:
+  default.conf: |
+{{- if $fe.nginxConf }}
+    {{- $fe.nginxConf | nindent 4 }}
+{{- else }}
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+{{- range $header, $value := $fe.securityHeaders }}
+        add_header {{ $header }} {{ $value | quote }} always;
+{{- end }}
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+{{- with $fe.contentSecurityPolicy }}
+        location = /index.html {
+{{- range $header, $value := $fe.securityHeaders }}
+            add_header {{ $header }} {{ $value | quote }} always;
+{{- end }}
+            add_header Content-Security-Policy {{ . | quote }} always;
+            add_header Cache-Control "no-store" always;
+            sub_filter_once off;
+            sub_filter "__CSP_NONCE__" "$request_id";
+        }
+{{- end }}
+    }
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ $fe.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $fe.image.repository }}:{{ $fe.image.tag }}"
+          imagePullPolicy: {{ $fe.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $fe.port }}
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+          resources:
+            {{- toYaml $fe.resources | nindent 12 }}
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ $nginx }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+{{- if $.Values.ingress.enabled }}
+{{- if $.Values.ingress.paths }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-api" $fullname }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+  {{- with $.Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range $.Values.ingress.paths }}
+          - path: {{ .path | quote }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ printf "%s-%s" $.Release.Name .service | trunc 63 | trimSuffix "-" }}
+                port:
+                  number: 80
+          {{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-web" $fullname }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}
+                port:
+                  number: 80
+{{- end }}
+{{- end }}

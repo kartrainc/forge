@@ -643,3 +643,25 @@ async def test_refresh_cannot_switch_subject_or_tenant(runtime, monkeypatch, pat
     monkeypatch.setattr(routes, "refresh_tokens", refresh)
     assert (await r.client.get(path)).status_code == 403
     assert (await r.sessions.get(sid)).access_token == old_token
+
+
+@pytest.mark.parametrize(
+    ("host", "realm", "tenant"),
+    [
+        ("app", "app", TENANT),  # the primary frontend's host, as before
+        ("admin", "app", TENANT),  # a frontend beside it resolves the same way
+        ("portal", "app", TENANT),
+        ("acme", "acme", "acme"),  # any other label is still a realm of its own
+    ],
+)
+def test_frontend_host_labels_resolve_to_the_project_realm(monkeypatch, host, realm, tenant):
+    cfg = config.GatekeeperSettings(
+        gatekeeper_client_secret="contract-only-secret",
+        keycloak_base_url="https://issuer.test/realms",
+        gatekeeper_frontend_host_labels="admin, portal",
+        cookie_secure=False,
+    )
+    monkeypatch.setattr(config, "_instance", cfg)
+    resolved = tenant_config.get_fallback_config(host)
+    assert (resolved.realm_name, resolved.tenant_id) == (realm, tenant)
+    assert resolved.issuer_url == f"https://issuer.test/realms/{realm}"

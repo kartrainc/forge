@@ -65,6 +65,13 @@ do not use those fields as the authoritative source path. Pass `--output-dir` ex
 the current CLI default can override a config-file `output_dir`. `--dry-run` renders into a temporary
 location for inspection and does not populate the requested output directory.
 
+A project can have several frontends: list them under `frontends:` instead of
+`frontend:`. The first is the primary (`apps/frontend` on `app.localhost`);
+each further one gets `apps/<name>` on `<name>.localhost`. Every frontend takes
+its pages from `features` (omitted: every backend feature; `[]`: none). See
+[`multi-frontend.yaml`](../../multi-frontend.yaml) and
+[ADR-012](../architecture-decisions/ADR-012-a-list-of-frontends.md).
+
 For a complete topology, use a preset instead of this example:
 
 ```bash

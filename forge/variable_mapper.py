@@ -35,7 +35,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from forge.config import BACKEND_REGISTRY, BackendConfig, FrontendFramework, ProjectConfig
+from forge.config import (
+    BACKEND_REGISTRY,
+    BackendConfig,
+    FrontendConfig,
+    FrontendFramework,
+    ProjectConfig,
+)
 from forge.config.typed_config import (
     FrontendExternal,
     FrontendGenerate,
@@ -265,8 +271,21 @@ def external_api_url(config: ProjectConfig) -> str:
     return _frontend_api_target_url(typed) if _external_api_mode(typed) else ""
 
 
+def _app_receives_component(config: ProjectConfig, fc: FrontendConfig, name: str) -> bool:
+    """Whether the selected component ``name`` lands in the app ``fc`` (its kit renders it)."""
+    if name not in (config.components or []):
+        return False
+    from forge.capability_resolver import component_fragments_for_kit  # noqa: PLC0415
+    from forge.components import component_fragment_name  # noqa: PLC0415
+
+    return component_fragment_name(name) in component_fragments_for_kit(config, fc.ui_kit)
+
+
 def _frontend_api_urls(
-    config: ProjectConfig, backend_name: str, backend_port: int
+    config: ProjectConfig,
+    backend_name: str,
+    backend_port: int,
+    fc: FrontendConfig | None = None,
 ) -> tuple[str, str, str]:
     """Return ``(api_base_url, api_proxy_target, env_api_base_url)``.
 
@@ -289,7 +308,7 @@ def _frontend_api_urls(
     if _external_api_mode(typed):
         ext = _frontend_api_target_url(typed)
         return ext, ext, ext
-    fc = config.frontend
+    fc = fc or config.frontend
     local_api = f"http://localhost:{backend_port}"
     local_proxy = f"http://{backend_name}:{backend_port}"
     dev_port = fc.server_port if fc else 5173
@@ -297,16 +316,16 @@ def _frontend_api_urls(
     return local_api, local_proxy, local_env
 
 
-def vue_context(config: ProjectConfig) -> dict[str, Any]:
+def vue_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict[str, Any]:
     """Build data dict for the vue-frontend-template (Copier)."""
-    fc = config.frontend
+    fc = fc or config.frontend
     if fc is None or fc.framework != FrontendFramework.VUE:
         raise ValueError("Vue frontend config is required.")
     bc = config.backend
     backend_port = bc.server_port if bc else 5000
     backend_name = bc.name if bc else "backend"
     api_base_url, api_proxy_target, env_api_base_url = _frontend_api_urls(
-        config, backend_name, backend_port
+        config, backend_name, backend_port, fc
     )
     from forge.codegen.event_union import AG_UI_CLIENT_VERSION, AG_UI_CORE_VERSION
     from forge.frontend_csp import csp_enabled
@@ -314,9 +333,9 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
 
     return {
         "project_name": fc.project_name,
-        "project_slug": config.frontend_slug,
+        "project_slug": fc.name,
         "description": fc.description,
-        "features": ", ".join(config.all_features),
+        "features": ", ".join(fc.page_features(config.all_features)),
         "author_name": fc.author_name,
         "version": fc.version,
         "package_manager": fc.package_manager,
@@ -328,7 +347,7 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         # package.json.jinja on this flag so they're added ONLY when the
         # component is selected — keeping every other Vue project (and the
         # golden snapshots) byte-identical. False by default (no component).
-        "include_dag_editor": "DagEditor" in (config.components or []),
+        "include_dag_editor": _app_receives_component(config, fc, "DagEditor"),
         "api_base_url": api_base_url,
         "api_proxy_target": api_proxy_target,
         "env_api_base_url": env_api_base_url,
@@ -346,7 +365,7 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         "server_port": fc.server_port,
         "keycloak_url": fc.keycloak_url,
         "keycloak_realm": fc.keycloak_realm,
-        "keycloak_client_id": fc.keycloak_client_id or config.frontend_slug,
+        "keycloak_client_id": fc.keycloak_client_id or fc.name,
         "default_color_scheme": fc.default_color_scheme,
         # The component library the template renders on (forge.ui_kits);
         # kit-specific files are selected by Copier conditional names.
@@ -355,7 +374,7 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
         # The Tailwind palette behind Nuxt UI's primary colour (brand module).
         "nuxt_ui_primary": nuxt_ui_primary(fc.default_color_scheme),
         # security.csp: the build stamps the nonce placeholder (forge.frontend_csp).
-        "security_csp": csp_enabled(config),
+        "security_csp": csp_enabled(config, fc),
         "backend_features": _build_backend_features_json(config),
         "proxy_targets": _build_proxy_targets_json(config),
         "vite_proxy_config": _build_vite_proxy_config(config),
@@ -364,25 +383,25 @@ def vue_context(config: ProjectConfig) -> dict[str, Any]:
     }
 
 
-def svelte_context(config: ProjectConfig) -> dict[str, Any]:
+def svelte_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict[str, Any]:
     """Build data dict for the svelte-frontend-template (Copier)."""
-    fc = config.frontend
+    fc = fc or config.frontend
     if fc is None or fc.framework != FrontendFramework.SVELTE:
         raise ValueError("Svelte frontend config is required.")
     bc = config.backend
     backend_port = bc.server_port if bc else 5000
     backend_name = bc.name if bc else "backend"
     api_base_url, api_proxy_target, env_api_base_url = _frontend_api_urls(
-        config, backend_name, backend_port
+        config, backend_name, backend_port, fc
     )
     from forge.codegen.event_union import AG_UI_CLIENT_VERSION, AG_UI_CORE_VERSION
 
     return {
         "project_name": fc.project_name,
-        "project_slug": config.frontend_slug,
+        "project_slug": fc.name,
         "app_title": fc.project_name,
         "description": fc.description,
-        "features": ", ".join(config.all_features),
+        "features": ", ".join(fc.page_features(config.all_features)),
         "author_name": fc.author_name,
         "version": fc.version,
         "include_auth": fc.include_auth,
@@ -395,7 +414,7 @@ def svelte_context(config: ProjectConfig) -> dict[str, Any]:
         "server_port": fc.server_port,
         "keycloak_url": fc.keycloak_url,
         "keycloak_realm": fc.keycloak_realm,
-        "keycloak_client_id": fc.keycloak_client_id or config.frontend_slug,
+        "keycloak_client_id": fc.keycloak_client_id or fc.name,
         "default_color_scheme": fc.default_color_scheme,
         "backend_features": _build_backend_features_json(config),
         "proxy_targets": _build_proxy_targets_json(config),
@@ -405,24 +424,24 @@ def svelte_context(config: ProjectConfig) -> dict[str, Any]:
     }
 
 
-def flutter_context(config: ProjectConfig) -> dict[str, Any]:
+def flutter_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict[str, Any]:
     """Build data dict for the flutter-frontend-template (Copier)."""
-    fc = config.frontend
+    fc = fc or config.frontend
     if fc is None or fc.framework != FrontendFramework.FLUTTER:
         raise ValueError("Flutter frontend config is required.")
     bc = config.backend
     backend_port = bc.server_port if bc else 5000
     backend_name = bc.name if bc else "backend"
     api_base_url, _api_proxy_target, env_api_base_url = _frontend_api_urls(
-        config, backend_name, backend_port
+        config, backend_name, backend_port, fc
     )
     return {
         "project_name": fc.project_name,
-        "project_slug": config.frontend_slug,
+        "project_slug": fc.name,
         "app_title": fc.project_name,
         "org_name": fc.org_name,
         "description": fc.description,
-        "features": ", ".join(config.all_features),
+        "features": ", ".join(fc.page_features(config.all_features)),
         "version": fc.version,
         "include_auth": fc.include_auth,
         "include_chat": fc.include_chat,
@@ -432,7 +451,7 @@ def flutter_context(config: ProjectConfig) -> dict[str, Any]:
         "server_port": str(backend_port),
         "keycloak_url": fc.keycloak_url,
         "keycloak_realm": fc.keycloak_realm,
-        "keycloak_client_id": fc.keycloak_client_id or config.frontend_slug,
+        "keycloak_client_id": fc.keycloak_client_id or fc.name,
         "default_color_scheme": fc.default_color_scheme,
         "backend_features": _build_backend_features_json(config),
         "author_name": fc.author_name,
@@ -443,9 +462,11 @@ def e2e_context(config: ProjectConfig) -> dict[str, Any]:
     """Build data dict for the e2e-testing-template (Copier)."""
     fc = config.frontend
     framework = fc.framework.value if fc else "vue"
+    # The root e2e harness drives the primary app, so it tests the primary's pages.
+    pages = fc.page_features(config.all_features) if fc else config.all_features
     return {
         "project_name": config.project_name,
-        "features": ", ".join(config.all_features),
+        "features": ", ".join(pages),
         "include_auth": config.include_keycloak,
         "base_url": f"http://localhost:{fc.server_port}" if fc else "http://localhost:5173",
         "frontend_framework": framework,
@@ -456,7 +477,9 @@ def e2e_context(config: ProjectConfig) -> dict[str, Any]:
     }
 
 
-def plugin_frontend_context(config: ProjectConfig) -> dict[str, Any]:
+def plugin_frontend_context(
+    config: ProjectConfig, fc: FrontendConfig | None = None
+) -> dict[str, Any]:
     """Build the Copier data dict for a plugin-registered frontend framework.
 
     Plugin frontends have no bespoke per-framework mapper, so they get a
@@ -466,21 +489,21 @@ def plugin_frontend_context(config: ProjectConfig) -> dict[str, Any]:
     ``defaults=True``, so a plugin template's ``copier.yml`` only needs to
     declare questions for the keys it actually consumes — extras are ignored.
     """
-    fc = config.frontend
+    fc = fc or config.frontend
     if fc is None:
         raise ValueError("Plugin frontend config is required.")
     bc = config.backend
     backend_port = bc.server_port if bc else 5000
     backend_name = bc.name if bc else "backend"
     api_base_url, api_proxy_target, env_api_base_url = _frontend_api_urls(
-        config, backend_name, backend_port
+        config, backend_name, backend_port, fc
     )
     return {
         "project_name": fc.project_name,
-        "project_slug": config.frontend_slug,
+        "project_slug": fc.name,
         "app_title": fc.project_name,
         "description": fc.description,
-        "features": ", ".join(config.all_features),
+        "features": ", ".join(fc.page_features(config.all_features)),
         "author_name": fc.author_name,
         "version": fc.version,
         "include_auth": fc.include_auth,
@@ -493,16 +516,17 @@ def plugin_frontend_context(config: ProjectConfig) -> dict[str, Any]:
         "server_port": fc.server_port,
         "keycloak_url": fc.keycloak_url,
         "keycloak_realm": fc.keycloak_realm,
-        "keycloak_client_id": fc.keycloak_client_id or config.frontend_slug,
+        "keycloak_client_id": fc.keycloak_client_id or fc.name,
         "default_color_scheme": fc.default_color_scheme,
         "backend_features": _build_backend_features_json(config),
         "proxy_targets": _build_proxy_targets_json(config),
     }
 
 
-def frontend_context(config: ProjectConfig) -> dict[str, Any]:
-    """Dispatch to the correct frontend mapper."""
-    if config.frontend is None:
+def frontend_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict[str, Any]:
+    """Dispatch to the correct frontend mapper for ``fc`` (default: the primary)."""
+    fc = fc or config.frontend
+    if fc is None:
         raise ValueError("No frontend configured.")
     mapping = {
         FrontendFramework.VUE: vue_context,
@@ -512,10 +536,10 @@ def frontend_context(config: ProjectConfig) -> dict[str, Any]:
     # Built-ins use their bespoke mapper; a plugin framework (a
     # _PluginFramework sentinel, absent from the mapping) gets the generic
     # plugin context instead of raising.
-    fn = mapping.get(config.frontend.framework, plugin_frontend_context)
-    ctx = fn(config)
+    fn = mapping.get(fc.framework, plugin_frontend_context)
+    ctx = fn(config, fc)
     # Expose the selected layout so variant templates / post-generate can branch
     # on it (e.g. layout-aware chat stripping). Unused by the built-in sidebar
     # templates, so it leaves their output unchanged.
-    ctx["frontend_layout"] = config.frontend.layout
+    ctx["frontend_layout"] = fc.layout
     return ctx

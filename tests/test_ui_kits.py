@@ -58,7 +58,7 @@ def _project(frontend: FrontendConfig, components: list[str] | None = None) -> P
     return ProjectConfig(
         project_name="kits",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontend=frontend,
+        frontends=[frontend],
         components=components or [],
     )
 
@@ -326,10 +326,10 @@ class TestRecorded:
         assert "ui_kit" not in svelte_context(svelte)
 
     def test_the_manifest_records_the_kit_for_vue_only(self) -> None:
-        vue = _frontend_manifest_data(_project(_frontend()))
-        assert vue is not None and vue.ui_kit == "shadcn"
-        svelte = _frontend_manifest_data(_project(_frontend(framework=FrontendFramework.SVELTE)))
-        assert svelte is not None and svelte.ui_kit == ""
+        (vue,) = _frontend_manifest_data(_project(_frontend()))
+        assert vue.ui_kit == "shadcn"
+        (svelte,) = _frontend_manifest_data(_project(_frontend(framework=FrontendFramework.SVELTE)))
+        assert svelte.ui_kit == ""
 
     def test_the_manifest_round_trips_the_kit(self, tmp_path: Path) -> None:
         manifest = tmp_path / "forge.toml"

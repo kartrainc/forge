@@ -30,7 +30,13 @@ def check(
     ui_kit: str = "shadcn",
     auth: bool = False,
     features: list[str] | None = None,
+    extra_frontends: list[tuple[str, str]] | None = None,
 ) -> dict:
+    """Render the reference application for ``language`` and run its gates.
+
+    ``extra_frontends`` adds further Vue apps beside the primary, as
+    ``(name, ui_kit)`` pairs: each becomes its own quality subject.
+    """
     frontend = language in {"vue", "svelte"}
     config = ProjectConfig(
         project_name=f"quality-{language}",
@@ -41,16 +47,31 @@ def check(
                 **({"features": features} if features else {}),
             )
         ],
-        frontend=FrontendConfig(
-            project_name="frontend",
-            framework=FrontendFramework(language),
-            include_auth=auth,
-            include_chat=False,
-            include_openapi=False,
-            ui_kit=ui_kit,
-        )
+        frontends=[
+            FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework(language),
+                include_auth=auth,
+                include_chat=False,
+                include_openapi=False,
+                ui_kit=ui_kit,
+            ),
+            *(
+                FrontendConfig(
+                    project_name="frontend",
+                    framework=FrontendFramework.VUE,
+                    include_auth=auth,
+                    include_chat=False,
+                    include_openapi=False,
+                    ui_kit=extra_kit,
+                    name=name,
+                    server_port=5174 + i,
+                )
+                for i, (name, extra_kit) in enumerate(extra_frontends or [])
+            ),
+        ]
         if frontend
-        else None,
+        else [],
     )
     rendered = generate(config, quiet=True, dry_run=True)
     try:
@@ -62,23 +83,39 @@ def check(
         raise ValueError(json.dumps(architecture))
     dependencies(destination, lock=True)
     dependencies(destination)
-    run_suites(destination, subject=config.frontend_slug if frontend else None)
+    apps = [fc.name for fc in config.active_frontends]
+    if frontend:
+        for name in apps:
+            run_suites(destination, subject=name)
+    else:
+        run_suites(destination, subject=None)
     reports = [
         json.loads(path.read_text()) for path in (destination / ".forge/coverage").glob("*/*.json")
     ]
     inventory = subjects(config, destination)
     if frontend:
-        inventory = [item for item in inventory if item["language"] == language]
+        # Only the apps are checked; the backend behind them is not the subject.
+        languages = {fc.framework.value for fc in config.active_frontends}
+        inventory = [item for item in inventory if item["language"] in languages]
     result = evaluate(destination, reports, inventory)
     result["architecture"] = architecture
-    if language == "vue":
-        # The production build under the policy nginx sends (security.csp).
-        service = destination / "apps" / config.frontend_slug
-        security = check_content_security(
-            service, destination / ".forge/coverage" / config.frontend_slug, ui_kit=ui_kit
+    # The production build of each Vue app under the policy nginx sends
+    # (security.csp). One app reports its result directly, as before; several
+    # report one result per app name.
+    securities = {
+        fc.name: check_content_security(
+            destination / "apps" / fc.name,
+            destination / ".forge/coverage" / fc.name,
+            ui_kit=fc.ui_kit,
         )
-        result["content_security"] = security
-        result["passed"] = result["passed"] and security["passed"]
+        for fc in config.active_frontends
+        if fc.framework == FrontendFramework.VUE
+    }
+    if securities:
+        result["content_security"] = (
+            next(iter(securities.values())) if len(securities) == 1 else securities
+        )
+        result["passed"] = result["passed"] and all(s["passed"] for s in securities.values())
     return result
 
 
@@ -93,6 +130,13 @@ if __name__ == "__main__":
         "--auth", action="store_true", help="Render the frontend with authentication on."
     )
     parser.add_argument("--features", help="Comma-separated CRUD features (default: items).")
+    parser.add_argument(
+        "--extra-frontend",
+        action="append",
+        default=[],
+        metavar="NAME[:KIT]",
+        help="Add a Vue app beside the primary (repeatable); KIT defaults to shadcn.",
+    )
     args = parser.parse_args()
     result = check(
         args.language,
@@ -100,6 +144,10 @@ if __name__ == "__main__":
         ui_kit=args.ui_kit,
         auth=args.auth,
         features=[f.strip() for f in args.features.split(",")] if args.features else None,
+        extra_frontends=[
+            (name, kit or "shadcn")
+            for name, _, kit in (item.partition(":") for item in args.extra_frontend)
+        ],
     )
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["passed"] else 12)

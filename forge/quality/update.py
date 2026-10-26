@@ -53,17 +53,13 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         new = read_forge_toml(candidate / "forge.toml")
         untidy = resolve_go_modules(candidate, go_modules, new.provenance)
         locks = {f"{module}/go.sum": f"{module}/go.mod" for module in go_modules}
-        # Regeneration always writes the frontend app to the generator's fixed
-        # apps/<frontend_slug>. A different recorded location (an edited
-        # manifest or a moved app) would silently recreate the app there and
-        # delete its protected files: refuse instead of relocating it.
-        recorded_app, regenerated_app = old.frontend.app_dir, new.frontend.app_dir
-        if recorded_app and regenerated_app and recorded_app != regenerated_app:
-            raise ValueError(
-                f"forge.toml records the frontend app at {recorded_app}, but the "
-                f"generator writes it to {regenerated_app}. This update does not move "
-                f"an app: restore it at {regenerated_app} before updating."
-            )
+        # Regeneration writes the primary app to the generator's fixed
+        # apps/<name>. A different recorded location (an edited manifest, a moved
+        # app, or a recipe that renamed or replaced the primary) would recreate
+        # the app there and delete its protected files: refuse instead. Further
+        # apps are identified by their names, so the recipe adds, removes and
+        # renames them; a moved one fails the protected-file check above.
+        _refuse_moved_primary(old.frontend.app_dir, new.frontend.app_dir)
         writes: dict[str, bytes | None] = {}
         conflicts: list[str] = []
         for rel, record in new.provenance.items():
@@ -257,3 +253,14 @@ def migration_report(root: Path) -> dict:
         "files": files,
         "instructions": "Regenerate using the original configuration into a separate directory. Move custom changes into extension files, then adopt the reviewed recipe and manifest.",
     }
+
+
+def _refuse_moved_primary(recorded_app: str, regenerated_app: str) -> None:
+    """Refuse an update that would move the primary app (see update_owned_project)."""
+    if recorded_app and regenerated_app and recorded_app != regenerated_app:
+        raise ValueError(
+            f"forge.toml records the frontend app at {recorded_app}, but the "
+            f"generator writes it to {regenerated_app}. This update does not move "
+            f"an app: restore it at {regenerated_app}, or keep the recipe's first "
+            f"frontend at {recorded_app}, before updating."
+        )

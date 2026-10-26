@@ -28,8 +28,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -52,7 +53,7 @@ from forge.codegen.ui_protocol import (
 from forge.codegen.ui_protocol import (
     load_all as load_ui_schemas,
 )
-from forge.config import BackendLanguage, FrontendFramework
+from forge.config import BackendLanguage
 from forge.domain.emitters import (
     emit_alembic_migration,
     emit_go_struct,
@@ -74,7 +75,7 @@ if TYPE_CHECKING:
     from forge.api import PluginEmitterRegistration
     from forge.capability_resolver import ResolvedPlan
     from forge.codegen.canvas_contract import DataContract
-    from forge.config import ProjectConfig
+    from forge.config import FrontendConfig, ProjectConfig
     from forge.sync.provenance import ProvenanceCollector
 
 
@@ -121,11 +122,45 @@ def run_codegen(
     _run_plugin_emitters(config, project_root, resolved)
 
 
-def _frontend_layout(config: ProjectConfig) -> FrontendLayout | None:
-    """Return the active frontend's layout, or None if no frontend / unregistered."""
-    if config.frontend is None or config.frontend.framework == FrontendFramework.NONE:
-        return None
-    return get_frontend_layout(config.frontend.framework)
+def _frontend_apps(config: ProjectConfig) -> list[tuple[FrontendConfig, FrontendLayout]]:
+    """Each rendered frontend with its registered layout, primary first.
+
+    Frontends whose framework registers no layout get no codegen output.
+    """
+    apps: list[tuple[FrontendConfig, FrontendLayout]] = []
+    for fc in config.active_frontends:
+        layout = get_frontend_layout(fc.framework)
+        if layout is not None:
+            apps.append((fc, layout))
+    return apps
+
+
+def _app_components(config: ProjectConfig, fc: FrontendConfig, names: Iterable[str]) -> list[str]:
+    """The selected components (of ``names``) that the app ``fc`` receives.
+
+    A Vue app receives a component only when its UI kit renders the component's
+    whole closure (``forge.capability_resolver.component_fragments_for_kit``).
+    A further app of another framework receives only components whose fragment
+    targets that framework, as placement does; the primary keeps every selected
+    component, as a project with one frontend always has.
+    """
+    from forge.components import component_fragment_name  # noqa: PLC0415
+    from forge.fragments import FRAGMENT_REGISTRY  # noqa: PLC0415
+    from forge.ui_kits import applies_to  # noqa: PLC0415
+
+    if not applies_to(fc.framework):
+        if config.is_primary_frontend(fc):
+            return list(names)
+        return [
+            n
+            for n in names
+            if fc.framework
+            in getattr(FRAGMENT_REGISTRY.get(component_fragment_name(n)), "target_frontends", ())
+        ]
+    from forge.capability_resolver import component_fragments_for_kit  # noqa: PLC0415
+
+    allowed = component_fragments_for_kit(config, fc.ui_kit)
+    return [n for n in names if component_fragment_name(n) in allowed]
 
 
 def _emit_ui_protocol(
@@ -138,9 +173,8 @@ def _emit_ui_protocol(
     if not schemas:
         return
 
-    layout = _frontend_layout(config)
-    if layout is not None:
-        target = _frontend_root(config, project_root) / layout.ui_protocol_path
+    for fc, layout in _frontend_apps(config):
+        target = _frontend_root(project_root, fc) / layout.ui_protocol_path
         if layout.ui_protocol_emitter == "typescript":
             body = emit_typescript(schemas)
         else:
@@ -165,13 +199,15 @@ def _emit_canvas_manifests(
     The manifest is read at runtime (dev) to validate backend-emitted
     payloads match the component's declared props schema.
     """
-    layout = _frontend_layout(config)
-    if layout is None:
+    apps = _frontend_apps(config)
+    if not apps:
         return
     components = load_canvas_components()
     manifest_body = json.dumps(build_canvas_manifest(components), indent=2) + "\n"
-    target = _frontend_root(config, project_root) / layout.canvas_manifest_path
-    _write(target, manifest_body, collector)
+    for fc, layout in apps:
+        _write(
+            _frontend_root(project_root, fc) / layout.canvas_manifest_path, manifest_body, collector
+        )
 
 
 def _selected_contracts(
@@ -225,27 +261,27 @@ def _selected_contracts(
     return contracts
 
 
-def _frontend_root(config: ProjectConfig, project_root: Path) -> Path:
-    """The real built frontend app root — ``<project_root>/apps/<slug>/``.
+def _frontend_root(project_root: Path, fc: FrontendConfig) -> Path:
+    """The real built frontend app root — ``<project_root>/apps/<name>/``.
 
     The deployed Vue/Svelte/Flutter app (package.json, Dockerfile target, where
     ``npm run build`` runs) and every component fragment live under
-    ``apps/<frontend_slug>/`` (see ``generator``). All frontend codegen outputs
-    MUST land here so the app's imports resolve — NOT the legacy
-    ``project_root/<slug>`` tree, which is orphaned (nothing builds it).
+    ``apps/<name>/`` (see ``generator``). All frontend codegen outputs MUST land
+    here so the app's imports resolve — NOT the legacy ``project_root/<slug>``
+    tree, which is orphaned (nothing builds it).
     """
-    return project_root / "apps" / config.frontend_slug
+    return project_root / "apps" / fc.name
 
 
-def _frontend_api_dir(config: ProjectConfig, project_root: Path) -> Path:
-    """The real built app's ``src/shared/api`` dir — ``apps/<slug>/``.
+def _frontend_api_dir(project_root: Path, fc: FrontendConfig) -> Path:
+    """The real built app's ``src/shared/api`` dir — ``apps/<name>/``.
 
     Component fragments (and the deployed Vue app: package.json, Dockerfile) live
-    under ``apps/<frontend_slug>/`` (see ``generator``). Contract artifacts that a
+    under ``apps/<name>/`` (see ``generator``). Contract artifacts that a
     generated ``.vue`` imports MUST co-locate there so ``vue-tsc`` resolves them —
     not the legacy ``project_root/<slug>`` codegen tree.
     """
-    return _frontend_root(config, project_root) / "src" / "shared" / "api"
+    return _frontend_root(project_root, fc) / "src" / "shared" / "api"
 
 
 def _emit_contract_types(
@@ -264,18 +300,19 @@ def _emit_contract_types(
     (plan §D drift-safety). Mode-independent: runs for greenfield + brownfield.
     ``components_root`` is a test seam.
     """
-    layout = _frontend_layout(config)
-    if layout is None or not config.components:
+    apps = _frontend_apps(config)
+    if not apps or not config.components:
         return
     contracts = _selected_contracts(config, components_root)
-    api_dir = _frontend_api_dir(config, project_root)
-    for name, contract in contracts.items():
-        _write(
-            api_dir / f"{name}.contract.ts",
-            emit_contract_types(contract),
-            collector,
-            template_name="_contract_types",
-        )
+    for fc, _layout in apps:
+        api_dir = _frontend_api_dir(project_root, fc)
+        for name in _app_components(config, fc, contracts):
+            _write(
+                api_dir / f"{name}.contract.ts",
+                emit_contract_types(contracts[name]),
+                collector,
+                template_name="_contract_types",
+            )
 
 
 def _emit_contract_bindings(
@@ -294,30 +331,49 @@ def _emit_contract_bindings(
     against the spec and fails loud (``FEATURE_CONTRACT_VIOLATION``) on any
     violation. ``components_root`` is a test seam.
     """
-    layout = _frontend_layout(config)
-    if layout is None:
+    apps = _frontend_apps(config)
+    if not apps:
         return
     spec_url = str(config.options.get("frontend.openapi_spec_url", "") or "")
     if not spec_url:
         return  # greenfield — nothing to bind
 
+    from forge.codegen.openapi_binding import load_openapi_spec  # noqa: PLC0415
+
+    selected = _selected_contracts(config, components_root)
+    if not selected:
+        return
+
+    spec = load_openapi_spec(spec_url)
+    # Each app binds the contract components it receives, in its own api dir.
+    for fc, _layout in apps:
+        names = _app_components(config, fc, selected)
+        if names:
+            _emit_app_contract_bindings(
+                _frontend_api_dir(project_root, fc),
+                {n: selected[n] for n in names},
+                spec,
+                collector,
+            )
+
+
+def _emit_app_contract_bindings(
+    api_dir: Path,
+    named: dict[str, DataContract],
+    spec: Any,
+    collector: ProvenanceCollector | None,
+) -> None:
+    """Write or validate one app's contract bindings and emit its adapters."""
     from forge.codegen.openapi_binding import (  # noqa: PLC0415
         build_bindings_document,
         emit_capabilities,
         emit_transform_adapter,
-        load_openapi_spec,
         parse_bindings_document,
         transform_adapter_prelude,
         validate_bindings_document,
     )
     from forge.errors import FEATURE_CONTRACT_VIOLATION, PluginError  # noqa: PLC0415
 
-    named = _selected_contracts(config, components_root)
-    if not named:
-        return
-
-    spec = load_openapi_spec(spec_url)
-    api_dir = _frontend_api_dir(config, project_root)
     target = api_dir / "contract-bindings.toml"
     if not target.is_file():
         # First run: write the editable proposal. Adapters are emitted on the
@@ -455,15 +511,15 @@ def _emit_event_union_pydantic(
         target = project_root / "services" / bc.name / "src" / "app" / "domain" / "canvas_events.py"
         _write(target, body, collector)
 
-    layout = _frontend_layout(config)
-    if layout is None or not layout.event_union_path:
-        return
-    target = _frontend_root(config, project_root) / layout.event_union_path
-    if layout.ui_protocol_emitter == "typescript":
-        fe_body = event_union_codegen.emit_typescript(schemas)
-    else:
-        fe_body = event_union_codegen.emit_dart(schemas)
-    _write(target, fe_body, collector)
+    for fc, layout in _frontend_apps(config):
+        if not layout.event_union_path:
+            continue
+        target = _frontend_root(project_root, fc) / layout.event_union_path
+        if layout.ui_protocol_emitter == "typescript":
+            fe_body = event_union_codegen.emit_typescript(schemas)
+        else:
+            fe_body = event_union_codegen.emit_dart(schemas)
+        _write(target, fe_body, collector)
 
 
 def _emit_shared_enums(
@@ -480,7 +536,7 @@ def _emit_shared_enums(
     if not _ENUMS_ROOT.is_dir():
         return
 
-    layout = _frontend_layout(config)
+    apps = _frontend_apps(config)
 
     for enum_file in sorted(_ENUMS_ROOT.glob("*.yaml")):
         spec = load_enum_yaml(enum_file)
@@ -537,17 +593,16 @@ def _emit_shared_enums(
                 )
                 _write(path, targets["go"], collector)
 
-        # Frontend — one enum emission per registered layout.
-        if layout is None:
-            continue
-        ext = ".ts" if layout.shared_enums_emitter == "typescript" else ".dart"
-        emitter_key = "typescript" if layout.shared_enums_emitter == "typescript" else "dart"
-        path = (
-            _frontend_root(config, project_root)
-            / layout.shared_enums_dir
-            / f"{enum_file.stem}{ext}"
-        )
-        _write(path, targets[emitter_key], collector)
+        # Frontends — one enum emission per app, in its registered layout.
+        for fc, layout in apps:
+            ext = ".ts" if layout.shared_enums_emitter == "typescript" else ".dart"
+            emitter_key = "typescript" if layout.shared_enums_emitter == "typescript" else "dart"
+            path = (
+                _frontend_root(project_root, fc)
+                / layout.shared_enums_dir
+                / f"{enum_file.stem}{ext}"
+            )
+            _write(path, targets[emitter_key], collector)
 
 
 # ---------------------------------------------------------------------------

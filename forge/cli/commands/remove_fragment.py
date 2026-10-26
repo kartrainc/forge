@@ -103,9 +103,9 @@ def _run_remove_fragment(args: argparse.Namespace) -> None:
             # an option flip — this command only mutates one option value,
             # not the per-template attribution.
             template_versions=dict(data.template_versions),
-            # Likewise preserve [forge.frontend] (framework + app_dir +
-            # layout) so disabling a fragment doesn't reset --layout.
-            frontend=data.frontend if data.frontend.framework else None,
+            # Likewise preserve every recorded frontend (framework + app_dir +
+            # layout) so disabling a fragment doesn't reset --layout or drop an app.
+            frontends=data.frontends,
         )
 
     try:

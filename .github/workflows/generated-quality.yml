@@ -68,6 +68,11 @@ jobs:
           - language: vue
             kit: nuxt-ui
             args: --ui-kit nuxt-ui --auth --features items,orders
+          # Two Vue apps (ADR-012): the shadcn primary and a Nuxt UI app
+          # beside it, each its own quality subject.
+          - language: vue
+            kit: two-apps
+            args: --auth --features items,orders --extra-frontend admin:nuxt-ui
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:

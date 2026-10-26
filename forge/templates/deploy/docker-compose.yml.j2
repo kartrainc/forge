@@ -139,7 +139,7 @@ services:
 {% endfor %}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.{{ be.name }}.rule=Host(`app.localhost`) && PathPrefix(`/api/{{ be.name }}`)"
+      - "traefik.http.routers.{{ be.name }}.rule={{ frontend_host_rule }} && PathPrefix(`/api/{{ be.name }}`)"
       - "traefik.http.routers.{{ be.name }}.entrypoints=web"
       - "traefik.http.middlewares.{{ be.name }}-rewrite.replacepathregex.regex=^/api/{{ be.name }}/(.*)"
       - "traefik.http.middlewares.{{ be.name }}-rewrite.replacepathregex.replacement=/api/$$1"
@@ -225,6 +225,29 @@ services:
 {% endif %}
     networks:
       - app-network
+{% for fe in extra_frontends %}
+
+  # ── Frontend {{ fe.name }} (nginx, served on {{ fe.host }}) ──
+  {{ fe.dns_name }}:
+    build:
+      context: ./apps/{{ fe.name }}
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/{{ fe.name }}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{ fe.dns_name }}.rule=Host(`{{ fe.host }}`)"
+      - "traefik.http.routers.{{ fe.dns_name }}.entrypoints=web"
+      - "traefik.http.services.{{ fe.dns_name }}.loadbalancer.server.port=80"
+{% if backends %}
+    depends_on:
+{% for be in backends %}
+      - {{ be.name }}
+{% endfor %}
+{% endif %}
+    networks:
+      - app-network
+{% endfor %}
 {% endif %}
 
   # ── API Gateway ──
