@@ -242,6 +242,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `backends:` fell back to one default backend. Scripts that passed such flags
   set the values in a config file instead (UPGRADING).
 
+### Node HTTP service
+
+- Add the `http-service` app template for Node backends: the Node template
+  rendered with `use_database=false`, without Prisma, the migrate step or the
+  sample `items` entity, for stateless services. Compose, `init-db.sh` and the
+  Helm chart wire no database, DB URL or migration for it. The connection
+  pool, background tasks, queue and cache fragments skip it, as the HTTP
+  middleware skips `worker`. `crud-service` output is unchanged.
+- Let an app-template manifest declare `uses_database = false` for a service
+  shape without a database of its own.
+
 ### Fixed
 
 - Template updates re-render every app of a framework and every backend of a

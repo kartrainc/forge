@@ -49,10 +49,12 @@ RUN if [ -f package-lock.json ]; then \
     fi
 
 WORKDIR /workspace/services/{{ project_slug }}
+{%- if use_database | default(true) %}
 
 COPY prisma ./prisma/
 COPY prisma.config.ts ./
 RUN npx prisma generate
+{%- endif %}
 
 COPY tsconfig.json ./
 COPY src ./src/
@@ -85,9 +87,13 @@ COPY --from=builder /workspace/packages /workspace/packages/
 {%- endif %}
 COPY --from=builder /workspace/services/{{ project_slug }}/node_modules ./node_modules/
 COPY --from=builder /workspace/services/{{ project_slug }}/dist ./dist/
+{%- if use_database | default(true) %}
 COPY --from=builder /workspace/services/{{ project_slug }}/prisma ./prisma/
+{%- endif %}
 COPY --from=builder /workspace/services/{{ project_slug }}/package.json ./
+{%- if use_database | default(true) %}
 COPY --from=builder /workspace/services/{{ project_slug }}/prisma.config.ts ./
+{%- endif %}
 
 COPY config ./config/
 COPY entrypoint.sh ./

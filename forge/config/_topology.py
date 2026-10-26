@@ -79,12 +79,14 @@ def backend_topology_entry(
     depends_on_services = [
         svc for svc in (app_tmpl.requires_services if app_tmpl else ()) if svc in rendered_infra
     ]
+    uses_database = app_tmpl.uses_database if app_tmpl else True
     return {
         "name": bc.name,
         "language": bc.language.value,
         "port": bc.server_port,
         "db_name": bc.name.replace("-", "_"),
-        "has_migrations": bc.language in BUILTIN_MIGRATING,
+        "uses_database": uses_database,
+        "has_migrations": uses_database and bc.language in BUILTIN_MIGRATING,
         "depends_on_services": depends_on_services,
         # Per-service S2S / inter-service env block; empty when synthesis is
         # inactive (single-service or auth.service_discovery off).

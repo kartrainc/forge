@@ -72,16 +72,35 @@ def test_available_backend_templates_per_language():
         "tenant-management-service",
         "worker",
     )
-    assert bat.available_backend_templates(BackendLanguage.NODE) == ("crud-service",)
+    assert bat.available_backend_templates(BackendLanguage.NODE) == (
+        "crud-service",
+        "http-service",
+    )
     assert bat.available_backend_templates(BackendLanguage.RUST) == ("crud-service",)
 
 
 def test_all_backend_template_names():
     assert bat.all_backend_template_names() == (
         "crud-service",
+        "http-service",
         "tenant-management-service",
         "worker",
     )
+
+
+def test_http_service_variant_is_node_baseline_without_database():
+    """``http-service`` renders the Node baseline template itself, with the
+    database switched off; every other variant keeps its database."""
+    from forge.config import BACKEND_REGISTRY
+
+    t = bat.get_backend_application_template(BackendLanguage.NODE, "http-service")
+    assert t is not None
+    assert t.template_dir == BACKEND_REGISTRY[BackendLanguage.NODE].template_dir
+    assert t.base_template_dir == ""
+    assert t.uses_database is False
+    assert bat.backend_uses_database(BackendLanguage.NODE, "http-service") is False
+    assert bat.backend_uses_database(BackendLanguage.NODE, "crud-service") is True
+    assert bat.backend_uses_database(BackendLanguage.NODE, None) is True
 
 
 def test_get_unknown_variant_returns_none():
@@ -356,6 +375,80 @@ def test_crud_service_renders_baseline_shape(tmp_path: Path):
     assert (svc / "src" / "app" / "api" / "v1" / "endpoints" / "items.py").is_file()
     # ...and NOT the worker package.
     assert not (svc / "src" / "worker").exists()
+
+
+def test_node_http_service_renders_without_database(tmp_path: Path):
+    """A Node ``http-service`` next to a Node ``crud-service`` gets no Prisma
+    stack, no sample entity, no database, no DB URL, no migrate step and no
+    queue or cache, while its sibling keeps all of them."""
+    import json
+
+    cfg = ProjectConfig(
+        project_name="http_demo",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name="capture",
+                project_name="http_demo",
+                language=BackendLanguage.NODE,
+                app_template="http-service",
+                server_port=5100,
+                features=[],
+            ),
+            BackendConfig(
+                name="store",
+                project_name="http_demo",
+                language=BackendLanguage.NODE,
+                server_port=5101,
+                features=["items"],
+            ),
+        ],
+        frontend=None,
+        options={
+            "reliability.connection_pool": True,
+            "async.task_queue": True,
+            "queue.backend": "bullmq",
+            "reliability.cache": "redis",
+        },
+    )
+    from forge.generator import generate
+
+    root = generate(cfg, quiet=True, dry_run=True)
+    svc = root / "services" / "capture"
+    for rel in (
+        "prisma",
+        "prisma.config.ts",
+        "src/data",
+        "src/lib/prisma.ts",
+        "src/lib/prisma-pool.ts",
+        "src/routes/items.ts",
+        "src/services",
+        "src/worker",
+    ):
+        assert not (svc / rel).exists(), f"database, queue or worker file rendered: {rel}"
+    for rel in ("src/app.ts", "src/config/schema.ts", "src/routes/health.ts", "entrypoint.sh"):
+        text = (svc / rel).read_text(encoding="utf-8")
+        assert "prisma" not in text.lower() and "itemRoutes" not in text, rel
+
+    package = json.loads((svc / "package.json").read_text(encoding="utf-8"))
+    assert not [name for name in package["dependencies"] if "prisma" in name]
+    assert not {"bullmq", "ioredis"} & set(package["dependencies"])
+    assert "prisma" not in package["devDependencies"]
+    store_package = json.loads(
+        (root / "services" / "store" / "package.json").read_text(encoding="utf-8")
+    )
+    assert {"bullmq", "ioredis"} <= set(store_package["dependencies"])
+    assert "migrate" not in package["scripts"]
+    assert "use_database: false" in (svc / ".copier-answers.yml").read_text(encoding="utf-8")
+
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "capture-migrate:" not in compose
+    assert "store-migrate:" in compose
+    assert "/capture\"" not in compose
+    init_db = (root / "deploy" / "compose" / "init-db.sh").read_text(encoding="utf-8")
+    assert "capture" not in init_db
+    assert "store" in init_db
+    assert (root / "services" / "store" / "src" / "lib" / "prisma.ts").is_file()
 
 
 def test_two_stage_variant_renders_nonempty_app_title(tmp_path: Path):

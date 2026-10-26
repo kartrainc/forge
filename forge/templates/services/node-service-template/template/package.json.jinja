@@ -15,25 +15,29 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "biome lint src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
-    "format": "biome format --write src/ tests/",
+    "format": "biome format --write src/ tests/"{% if use_database | default(true) %},
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
-    "generate": "prisma generate"
+    "generate": "prisma generate"{% endif %}
   },
   "dependencies": {
     "fastify": "^5.12.5",
     "@fastify/cors": "^11.3.1",
+{%- if use_database | default(true) %}
     "@prisma/client": "^7.10.0",
+{%- endif %}
     "zod": "^4.6.5",
     "pino": "^10.4.0",
     "pino-pretty": "^13.2.0",
     "dotenv": "^18.0.6",
     "uuid": "^14.0.2",
-    "yaml": "^2.9.1",
-    "@prisma/adapter-pg": "^7.10.0"
+    "yaml": "^2.9.1"{% if use_database | default(true) %},
+    "@prisma/adapter-pg": "^7.10.0"{% endif %}
   },
   "overrides": {
+{%- if use_database | default(true) %}
     "@prisma/config": { "deepmerge-ts": "^8.0.0" },
+{%- endif %}
     "vitest": "5.0.3",
     "mysql2": "3.24.5"
   },
@@ -43,7 +47,9 @@
     "@biomejs/biome": "^2.5.15",
     "vitest": "5.0.3",
     "@vitest/coverage-v8": "5.0.3",
+{%- if use_database | default(true) %}
     "prisma": "^7.10.0",
+{%- endif %}
     "@types/node": "^22.15.29"
   }
 }

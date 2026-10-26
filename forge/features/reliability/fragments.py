@@ -25,8 +25,9 @@ def register_all(api: ForgeAPI) -> None:
         Fragment(
             name="reliability_connection_pool",
             # Injects pool kwargs into the crud-service session factory; the
-            # worker variant owns its own DB wiring (src/worker/, no src/app).
-            excluded_app_templates=("worker",),
+            # worker variant owns its own DB wiring (src/worker/, no src/app)
+            # and http-service has no database (no src/lib/prisma.ts).
+            excluded_app_templates=("worker", "http-service"),
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("reliability_connection_pool", "python"),
@@ -141,6 +142,7 @@ def register_all(api: ForgeAPI) -> None:
     api.add_fragment(
         Fragment(
             name="cache_port",
+            excluded_app_templates=("http-service",),  # stateless: no cache of its own
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("cache_port", "python"),
@@ -170,6 +172,7 @@ def register_all(api: ForgeAPI) -> None:
         Fragment(
             name="cache_memory",
             depends_on=("cache_port",),
+            excluded_app_templates=("http-service",),  # follows cache_port
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("cache_memory", "python"),
@@ -200,6 +203,7 @@ def register_all(api: ForgeAPI) -> None:
             name="cache_redis",
             depends_on=("cache_port",),
             capabilities=("redis",),
+            excluded_app_templates=("http-service",),  # follows cache_port
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("cache_redis", "python"),

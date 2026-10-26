@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
+from forge.backend_app_templates import backend_uses_database
 from forge.config import (
     DEFAULT_REALM,
     TRAEFIK_DASHBOARD_PORT,
@@ -469,6 +470,9 @@ def render_init_db(
     extra_dbs = set()
     if config.database_mode != "none":
         for bc in config.backends:
+            if not backend_uses_database(bc.language, bc.app_template):
+                continue
+
             db_name = bc.name.replace("-", "_")
             extra_dbs.add(db_name)
     if config.include_keycloak:

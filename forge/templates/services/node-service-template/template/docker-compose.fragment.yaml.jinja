@@ -3,6 +3,7 @@
 # across language backends.
 
 services:
+{%- if use_database | default(true) %}
   {{ project_slug }}-migrate:
     build:
       context: ./services/{{ project_slug }}
@@ -24,7 +25,7 @@ services:
       postgres:
         condition: service_healthy
     networks: [app-network]
-
+{% endif %}
   {{ project_slug }}:
     build:
       context: ./services/{{ project_slug }}
@@ -37,7 +38,9 @@ services:
     environment:
       NODE_ENV: development
       PORT: "{{ server_port }}"
+{%- if use_database | default(true) %}
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ db_name }}"
+{%- endif %}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy:4318"
     labels:
       - "traefik.enable=true"
@@ -47,8 +50,10 @@ services:
       - "traefik.http.middlewares.{{ project_slug }}-rewrite.replacepathregex.replacement=/api/$$1"
       - "traefik.http.services.{{ project_slug }}.loadbalancer.server.port={{ server_port }}"
     depends_on:
+{%- if use_database | default(true) %}
       {{ project_slug }}-migrate:
         condition: service_completed_successfully
+{%- endif %}
       keycloak:
         condition: service_healthy
     networks: [app-network]

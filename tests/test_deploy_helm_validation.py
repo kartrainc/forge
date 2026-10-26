@@ -102,6 +102,21 @@ def _scenarios() -> list[tuple[str, dict]]:
                 backends=[BackendConfig(name="svc", language=BackendLanguage.RUST, server_port=9000)],
             ),
         ),
+        (
+            "node_http_service_beside_crud",
+            dict(
+                project_name="capture",
+                backends=[
+                    BackendConfig(name="store", language=BackendLanguage.NODE, server_port=8010),
+                    BackendConfig(
+                        name="capture",
+                        language=BackendLanguage.NODE,
+                        app_template="http-service",
+                        server_port=8011,
+                    ),
+                ],
+            ),
+        ),
     ]
 
 
