@@ -1,0 +1,224 @@
+# ADR-013: A dev-server overlay for the Compose frontend
+
+- Status: Proposed
+- Author: forge team
+- Date: 2026-10-26
+- Scope: `FrontendConfig.dev_server` (`forge/config/_frontend.py`), the stack
+  file's `frontend.dev_server` and `--dev-server` (`forge/cli/builder.py`,
+  `forge/cli/interactive.py`), `forge/templates/deploy/Dockerfile.node.j2`,
+  a generated `docker-compose.dev.yaml`, a generated `vite.dev.config.ts`
+  (`forge/docker_manager.py`), the boot step after generation (`boot()` in
+  `forge/docker_manager.py`, its call in `forge/cli/main.py`), `forge doctor`,
+  the updater's handling of both (`forge/sync/forge_to_project/updater/`),
+  `forge.toml` and the quality recipe
+- Related: [plan](../../plans/2026-10-26-frontend-dev-server.md);
+  [[ADR-006]] (provenance), [[ADR-007]] (separate frontend templates),
+  [[ADR-011]] (UI kit option, the precedent for a field of the frontend)
+
+## Context
+
+In a generated stack the `frontend` service is nginx over a built bundle.
+The only way to see a change in the running stack is to rebuild the frontend
+image, which takes minutes per edit. A developer who wants hot reload runs
+`npm run dev` on the host, which is a second origin: it has no Traefik, so no
+`/api/<backend>` routes, and none of the stack's hostnames.
+
+A downstream project (Kartra) built a dev overlay by hand and ran it on Linux.
+What it learned shapes this decision:
+
+- Dependencies must be installed for the container's platform. A host
+  `node_modules` holds the host's native binaries (esbuild, rolldown,
+  lightningcss).
+- Files the dev server writes into a bind-mounted `src/` are owned by the
+  container user. The Vue template writes `src/auto-imports.d.ts`, and with
+  Nuxt UI `src/components.d.ts`, at startup, so a root container leaves root-owned
+  files in the checkout. Docker also creates a bind source that does not exist
+  as `root`.
+- The base `docker-compose.yml` carries values an overlay must replace, not add
+  to: the nginx.conf volume and the port-80 Traefik label. Compose merges
+  volumes by target and labels by entry, so omission deletes nothing.
+- The base `frontend` service has **no** health check. The overlay adds one;
+  a slim Node image has no `wget` or `curl`.
+- Vite rejects the stack's hostnames unless `server.allowedHosts` lists them.
+- No Content-Security-Policy applies, because nginx is not in the path.
+
+## Decision
+
+1. **A per-frontend field, Vue first.** `frontend.dev_server` (boolean,
+   default `false`) is a `FrontendConfig` field, travelling the way `ui_kit`
+   does (ADR-011): the stack file, `--dev-server`, the interactive prompt,
+   `[forge.frontend]` in `forge.toml`, the recipe. It is not an option-registry
+   path. It applies to Vue first; Svelte follows in a separate change with the
+   same tests; Flutter is refused. The overlay overrides the project's one
+   `frontend` service (`apps/<frontend_slug>`, host `app.localhost`). A list of
+   frontends is proposed separately (kartrainc/forge#6); because the field
+   belongs to a frontend, that change adds one override per enabled frontend
+   without changing this decision.
+2. **The Dockerfile gains a `dev` stage; nginx stays last.** With the field
+   on, the stages are `deps → source → dev` and `source → builder → nginx`,
+   where `source` is the single place that runs `COPY . .`, so the dev and
+   production images cannot diverge in what the generated Dockerfile copies.
+   `COPY . .` does not copy a named external build context: a project that
+   adds `COPY --from=<context>` instructions to its scaffold-owned Dockerfile
+   (Kartra copies shared libraries this way) must place them in `source` for
+   the dev image to have them, which the sidecar merge on enabling the field
+   makes explicit. The overlay sets only `build.target`, so the base file's
+   `context`, `dockerfile` and `additional_contexts` are inherited. With the field off the rendered Dockerfile is
+   unchanged, byte for byte. `dev` runs as a non-root user, and the application
+   tree, including Vite's cache directories, is writable by that user; the
+   files arrive with `COPY --chown`.
+3. **A generated `docker-compose.dev.yaml` overrides the `frontend` service.**
+   It sets the build target to `dev`, the
+   command (the project's own `dev` script with `--host 0.0.0.0` and
+   `--config vite.dev.config.ts`, per package manager), a Node-based health
+   check, and the Traefik labels. It replaces inherited values explicitly:
+   `volumes: !override`, `labels: !override`, `healthcheck: !override`. Because
+   `!override` replaces all labels, the overlay writes out every label the
+   frontend router still needs, from the same values the base Compose template
+   reads (`app.localhost`, the router name `frontend`), with the service port
+   set to the frontend's `server_port`; a test compares the two. The minimum is **Docker Compose 2.24.4**, the release that added
+   `!override`. Forge already depends on `!reset` (2.24) in its Compose boot
+   test; `forge doctor` reports an older Compose.
+4. **Compose Watch is the sync mechanism, not a bind mount.** The overlay
+   declares `develop.watch` with `initial_sync: true`:
+   - `sync` for the source tree and configuration files that exist in the
+     rendered app, excluding `node_modules`, build output, coverage artifacts,
+     package manifests, lockfiles, and the generated declaration files
+     (`src/auto-imports.d.ts`, `src/components.d.ts`);
+   - `sync+restart` for `vite.config.ts` and `vite.dev.config.ts`, which Vite
+     reads once;
+   - `rebuild` for `package.json`, and a separate `rebuild` rule for the
+     package manager's lockfile.
+   The stack is started with `docker compose -f docker-compose.yml -f
+   docker-compose.dev.yaml up --build --watch`. Sync is one way: files the dev
+   server generates stay in the container, so no host file is created by it
+   and the host needs no uid mapping. Dependencies are in the image's `deps`
+   layer, so no install volume, no one-shot install service and no
+   `--ignore-scripts` workaround exist. Watch needs Compose 2.22; the
+   2.24.4 minimum above is the higher bound.
+5. **A wrapper Vite config, never an edit of the project's own.**
+   `apps/<frontend_slug>/vite.dev.config.ts` resolves the base `vite.config.ts` whether
+   it exports an object, a function of `ConfigEnv`, or a promise, merges it with
+   Vite's `mergeConfig`, and sets `server.host` to `0.0.0.0`, `strictPort`,
+   and `allowedHosts` to the frontend's exact generated Traefik hostname,
+   `app.localhost`, read from the same place the Compose template reads it. It never sets `allowedHosts: true`. File polling is off unless the
+   Playwright check in the plan shows sync events do not reach the watcher.
+   The HMR WebSocket stays on the page's own origin; Traefik proxies it.
+   `tsconfig.node.json` includes the wrapper.
+6. **The dev frontend behaves like the built one with respect to sign-in, and
+   forge does not fix that.** The generated gatekeeper defines only the
+   ForwardAuth middleware and declares no router
+   (`forge/features/auth/templates/platform_auth_gatekeeper/compose.yaml`), so
+   the stack routes none of its browser paths (`/auth/login`, `/callback`,
+   `/auth/userinfo`, `/logout`) on the frontend host, and the backend routers
+   require a session the browser cannot obtain. With `include_auth` on the
+   generated `.env` sets `VITE_AUTH_DISABLED=false`, so the app redirects to
+   `/auth/login` in the dev stack exactly as in the built one. The overlay does
+   not override that variable: `VITE_AUTH_DISABLED=true` would only swap in the
+   development user, and every API call would still be refused at the gate.
+   What keeps Keycloak working for a project that routes the gatekeeper itself
+   (Kartra's overlay does) is that the dev server stays on the **same origin**:
+   the same host and port behind Traefik, no published Vite port, so the
+   session cookie, the realm's redirect URIs (`http://*.localhost/*`,
+   `http://localhost:*`) and `webOrigins` need no change. The Vite dev proxy
+   the template generates targets `http://localhost:<port>` and is never
+   reached, because Traefik's backend routers match `/api/<backend>` first. A
+   forge-only dev loop with no sign-in uses a project generated with
+   `include_auth` off. The docs say all of this.
+7. **The Dockerfile, overlay and wrapper are scaffold, and the updater treats
+   their removal explicitly.** They are non-source or root-level files under
+   `ownership()`, so an edited copy receives a `.forge-merge` sidecar on update
+   and an untouched copy is rewritten. Vanished scaffold is normally left on
+   disk (ADR-006); for these files that would leave a stale overlay after
+   `dev_server` goes `true → false`. The updater deletes the overlay and the
+   wrapper on that transition when they are unmodified since generation, and
+   reports one that was edited. The Dockerfile falls back to the single-stage
+   form through the normal sidecar path.
+8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.24.4
+   or newer, where Watch's sync is too slow or a filesystem does not suit it,
+   generated docs say how to mount `src/` into the `dev` target instead. An older
+   Compose cannot use the overlay at all.
+   Only paths that exist are mounted (the Vue template has no `public/`; Svelte's
+   static assets are `static/`), and the docs name the caveats: on Linux the
+   container writes as its own uid, and the generated declaration files then
+   appear in the checkout owned by that uid. It is not a second generated mode.
+9. **Forge does not boot the dev stack itself.** After generation `boot()`
+   runs `docker compose up --build` on the base file only, which would serve
+   nginx and not Vite. With `dev_server` on, forge skips the automatic boot
+   (whether from `--yes` or the interactive prompt) and prints the Watch
+   command, so no run claims a hot-reload stack it did not start.
+10. **Dev is not the production proof.** No CSP applies, nginx is absent, and
+   auth is off. Production Compose and Helm tests, and the CSP lane against the
+   production build, remain the gates for those behaviours; the docs say so.
+
+## Alternatives considered
+
+### The prototype's bind mount of the whole checkout, with install volumes
+
+Rejected as the default. It needs two named volumes for installs, a one-shot
+service that chowns volume mount points, another that installs under a
+read-only mount with `--ignore-scripts`, and a uid variable, and it still
+cannot run on a host whose files the container user cannot write. Compose
+Watch removes all of it by keeping dependencies in the image and syncing in
+one direction. The prototype is the fallback in the docs, not the design.
+
+### A registry option (`frontend.dev_overlay`)
+
+Rejected. The value describes how one frontend is built and run, and `ui_kit`
+already established the `FrontendConfig` route for a setting of that kind
+that changes what is rendered.
+
+### Always emit the overlay and the `dev` stage
+
+Rejected. Every project's Dockerfile, recipe and golden snapshots would change
+for a feature most projects do not use, and the overlay would have to live in
+every update. An option keeps the off state's Dockerfile and Compose output
+unchanged. The recipe and `forge.toml` still record the field, so the goldens
+change; that is the accepted cost, as in ADR-011.
+
+### A compose profile in `docker-compose.yml`
+
+Rejected. A profile can add a service but cannot replace the nginx service's
+build, volumes and labels, so it would need a second frontend service on a
+second host.
+
+### A host dev server with a Vite proxy to Traefik
+
+Rejected. It is the second-origin setup the Context describes.
+
+## Consequences
+
+- With the field off, the rendered Dockerfile and Compose files are
+  unchanged. `forge.toml` and `.forge/quality.json` gain `dev_server = false`
+  on the next update, so golden snapshots, the manifest and the recipe change.
+- Projects on Docker Compose older than 2.24.4 cannot use the overlay.
+- A change under `package.json` or a lockfile rebuilds the image and restarts
+  the service; a change to the Vite config restarts it without a rebuild.
+- The host does not see the generated declaration files the dev server writes.
+  An editor's types follow a host install or build.
+- A project that edits the generated Dockerfile receives a sidecar the first
+  time it enables the field.
+- Kartra's adoption must move its `COPY --from=<context>` lines into `source`
+  and decide which of its additional build contexts (shared pricing and
+  geographic data) are watched; an unwatched one needs a rebuild, as today.
+  Its Vite aliases point outside the frontend root (`../../libs/...`,
+  `../../services/...`, which resolve to `/libs/...` and `/services/...` in the
+  container), and Vite refuses to serve files outside `server.fs.allow`. The
+  wrapper merges the project's own `vite.config.ts`, so Kartra widens
+  `server.fs.allow` there; forge's wrapper knows no project paths and adds
+  none. Its Compose stack is assembled through `COMPOSE_FILE`, so
+  the two-file command above would drop its other overlays; the dev overlay
+  goes last in that list.
+- Svelte keeps the nginx flow until its parity change lands.
+- If a list of frontends lands (kartrainc/forge#6), the overlay is extended
+  to one override per enabled frontend, with that frontend's service name,
+  host and `server_port`; this change does not assume it.
+
+## References
+
+- [Implementation plan](../../plans/2026-10-26-frontend-dev-server.md)
+- `forge/templates/deploy/docker-compose.yml.j2`, `Dockerfile.node.j2` and
+  `forge/docker_manager.py` — what the overlay replaces
+- Docker Compose Watch, `https://docs.docker.com/compose/how-tos/file-watch/`
+- Docker Compose merge rules (`!reset`, `!override`),
+  `https://docs.docker.com/reference/compose-file/merge/`
