@@ -233,15 +233,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   re-stamp is automatic. Callers that pin the manifest schema version must
   update; forge itself needs no action.
 
+### Breaking — unit flags beside a list
+
+- Unit flags (`--frontend`, `--backend-name`, `--features`, `--backend-port`,
+  ...) beside a `frontends:` or `backends:` list, a `--platform` preset's
+  included, stop with an error; they used to be ignored silently. A
+  `backends:` or `frontends:` key holding a mapping is refused too, where
+  `backends:` fell back to one default backend. Scripts that passed such flags
+  set the values in a config file instead (UPGRADING).
+
 ### Fixed
 
 - Template updates re-render every app of a framework and every backend of a
   language, not only the first match; a recorded app that is gone is skipped
   instead of being replaced by another app. A template's recorded version
   moves only when each of its re-renders applied (or left sidecars).
-- Unit flags (`--frontend`, `--backend-name`, `--features`, ...) beside a
-  `frontends:` or `backends:` list, a `--platform` preset's included, are
-  refused instead of silently ignored.
 - `frontend.features` in a stack file is read; it was dropped.
 - The Svelte template accepts an empty `features` list.
 - `security.csp` now protects the Vue frontend without the AI chat. The
