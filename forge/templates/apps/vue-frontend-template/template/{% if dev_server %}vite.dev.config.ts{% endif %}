@@ -8,6 +8,19 @@ import base from './vite.config.ts'
 const resolve = async (exported: UserConfigExport, env: ConfigEnv): Promise<UserConfig> =>
   typeof exported === 'function' ? exported(env) : exported
 
+// Hosts another Compose overlay routes to this service (it adds them to the router's
+// rule), as a comma-separated list in FORGE_DEV_ALLOWED_HOSTS on the frontend service.
+// A name only: no scheme, port, path or wildcard, so a typo fails here, not silently.
+const extraHosts = (process.env.FORGE_DEV_ALLOWED_HOSTS ?? '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean)
+for (const host of extraHosts) {
+  if (!/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)) {
+    throw new Error(`FORGE_DEV_ALLOWED_HOSTS: "${host}" is not a host name`)
+  }
+}
+
 export default async (env: ConfigEnv): Promise<UserConfig> => {
   const resolved = await resolve(base, env)
   return {
@@ -18,13 +31,12 @@ export default async (env: ConfigEnv): Promise<UserConfig> => {
       host: '0.0.0.0',
       // The port is the one the router targets: fail rather than move.
       strictPort: true,
-      // The host Traefik routes to this service. Set after the project's config, not
-      // merged into it: a merge concatenates host lists and keeps `true`, so the
-      // project could widen the list. The wrapper prevents the project's
-      // `allowedHosts` from widening the list; Vite's built-in allowances
-      // (localhost, *.localhost, IP addresses) and the ones from
-      // `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` still apply.
-      allowedHosts: ['app.localhost'],
+      // The host Traefik routes to this service, plus any named above; other
+      // external names are refused (Vite also always admits localhost, *.localhost
+      // and IP addresses). Set after the project's config, not merged into it: a
+      // merge concatenates host lists and keeps `true`, so the project could widen
+      // the list.
+      allowedHosts: ['app.localhost', ...extraHosts],
     },
   }
 }

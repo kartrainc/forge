@@ -21,7 +21,7 @@ change. Tracked as KR-59.
 | Runtime user | `dev` runs non-root; the tree and Vite's cache directories are writable by it; `COPY --chown` |
 | Overlay | generated `docker-compose.dev.yaml`; `volumes: !reset []` and `healthcheck: !override`, and only the service-port label (labels merge by key, so a downstream overlay's hosts survive); Compose ≥ 2.39.4 (`initial_sync`) |
 | Sync | Compose Watch: one `sync` rule over the app directory with `initial_sync: true`, and separate `rebuild` rules for `package.json` and the lockfile; Vite restarts itself on config changes |
-| Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; `allowedHosts` set to `app.localhost` after the project's config (Vite still admits localhost, `*.localhost` and IPs); `strictPort`; no polling unless measured |
+| Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; `allowedHosts` set to `app.localhost` plus `FORGE_DEV_ALLOWED_HOSTS` after the project's config (Vite still admits localhost, `*.localhost` and IPs); `strictPort`; no polling unless measured |
 | Auth | dev behaves like the built stack: the gatekeeper's browser paths are not routed; `VITE_AUTH_DISABLED` is not overridden; the Vite port is not published, so the origin, cookie and realm redirect URIs are unchanged |
 | Multi-frontend | not assumed; if kartrainc/forge#6 lands first, the overlay gains one override per enabled frontend |
 | Boot | with the field on, forge skips its automatic `docker compose up` and prints the Watch command |

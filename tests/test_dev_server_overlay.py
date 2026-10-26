@@ -210,7 +210,9 @@ class TestWrapper:
         self, on: Path
     ) -> None:
         wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
-        assert "allowedHosts: ['app.localhost']" in wrapper
+        assert "allowedHosts: ['app.localhost', ...extraHosts]" in wrapper
+        assert "process.env.FORGE_DEV_ALLOWED_HOSTS" in wrapper
+        assert "is not a host name" in wrapper
         assert "allowedHosts: true" not in wrapper
         assert "strictPort: true" in wrapper
         assert "host: '0.0.0.0'" in wrapper

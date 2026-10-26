@@ -11,6 +11,8 @@ services:
     build:
       target: dev
     volumes: !reset []
+    # A host another overlay adds to the router's rule must also go in
+    # FORGE_DEV_ALLOWED_HOSTS (comma-separated) on this service, or Vite answers 403.
     # Only the port the router targets changes. Labels merge key by key, so the rule,
     # the entrypoint and any host another overlay added to the router stay as they are.
     labels:

@@ -188,6 +188,9 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     port = _free_port()
     (root / "compose.e2e.yaml").write_text(
         "services:\n"
+        "  frontend:\n"
+        "    environment:\n"
+        "      FORGE_DEV_ALLOWED_HOSTS: dev.example.test\n"
         "  traefik:\n"
         f'    ports: !override\n      - "127.0.0.1:{port}:80"\n'
         "    environment:\n"
@@ -226,6 +229,8 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         # always admits localhost, *.localhost and IP addresses).
         assert _http_status(compose, root, "app.localhost") == "200"
         assert _http_status(compose, root, "evil.example") == "403"
+        # A host another overlay routes here is admitted once it is named.
+        assert _http_status(compose, root, "dev.example.test") == "200"
 
         _run(["npx", "--no-install", "playwright", "install", "chromium"], app, 900)
         probe = tmp_path / "probe.mjs"

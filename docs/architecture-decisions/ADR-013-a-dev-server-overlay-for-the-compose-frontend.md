@@ -123,7 +123,12 @@ What it learned shapes this decision:
    name and IP addresses, and adds hosts named in its
    `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable. That is
    enough here because Traefik routes only `app.localhost` to this service and
-   the Vite port is not published. File polling is off: Compose writes the
+   the Vite port is not published. A project that routes more hosts to the
+   frontend (Kartra adds `app.localtest.me`) names them in
+   `FORGE_DEV_ALLOWED_HOSTS` on the frontend service, a comma-separated list of
+   plain host names that the wrapper checks and appends after `app.localhost`;
+   without it Vite answers 403 for those hosts, which is how Kartra's adoption
+   found the need. File polling is off: Compose writes the
    synced files inside the container, where Vite's watcher sees them (measured:
    an edit reaches the browser in under a second). It imports the project's
    config with its `.ts` extension, which Vite 8's native config loader asks for.

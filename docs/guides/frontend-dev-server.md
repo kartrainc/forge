@@ -95,6 +95,22 @@ the newest pnpm for a lockfile generated on the host, and yarn project generatio
 fail at the lint step on some hosts. Both predate this option; until they are fixed,
 treat the dev server as verified with npm.
 
+## Hosts other overlays add
+
+The wrapper lists `app.localhost`. If another Compose overlay adds hosts to the
+frontend's router rule, Vite answers 403 for them until you name them on the
+frontend service, as a comma-separated list of plain host names:
+
+```yaml
+services:
+  frontend:
+    environment:
+      FORGE_DEV_ALLOWED_HOSTS: app.example.test,app.other.test
+```
+
+A name with a scheme, port, path or wildcard stops the dev server at start-up.
+The overlay keeps the router's other labels, so the hosts themselves are yours.
+
 ## Aliases outside the app
 
 The container holds `apps/<frontend>` at `/app`. A `vite.config.ts` that aliases
