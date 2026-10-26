@@ -340,14 +340,14 @@ _KEPT_POLICY = (
 _INCLUDING = "server {\n    include /etc/nginx/snippets/security-headers.conf;\n}\n"
 
 
-def _report(port: int, report: dict) -> None:
-    body = json.dumps({"csp-report": report}).encode()
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/__csp-report",
-        data=body,
-        headers={"Content-Type": "application/csp-report"},
-    )
-    urllib.request.urlopen(req, timeout=5).close()
+_CHECK_FILE = json.dumps(
+    {"policy": "security-headers.conf", "variables": {"MEDIA_ORIGINS": "https://media.example"}}
+)
+
+
+def _fetch(port: int, path: str) -> tuple[str, str]:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as res:
+        return res.headers["Content-Security-Policy"], res.read().decode()
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -356,15 +356,7 @@ def test_the_check_serves_the_policy_file_a_project_names(tmp_path: Path) -> Non
     app = _app(
         tmp_path,
         _INCLUDING,
-        {
-            "security-headers.conf": _KEPT_POLICY,
-            "csp-check.json": json.dumps(
-                {
-                    "policy": "security-headers.conf",
-                    "variables": {"MEDIA_ORIGINS": "https://media.example"},
-                }
-            ),
-        },
+        {"security-headers.conf": _KEPT_POLICY, "csp-check.json": _CHECK_FILE},
     )
     server, port = _serve(app, {})
     try:
@@ -375,20 +367,47 @@ def test_the_check_serves_the_policy_file_a_project_names(tmp_path: Path) -> Non
         # The policy's own report directive gives way to the check's collector:
         # a browser that knows report-to would ignore a report-uri beside it.
         assert "report-to" not in policy and policy.endswith("; report-uri /__csp-report")
-        # Until a report arrives, each page carries the canary the policy blocks.
-        assert '<script src="https://csp-canary.invalid/forge.js"></script></head>' in page
-        _report(port, {"blocked-uri": "https://csp-canary.invalid/forge.js"})
-        assert "csp-canary" not in _get(port)[1]
+        # The app's pages are served untouched; the canary is a page of its own,
+        # under a fixed policy that blocks its script whatever the project admits.
+        assert "csp-canary" not in page
+        canary_policy, canary = _fetch(port, "/__csp-canary")
+        assert canary_policy == "default-src 'none'; script-src 'none'; report-uri /__csp-report"
+        assert '<script src="/__csp-canary.js"></script>' in canary
     finally:
         server.terminate()
         server.wait(timeout=10)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_a_policy_file_needs_no_nginx_conf(tmp_path: Path) -> None:
+    app = _app(tmp_path, "", {"security-headers.conf": _KEPT_POLICY, "csp-check.json": _CHECK_FILE})
+    (app / "nginx.conf").unlink()
+    server, port = _serve(app, {})
+    try:
+        assert "img-src 'self' https://media.example;" in _get(port)[0]
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_without_chromium_the_canary_says_so_and_the_server_still_serves(tmp_path: Path) -> None:
+    # The app has no node_modules, so @playwright/test cannot be imported.
+    app = _app(tmp_path, f'add_header Content-Security-Policy "{"default-src 'self'"}" always;\n')
+    server, port = _serve(app, {"FORGE_CSP_REPORT": str(tmp_path / "reports.jsonl")})
+    try:
+        assert _get(port)[0].startswith("default-src 'self'")
+    finally:
+        server.terminate()
+        _, stderr = server.communicate(timeout=10)
+    assert "could not open the canary page in Chromium" in stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 @pytest.mark.parametrize(
     ("nginx", "files", "error"),
     [
-        (_INCLUDING, {}, "csp-check.json names no policy file"),
+        (_INCLUDING, {}, "neither nginx.conf nor a file csp-check.json names"),
         (
             _INCLUDING,
             {
@@ -404,8 +423,13 @@ def test_the_check_serves_the_policy_file_a_project_names(tmp_path: Path) -> Non
             {},
             "sends 2 different Content-Security-Policy headers",
         ),
+        (
+            "server {\n    add_header Content-Security-Policy \"default-src 'self'\" always;\n}\n",
+            {"security-headers.conf": _KEPT_POLICY, "csp-check.json": _CHECK_FILE},
+            "csp-check.json names another source: keep one",
+        ),
     ],
-    ids=["no-source", "undeclared-variable", "two-policies"],
+    ids=["no-source", "undeclared-variable", "two-policies", "two-sources"],
 )
 def test_the_check_refuses_a_policy_it_cannot_pin_down(
     tmp_path: Path, nginx: str, files: dict[str, str], error: str

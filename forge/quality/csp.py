@@ -11,10 +11,11 @@ keeps the project's authentication setting; the suites answer the session in
 the page. Which suites run, and with which builds, is the project's
 ``playwright.csp.config.ts`` to say.
 
-The check also proves that reports reach it: until the first one arrives, the
-script serves each page with a canary, a script from a host that cannot
-resolve, which any working policy blocks. Without the canary's report the
-check fails, since an empty report file would otherwise pass.
+The check also proves that reports reach it, since an empty report file
+would otherwise pass: the script opens a canary page of its own once, under a
+fixed policy that blocks the page's one script, whatever the project's policy
+admits. The app's pages are served untouched. Without the canary's report the
+check fails.
 
 Two reports are admitted for a ``nuxt-ui`` project, each a ``<style>`` element a
 Nuxt UI 4.12 dependency inserts without the nonce in Vue mode. The browser
@@ -43,8 +44,8 @@ ADMITTED_STYLE_SAMPLES = {
     "*,*::before,*::after{-webkit-transition:": "VueUse's colour-mode transition guard",
 }
 
-#: The script ``serve-csp.mjs`` puts on pages until the first report arrives.
-CANARY = "https://csp-canary.invalid/forge.js"
+#: The script of the canary page ``serve-csp.mjs`` opens to prove reporting.
+CANARY = "/__csp-canary.js"
 
 
 def admitted(report: dict, ui_kit: str) -> str | None:
@@ -60,7 +61,7 @@ def admitted(report: dict, ui_kit: str) -> str | None:
 
 def is_canary(report: dict) -> bool:
     """True for the report of the canary script that proves reports arrive."""
-    return str(report.get("blocked-uri", "")).startswith(CANARY)
+    return str(report.get("blocked-uri", "")).endswith(CANARY)
 
 
 def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn") -> dict:
@@ -151,5 +152,9 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
         "canary": canary,
     }
     if not canary:
-        outcome["error"] = "no report reached the check: the canary script went unreported"
+        outcome["error"] = (
+            "no report reached the check: the canary page went unreported (Chromium did "
+            "not start for scripts/serve-csp.mjs, or its reports never reached the collector; "
+            "see the script's messages on stderr)"
+        )
     return outcome

@@ -404,10 +404,12 @@ kit it uses, unless the project has the AI chat:
   policy in a header template names that file in `csp-check.json` beside the
   config, with the values of its `${NAME}` variables
   (`{"policy": "security-headers.conf", "variables": {"MEDIA_ORIGINS": "…"}}`);
-  an undeclared variable, a missing source or two different policies stop the
-  check. Until the first report arrives, the script serves each page with a
-  canary script the policy blocks, and the check fails without its report, so
-  a policy that reports nowhere cannot pass. Both scripts are written only
+  exactly one source names the policy, and both or neither, an undeclared
+  variable or two different policies stop the check. Before the suites, the
+  script opens a canary page of its own in the project's Playwright Chromium,
+  under a fixed policy that blocks the page's script whatever the project's
+  policy admits; the check fails without its report, so a collector that
+  receives nothing cannot pass. The app's pages are served untouched. Both scripts are written only
   when absent and are the project's afterwards: give the config the specs,
   projects and builds a production run can serve (a development-only route or
   a second build is the project's to arrange); to take a later version,

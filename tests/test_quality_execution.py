@@ -187,9 +187,9 @@ _TRANSITION = {
     "script-sample": "*,*::before,*::after{-webkit-transition:",
 }
 _CANARY = {
-    "document-uri": "http://127.0.0.1:4174/",
+    "document-uri": "http://127.0.0.1:4174/__csp-canary",
     "effective-directive": "script-src-elem",
-    "blocked-uri": "https://csp-canary.invalid/forge.js",
+    "blocked-uri": "http://127.0.0.1:4174/__csp-canary.js",
     "script-sample": "",
 }
 _ICON_FETCH = {
@@ -214,8 +214,8 @@ def _content_security(
     service = tmp_path / "apps" / "web"
     service.mkdir(parents=True)
     (service / "playwright.csp.config.ts").write_text("export default {}\n", encoding="utf-8")
-    # serve-csp.mjs serves the canary until a report arrives: its report proves
-    # that reports reach the check.
+    # serve-csp.mjs opens its canary page once: its report proves that reports
+    # reach the check.
     reports = [*reports, _CANARY] if canary else reports
     monkeypatch.setenv("FORGE_BROWSER_COVERAGE", "/coverage")
     monkeypatch.delenv("VITE_AUTH_DISABLED", raising=False)

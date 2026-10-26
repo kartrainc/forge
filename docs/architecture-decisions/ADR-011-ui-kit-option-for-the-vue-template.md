@@ -83,7 +83,8 @@ works best adopted by its documented model, not adapted to shadcn-vue's.
    (`tests/e2e/session.ts`). The sign-in flow through the gateway and Keycloak
    is a consumer's live suite to run under its real policy. A project that
    keeps its own policy in a header template names it in `csp-check.json`,
-   and the check fails unless a canary the policy blocks is reported.
+   and the check fails unless a canary page of its own, under a fixed policy,
+   is reported.
    `connect-src` admits the page's own origin and an external API's, not
    `ws:` or `wss:` at large. The policy covers the Vue
    template without the AI chat, which is what the lanes prove under it.
