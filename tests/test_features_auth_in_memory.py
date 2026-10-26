@@ -242,7 +242,7 @@ def _py_config(provider: str, *, include_keycloak: bool) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=include_keycloak,
         options={"auth.mode": "generate", "auth.provider": provider},
     )
@@ -299,7 +299,7 @@ def test_in_memory_render_lands_issuer_and_route(tmp_path: Path) -> None:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=False,
         options={"auth.mode": "generate", "auth.provider": "in_memory"},
     )

@@ -93,7 +93,7 @@ def _make_config(tmp_path: Path):
         project_name="Vite App",
         output_dir=str(tmp_path),
         backends=[bc],
-        frontend=fe,
+        frontends=[fe],
         include_keycloak=False,
     )
 

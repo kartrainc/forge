@@ -65,12 +65,11 @@ class TestConfigShape:
         assert "frontends" in names and "frontend" not in names
         assert "frontends" in dataclasses.asdict(cfg) and "frontend" not in dataclasses.asdict(cfg)
 
-    def test_frontend_kwarg_is_shorthand_for_a_list_of_one(self):
-        fc = _vue()
-        assert ProjectConfig(project_name="Test", frontend=fc).frontends == [fc]  # type: ignore[call-arg]
-        assert ProjectConfig(project_name="Test", frontend=None).frontends == []  # type: ignore[call-arg]
-        with pytest.raises(TypeError, match="either 'frontend' or 'frontends'"):
-            ProjectConfig(project_name="Test", frontend=fc, frontends=[fc])  # type: ignore[call-arg]
+    def test_frontend_kwarg_is_gone_like_backend(self):
+        with pytest.raises(TypeError):
+            ProjectConfig(project_name="Test", frontend=_vue())  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            ProjectConfig(project_name="Test", backend=BackendConfig(project_name="Test"))  # type: ignore[call-arg]
 
     def test_frontend_setter_mirrors_backend(self):
         cfg = _project()

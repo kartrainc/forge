@@ -429,10 +429,9 @@ nothing with one frontend.
 - **The generated gatekeeper reads `GATEKEEPER_FRONTEND_HOST_LABELS`.** Empty
   (the default) keeps its behaviour. A gatekeeper you run yourself in front of
   several apps needs the first label of each further app's host listed there.
-- **Python API.** `ProjectConfig` takes `frontends=[...]`. `frontend=x` still
-  works as shorthand for `frontends=[x]` but is due to go, as `backend` has no
-  such keyword: move to `frontends=`. `config.frontend` still returns the
-  primary and can still be assigned. `FrontendConfig.features` defaults to `None`
+- **Python API.** `ProjectConfig(frontend=...)` is replaced by
+  `ProjectConfig(frontends=[...])`; `config.frontend` still returns the primary
+  and can still be assigned. `FrontendConfig.features` defaults to `None`
   (every backend feature), and an app's pages are
   `fc.page_features(config.all_features)`.
 - **Template updates reach every backend.** A template bump now re-renders each

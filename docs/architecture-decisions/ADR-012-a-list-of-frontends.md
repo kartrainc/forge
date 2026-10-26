@@ -30,9 +30,7 @@ the generator's provenance and update path.
 1. **Mirror the backend precedent.** The stack file takes `frontend:` (one app)
    or `frontends:` (a list); both is an error. `ProjectConfig.frontends` is the
    list and `frontend` a property returning the first entry, with a setter, as
-   `backend` is. `ProjectConfig(frontend=x)` stays accepted for now as
-   shorthand for `frontends=[x]`; a follow-up removes it, as `backend` has
-   no such keyword.
+   `backend` is. `ProjectConfig(frontend=...)` is no longer accepted.
 2. **The first entry is the primary and keeps everything it has.** Compose
    service `frontend` on `app.localhost`, the Helm `frontend:` block and
    `<release>-frontend` resources, the root `tests/e2e` harness, the realm's
