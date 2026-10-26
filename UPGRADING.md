@@ -328,6 +328,34 @@ up` created only `POSTGRES_DB`.
   delete the Postgres volume once after updating, for example with
   `docker compose down -v`, which also deletes the other volumes.
 
+### Frontend dev server (unreleased)
+
+`frontend.dev_server` (Vue only, off by default) runs the Compose frontend as a
+Vite dev server with hot reload; see the
+[guide](docs/guides/frontend-dev-server.md). Existing projects change only by
+recording `dev_server = false` in `.forge/quality.json`; the Dockerfile, the
+Compose file and `forge.toml` stay as they were.
+
+Turning it on with `forge --update`:
+
+- adds `docker-compose.dev.yaml` and `apps/<frontend>/vite.dev.config.ts`, and
+  a `dev` stage in `apps/<frontend>/Dockerfile` (`deps`, `source`, `dev`, then
+  `builder` and the nginx stage from `source`);
+- stops with `New generator output collides with user file` if your project
+  already has a `docker-compose.dev.yaml` or `vite.dev.config.ts`: move yours
+  aside, update, then fold your changes in;
+- proposes the Dockerfile change as `apps/<frontend>/Dockerfile.forge-merge` if
+  you edited the Dockerfile. Put any `COPY --from=<named context>` lines of your
+  own in the `source` stage, so the dev image holds them too, and resolve with
+  `forge --quality resolve`.
+
+Turning it off removes the two new files when you have not changed them. A file you
+changed stays on disk and is listed as `left_in_place` in the update report.
+
+Needs Docker Compose 2.40 or newer; `forge doctor` checks it. `forge` no longer
+runs `docker compose up` for a project with the option on, because that would
+start nginx: it prints the command that starts the dev stack.
+
 ### Frontend image build context (unreleased)
 
 The frontend image is built from the whole `apps/<frontend>` directory, and
