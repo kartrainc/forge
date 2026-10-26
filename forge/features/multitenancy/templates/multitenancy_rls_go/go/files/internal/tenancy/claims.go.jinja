@@ -1,0 +1,47 @@
+package tenancy
+
+import (
+	"context"
+{%- if options['auth.mode'] == 'generate' %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
+
+	"{{ project_name }}/internal/identity"
+)
+{%- if options['auth.mode'] == 'generate' %}
+
+// VerifiedClaims returns the claims of the token the platform-auth middleware
+// verified for ctx, or nil.
+func VerifiedClaims(ctx context.Context) map[string]any {
+	if verified, ok := platformauth.IdentityFromContext(ctx); ok {
+		return verified.RawClaims
+	}
+	return nil
+}
+
+// unverifiedIdentity returns the identity bound to ctx when no token was
+// verified for it (the platform-auth dev mode).
+func unverifiedIdentity(ctx context.Context) (identity.IdentityContext, bool) {
+	if _, verified := platformauth.IdentityFromContext(ctx); verified {
+		return identity.IdentityContext{}, false
+	}
+	return identity.FromContext(ctx)
+}
+{%- else %}
+
+// VerifiedClaims returns nil: without platform auth (auth.mode=none) no token
+// is verified, so token_claim resolution uses the bound identity's tenant.
+func VerifiedClaims(context.Context) map[string]any {
+	return nil
+}
+
+// unverifiedIdentity returns the identity bound to ctx, else identity.Dev(),
+// which the dev-identity middleware keeps or binds further in.
+func unverifiedIdentity(ctx context.Context) (identity.IdentityContext, bool) {
+	if ident, ok := identity.FromContext(ctx); ok {
+		return ident, true
+	}
+	return identity.Dev(), true
+}
+{%- endif %}

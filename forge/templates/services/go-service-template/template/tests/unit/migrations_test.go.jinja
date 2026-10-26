@@ -1,0 +1,90 @@
+package unit_test
+
+import (
+	"bytes"
+	"cmp"
+	"context"
+	"errors"
+	"io/fs"
+	"slices"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/pressly/goose/v3"
+
+	"{{ project_name }}/migrations"
+)
+
+func TestParseCommandDefaultsToUp(t *testing.T) {
+	for want, args := range map[string][]string{
+		"up": nil, "down": {"down"}, "status": {"status"}, "version": {"version"},
+	} {
+		if got, err := migrations.ParseCommand(args); err != nil || got != want {
+			t.Fatalf("%q: %q %v", args, got, err)
+		}
+	}
+	if got, _ := migrations.ParseCommand([]string{"up"}); got != "up" {
+		t.Fatalf("explicit up: %q", got)
+	}
+	for _, line := range []string{"sideways", "", "up extra"} {
+		if _, err := migrations.ParseCommand(strings.Split(line, " ")); !errors.Is(err, migrations.ErrUsage) {
+			t.Fatalf("%q must be a usage error: %v", line, err)
+		}
+	}
+}
+
+func TestEmbeddedMigrationsAreVersionedInOrder(t *testing.T) {
+	names, err := fs.Glob(migrations.Embedded(), "*.sql")
+	if err != nil || len(names) == 0 {
+		t.Fatalf("embedded migrations: %v %v", names, err)
+	}
+	migrator, err := migrations.Open(unreachable, migrations.Embedded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	sources := migrator.ListSources()
+	if len(sources) != len(names) {
+		t.Fatalf("sources %d, files %d", len(sources), len(names))
+	}
+	if !slices.IsSortedFunc(sources, func(a, b *goose.Source) int { return cmp.Compare(a.Version, b.Version) }) {
+		t.Fatal("sources are ordered by version")
+	}
+}
+
+func TestOpenRejectsInvalidURLAndEmptyMigrationSets(t *testing.T) {
+	if _, err := migrations.Open("::not a url::", migrations.Embedded()); err == nil {
+		t.Fatal("an invalid url fails")
+	}
+	if _, err := migrations.Open(unreachable, fstest.MapFS{}); !errors.Is(err, goose.ErrNoMigrations) {
+		t.Fatalf("an empty migration set fails: %v", err)
+	}
+}
+
+func TestCommandsFailWithoutDatabase(t *testing.T) {
+	ctx := context.Background()
+	migrator, err := migrations.Open(unreachable, migrations.Embedded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Close()
+	var out bytes.Buffer
+	for _, command := range []string{"up", "down", "status", "version"} {
+		if err := migrations.Run(ctx, migrator, command, &out); err == nil {
+			t.Fatalf("%s without a database must fail", command)
+		}
+	}
+	if out.Len() != 0 {
+		t.Fatalf("failed commands print nothing: %q", out.String())
+	}
+	if err := migrations.Run(ctx, migrator, "sideways", &out); !errors.Is(err, migrations.ErrUsage) {
+		t.Fatalf("unknown command: %v", err)
+	}
+	if err := migrations.Up(ctx, unreachable); err == nil {
+		t.Fatal("Up without a database must fail")
+	}
+	if err := migrations.Up(ctx, "::not a url::"); err == nil {
+		t.Fatal("Up with an invalid url must fail")
+	}
+}

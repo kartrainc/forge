@@ -79,6 +79,7 @@ def test_go_toolchain(tmp_path, monkeypatch) -> None:
     checks = toolchain.verify(tmp_path, quiet=True)
     assert commands[:2] == [["go", "mod", "tidy"], ["gofmt", "-w", "."]]
     assert ["go", "vet", "./..."] in commands
+    assert ["go", "run", go_toolchain.STATICCHECK, "./..."] in commands
     assert checks[1].status == "skip"
 
     monkeypatch.setattr(go_toolchain.shutil, "which", lambda name: "/usr/bin/gofmt")
@@ -89,6 +90,11 @@ def test_go_toolchain(tmp_path, monkeypatch) -> None:
             lambda *a, stdout=stdout, **k: subprocess.CompletedProcess(a, 0, stdout, ""),
         )
         assert go_toolchain._gofmt_check(tmp_path, quiet=False).status == status
+
+
+def test_go_ci_pins_the_toolchain_staticcheck() -> None:
+    ci = Path(go_toolchain.__file__).parents[1] / "templates/_common/ci_go.yml"
+    assert f"go run {go_toolchain.STATICCHECK} ./..." in ci.read_text(encoding="utf-8")
 
 
 def test_go_mod_dependency_round_trip(tmp_path) -> None:

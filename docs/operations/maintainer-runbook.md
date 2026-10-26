@@ -236,7 +236,7 @@ The PR/push pipeline runs these jobs. A failure in one does not cancel the other
    uv run python tests/matrix/runner.py --scenario <name> --lane generate
    ```
 
-8. **`matrix-verify`** (lane B) -- toolchain verification per scenario (uv, node/npm, cargo):
+8. **`matrix-verify`** (lane B) -- toolchain verification per scenario (uv, node/npm, cargo, go):
    ```bash
    uv run python tests/matrix/runner.py --scenario <name> --lane verify
    ```
@@ -323,7 +323,7 @@ do not wait for the weekly batch to fix an exploitable vulnerability.
    separate technology decision, not an ordinary version bump.
 3. Run locked installs, `make check`, the ty canary, canvas build/type/runtime
    checks, and authentication parity with `--group auth-parity`. Build and test
-   rendered Python/Node/Rust applications and Vue/Svelte/Flutter frontends.
+   rendered Python/Node/Rust/Go applications and Vue/Svelte/Flutter frontends.
    Run native generated-code architecture and unit/integration/E2E coverage
    gates without changing their thresholds. Advance `FORGE_NPM_SNAPSHOT` in
    `.github/workflows/generated-quality.yml` to the time you resolved the
@@ -351,7 +351,7 @@ failure logs and never remove an unrelated running application.
 ## Generated quality failures
 
 The `generated-quality` workflow has policy checks on Windows/Linux and selected
-Python/Node/Rust/Vue/Svelte native rendered lanes. Read the failing subject and
+Python/Node/Rust/Go/Vue/Svelte native rendered lanes. Read the failing subject and
 suite, its native report, and its source hashes before changing code. Missing or
 stale reports require rerunning the suite; coverage failures require behavior
 coverage. Do not weaken exclusions, ownership, or thresholds to make a run green.

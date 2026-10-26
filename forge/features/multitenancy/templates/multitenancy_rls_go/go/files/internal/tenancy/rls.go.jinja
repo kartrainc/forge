@@ -1,0 +1,47 @@
+package tenancy
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5"
+
+	"{{ project_name }}/internal/data/repositories"
+	"{{ project_name }}/internal/identity"
+)
+
+// TxStarter opens transactions; *pgxpool.Pool satisfies it.
+type TxStarter interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// Bind sets guc to tenant until tx ends. set_config(..., true) is
+// transaction-local, so a pooled connection never carries a tenant into the
+// next transaction. An empty tenant binds nothing.
+func Bind(ctx context.Context, tx pgx.Tx, guc, tenant string) error {
+	if tenant == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", guc, tenant)
+	return err
+}
+
+// InTx runs fn in a transaction bound to tenant; it commits when fn succeeds
+// and rolls back otherwise.
+func InTx(ctx context.Context, db TxStarter, guc, tenant string, fn func(pgx.Tx) error) error {
+	return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if err := Bind(ctx, tx, guc, tenant); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+// Scope runs every repository call in its own transaction bound to the
+// caller's tenant (see Resolver.Tenant).
+func Scope(db TxStarter, resolver *Resolver) repositories.Scope {
+	return func(ctx context.Context, ident identity.IdentityContext, fn func(repositories.DBTX) error) error {
+		return InTx(ctx, db, resolver.settings.GUC, resolver.Tenant(ctx, ident), func(tx pgx.Tx) error {
+			return fn(tx)
+		})
+	}
+}

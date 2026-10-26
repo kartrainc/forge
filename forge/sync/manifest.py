@@ -685,4 +685,4 @@ def write_forge_toml(
         forge_tbl.add("merge_blocks", mb_tbl)
 
     doc.add("forge", forge_tbl)
-    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8", newline="\n")

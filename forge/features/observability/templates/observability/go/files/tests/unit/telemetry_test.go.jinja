@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/embedded"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -158,5 +162,27 @@ func TestTelemetryNamesApplicationSpansByRoute(t *testing.T) {
 	spans := recorder.Ended()
 	if len(spans) != 1 || spans[0].Name() != "GET /api/v1/info" {
 		t.Fatalf("one route-named span per request: %v", spans)
+	}
+}
+
+type telemetryMeterCounter struct {
+	embedded.MeterProvider
+	meters atomic.Int32
+}
+
+func (p *telemetryMeterCounter) Meter(name string, options ...metric.MeterOption) metric.Meter {
+	p.meters.Add(1)
+	return metricnoop.NewMeterProvider().Meter(name, options...)
+}
+
+func TestTelemetryMiddlewareRecordsNoMetrics(t *testing.T) {
+	previous := otel.GetMeterProvider()
+	defer otel.SetMeterProvider(previous)
+	counting := &telemetryMeterCounter{}
+	otel.SetMeterProvider(counting)
+	handler := telemetry.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/orders/1", nil))
+	if n := counting.meters.Load(); n != 0 {
+		t.Fatalf("otelhttp must not record its own server metrics: %d meters", n)
 	}
 }

@@ -331,6 +331,9 @@ _VALUE_REQUIRES_BACKEND: dict[tuple[str, object], frozenset[BackendLanguage]] = 
     ("queue.backend", "bullmq"): frozenset({BackendLanguage.NODE}),
     ("queue.backend", "apalis"): frozenset({BackendLanguage.RUST}),
     ("queue.backend", "asynq"): frozenset({BackendLanguage.GO}),
+    # ``shared_rls`` ships on Python and Go (``allowed_backends`` on the
+    # option); the per-tenant-schema strategy is Python-only.
+    ("database.multitenancy", "schema_per_tenant"): frozenset({BackendLanguage.PYTHON}),
 }
 
 # Options where EVERY "active" (non-none / non-false) value is Python-only in
@@ -590,14 +593,43 @@ def _check_multitenancy_deferred(config: ProjectConfig) -> None:
         f"forge.toml (so a future version can realise it without a config "
         f"migration), but generation cannot proceed: it would produce a "
         f"project with no tenant isolation. Use database.multitenancy="
-        f"'shared_rls' (Postgres Row-Level Security) or 'schema_per_tenant' "
-        f"(per-tenant Postgres schema), both Python, today — or 'none' for "
-        f"application-layer scoping only.",
+        f"'shared_rls' (Postgres Row-Level Security; Python and Go) or "
+        f"'schema_per_tenant' (per-tenant Postgres schema; Python) today — or "
+        f"'none' for application-layer scoping only.",
         code=OPTIONS_INVALID_VALUE,
         context={
             "option": path,
             "value": value,
             "implemented": ["none", "shared_rls", "schema_per_tenant"],
+        },
+    )
+
+
+# Tenant-isolation strategies each Go service implements. A Go service the
+# selected strategy does not reach would run without tenant isolation, so a
+# project with Go services must pick one Go implements.
+_GO_MULTITENANCY: frozenset[str] = frozenset({"none", "shared_rls"})
+
+
+def _check_go_multitenancy(
+    config: ProjectConfig, project_backends: tuple[BackendLanguage, ...]
+) -> None:
+    """Reject a tenant-isolation strategy that would leave Go services unisolated."""
+    path = "database.multitenancy"
+    value = config.options.get(path, "none")
+    if BackendLanguage.GO not in project_backends or value in _GO_MULTITENANCY:
+        return
+    raise OptionsError(
+        f"database.multitenancy={value!r} has no Go implementation, so this "
+        f"project's Go services would run without tenant isolation. Use "
+        f"database.multitenancy='shared_rls' (Python and Go), or move the Go "
+        f"services to a separate configuration.",
+        code=OPTIONS_INVALID_VALUE,
+        context={
+            "option": path,
+            "value": value,
+            "go_implements": sorted(_GO_MULTITENANCY - {"none"}),
+            "project_backends": [b.value for b in project_backends],
         },
     )
 
@@ -737,6 +769,7 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
     _check_option_allowed_backends(config, project_backends)
     _check_app_template_exclusions(config)
     _check_multitenancy_deferred(config)
+    _check_go_multitenancy(config, project_backends)
 
     option_values = _apply_option_defaults(config.options)
     # The platform-auth gatekeeper stack depends on the keycloak + redis

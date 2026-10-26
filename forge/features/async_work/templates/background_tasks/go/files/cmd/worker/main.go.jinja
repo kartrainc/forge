@@ -21,6 +21,7 @@ func main() {
 }
 
 func run() int {
+	slog.SetDefault(app.Logger("info", false))
 	cfg, err := config.Load(config.LoadOptions{})
 	if err != nil {
 		slog.Error("configuration error", "error", err)

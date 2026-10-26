@@ -1,0 +1,9 @@
+# pii_redaction for Go: every logger app.Logger builds redacts (cmd/server,
+# cmd/worker, cmd/migrate). The server also installs redaction on whatever
+# default logger the startup hooks leave behind, which is a no-op unless a
+# project replaced it with a logger built elsewhere.
+
+- target: cmd/server/main.go
+  marker: FORGE:STARTUP_INIT
+  position: after
+  snippet: app.InstallPIIRedaction()

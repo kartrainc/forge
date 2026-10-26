@@ -16,8 +16,11 @@ from forge.fragments._spec import Fragment, FragmentImplSpec
 
 _TEMPLATES = Path(__file__).resolve().parent / "templates"
 
+# otel/metric supplies the no-op meter provider that keeps otelhttp's own
+# server metrics off.
 _GO_OTEL_DEPENDENCIES = (
     "go.opentelemetry.io/otel@v1.47.0",
+    "go.opentelemetry.io/otel/metric@v1.47.0",
     "go.opentelemetry.io/otel/sdk@v1.47.0",
     "go.opentelemetry.io/otel/trace@v1.47.0",
     "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.47.0",
@@ -246,6 +249,20 @@ def register_all(api: ForgeAPI) -> None:
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("metrics_middleware", "python"),
                     dependencies=("opentelemetry-api>=1.20.0",),
+                ),
+                # Go installs its own MeterProvider (internal/otel/metrics.go,
+                # same OTEL_* env contract as the trace exporter) plus the Go
+                # runtime metrics.
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("metrics_middleware", "go"),
+                    dependencies=(
+                        "go.opentelemetry.io/otel@v1.47.0",
+                        "go.opentelemetry.io/otel/metric@v1.47.0",
+                        "go.opentelemetry.io/otel/sdk@v1.47.0",
+                        "go.opentelemetry.io/otel/sdk/metric@v1.47.0",
+                        "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp@v1.47.0",
+                        "go.opentelemetry.io/contrib/instrumentation/runtime@v0.72.0",
+                    ),
                 ),
             },
         )

@@ -8,8 +8,13 @@ from pathlib import Path
 
 import tomlkit
 
+from forge.config import BackendLanguage
+from forge.errors import ForgeError
 from forge.quality.model import RECIPE, digest, ownership, project_path, read_recipe
 from forge.sync.manifest import read_forge_toml
+from forge.sync.provenance import ProvenanceCollector
+from forge.toolchains._runner import run_backend_cmd
+from forge.toolchains.go import TIDY
 
 
 def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
@@ -37,9 +42,17 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
     config = read_recipe(root, check_generator=False)
     config.options = dict(old.options)
     config.option_origins = dict(old.option_origins)
+    go_modules = [f"services/{b.name}" for b in config.backends if b.language == BackendLanguage.GO]
+    if go_modules and shutil.which("go") is None:
+        raise ValueError(
+            f"Updating Go services ({', '.join(go_modules)}) resolves go.mod and go.sum "
+            "as generation does: install the go toolchain and run the update again."
+        )
     candidate = generate(config, quiet=True, dry_run=True)
     try:
         new = read_forge_toml(candidate / "forge.toml")
+        untidy = resolve_go_modules(candidate, go_modules, new.provenance)
+        locks = {f"{module}/go.sum": f"{module}/go.mod" for module in go_modules}
         # Regeneration always writes the frontend app to the generator's fixed
         # apps/<frontend_slug>. A different recorded location (an edited
         # manifest or a moved app) would silently recreate the app there and
@@ -64,6 +77,8 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
                     )
                 new.provenance[rel] = previous
                 continue
+            if rel in locks:
+                continue
             if previous is None and path.exists():
                 raise ValueError(f"New generator output collides with user file: {rel}")
             if (
@@ -81,12 +96,24 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             ):
                 # Untouched scaffold can receive a compatible upstream update.
                 writes[rel] = (candidate / rel).read_bytes()
-            elif path.is_file() and digest(candidate / rel) != previous["sha256"]:
+            elif (
+                path.is_file()
+                and digest(candidate / rel) != previous["sha256"]
+                # A baseline recorded before tidy is the same upstream go.mod.
+                and untidy.get(rel) != previous["sha256"]
+            ):
                 sidecar = rel + ".forge-merge"
                 if (root / sidecar).exists():
                     raise ValueError(f"Resolve existing update conflict first: {sidecar}")
                 writes[sidecar] = (candidate / rel).read_bytes()
                 conflicts.append(rel)
+        for rel, module in locks.items():
+            previous = old.provenance.get(rel)
+            if rel not in new.provenance or (previous and previous.get("origin") == "user"):
+                continue
+            # go.sum is resolved from its go.mod, so it follows that file's decision.
+            if writes.get(module) is not None or not project_path(root, rel).exists():
+                writes[rel] = (candidate / rel).read_bytes()
         for rel, record in old.provenance.items():
             if record.get("ownership") == "generated" and rel not in new.provenance:
                 writes[rel] = None
@@ -95,7 +122,7 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
                 if record.get("origin") == "user" and rel not in new.provenance:
                     new.provenance[rel] = record
             manifest = tomlkit.parse((candidate / "forge.toml").read_text(encoding="utf-8"))
-            manifest["forge"]["provenance"] = new.provenance
+            manifest["forge"]["provenance"] = dict(sorted(new.provenance.items()))
             writes["forge.toml"] = tomlkit.dumps(manifest).encode()
             writes[RECIPE] = (candidate / RECIPE).read_bytes()
         else:
@@ -127,6 +154,28 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         return report
     finally:
         shutil.rmtree(candidate)
+
+
+def resolve_go_modules(
+    candidate: Path, modules: list[str], provenance: dict[str, dict]
+) -> dict[str, str]:
+    """Tidy candidate Go modules and re-record them as generation does.
+
+    Returns each go.mod's pre-tidy digest.
+    """
+    untidy: dict[str, str] = {}
+    collector = ProvenanceCollector(candidate)
+    for module in modules:
+        manifest = f"{module}/go.mod"
+        untidy[manifest] = digest(candidate / manifest)
+        try:
+            run_backend_cmd(candidate / module, TIDY, "Resolve go.sum", quiet=True, required=True)
+        except ForgeError as exc:
+            raise ValueError(f"Cannot resolve the Go modules of {module}: {exc}") from exc
+        provenance[manifest]["sha256"] = digest(candidate / manifest)
+        collector.record(candidate / module / "go.sum", origin="base-template")
+    provenance.update({rel: dict(sorted(e.items())) for rel, e in collector.as_dict().items()})
+    return untidy
 
 
 def resolve_owned_conflict(root: Path, relative: str, *, resolution: str) -> dict:

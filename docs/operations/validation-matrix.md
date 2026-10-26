@@ -31,7 +31,7 @@ The five lanes are:
 - **A — generate** — scenario renders through `forge.generator.generate`
   without crashing (per-PR via `ci.yml::matrix-generate`).
 - **B — verify** — generated project's toolchain (ruff/mypy/pytest, npm
-  run lint+test, cargo clippy+test) passes, plus the frontend build
+  run lint+test, cargo clippy+test, go vet+staticcheck+test) passes, plus the frontend build
   (per-PR via `ci.yml::matrix-verify`).
 - **C — smoke** — `docker compose up` succeeds and the
   RFC-006 HTTP contract (`tests/matrix/smoke_contract.py`) accepts each

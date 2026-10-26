@@ -25,7 +25,7 @@ contracts. Production boundaries are covered in [deployment](operations/deployme
 - **Gatekeeper** is the *sole* token authority for backend services.
   It mints ES256-signed JWTs from verified credentials and publishes public
   verification keys at `/auth/jwks`. Backends never trust Keycloak-issued tokens directly.
-- **`platform-auth` SDKs** (Python, Node, Rust — one per backend
+- **`platform-auth` SDKs** (Python, Node, Rust, Go — one per backend
   language forge supports) are the verifier libraries. They expose a
   small public surface (`AuthGuard`, `IdentityContext`, `JWKSCache`,
   `S2SClient`, `MayActPolicy`, `IssuerTrustMap`, `RevocationStore`,
