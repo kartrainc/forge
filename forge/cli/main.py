@@ -9,9 +9,11 @@ into interactive mode.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from forge.cli import interactive as _interactive
@@ -24,7 +26,7 @@ from forge.cli.completion import _print_completion
 from forge.cli.loader import _load_config_file
 from forge.cli.parser import _is_headless, _orphan_subflags, _parse_args
 from forge.config import FrontendFramework, ProjectConfig
-from forge.docker_manager import boot
+from forge.docker_manager import DEV_STACK_COMMAND, boot
 from forge.errors import (
     FilesystemError,
     ForgeError,
@@ -103,6 +105,29 @@ def _json_error(stdout_fd, err: object) -> None:
     stdout_fd.write(json.dumps(payload) + "\n")
     stdout_fd.flush()
     sys.exit(exit_code)
+
+
+def _start_stack(args: argparse.Namespace, config: Any, project_root: Path, quiet: bool) -> None:
+    """Start the generated Compose stack when asked to, or say how to."""
+    if args.no_docker or config.backend is None or getattr(args, "dry_run", False):
+        return
+    if config.frontend is not None and config.frontend.dev_server:
+        # boot() runs docker-compose.yml alone, which serves the nginx frontend, so
+        # it never starts the dev server: print the command that does (ADR-013).
+        if not quiet:
+            print("\n  The frontend runs as a Vite dev server. Start the stack with:")
+            print(f"    cd {project_root}")
+            print(f"    {DEV_STACK_COMMAND}")
+        return
+    if args.yes:
+        boot(project_root)
+    elif sys.stdin.isatty():
+        print()
+        if _interactive._ask_confirm("Start Docker Compose stack?", default=False):
+            boot(project_root)
+    # Non-TTY without --yes: skip docker boot. Matches the prompt's default=False
+    # answer; an agent that wants the stack should pass --yes (auto-boot) or run
+    # docker compose itself after consuming the JSON success envelope.
 
 
 def main() -> None:
@@ -581,14 +606,4 @@ def main() -> None:
             else:
                 print(f"\n  Project generated at: {project_root}")
 
-    if not args.no_docker and config.backend is not None and not getattr(args, "dry_run", False):
-        if args.yes:
-            boot(project_root)
-        elif sys.stdin.isatty():
-            print()
-            if _interactive._ask_confirm("Start Docker Compose stack?", default=False):
-                boot(project_root)
-        # Non-TTY without --yes: skip docker boot. Matches the prompt's
-        # default=False answer; an agent that wants the stack should pass
-        # --yes (auto-boot) or run docker compose itself after consuming
-        # the JSON success envelope.
+    _start_stack(args, config, project_root, quiet)

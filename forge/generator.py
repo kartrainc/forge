@@ -41,6 +41,7 @@ from forge.config import (
     validate_slug,
 )
 from forge.docker_manager import (
+    DEV_STACK_COMMAND,
     render_compose,
     render_dev_overlay,
     render_frontend_dockerfile,
@@ -1841,13 +1842,25 @@ def _populate_report(
     if config.backends or (
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
     ):
-        report.add_next_action(
-            NextAction(
-                command="docker compose up",
-                description="Start the generated stack (Postgres, services, frontend).",
-                cwd=".",
+        if config.frontend is not None and config.frontend.dev_server:
+            report.add_next_action(
+                NextAction(
+                    command=DEV_STACK_COMMAND,
+                    description=(
+                        "Start the generated stack with the frontend as a Vite dev server "
+                        "(hot reload; needs Docker Compose 2.40+)."
+                    ),
+                    cwd=".",
+                )
             )
-        )
+        else:
+            report.add_next_action(
+                NextAction(
+                    command="docker compose up",
+                    description="Start the generated stack (Postgres, services, frontend).",
+                    cwd=".",
+                )
+            )
     report.add_next_action(
         NextAction(
             command="forge --update",

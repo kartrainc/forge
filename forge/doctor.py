@@ -8,6 +8,7 @@ failed. ``--json`` output is usable by CI.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -159,6 +160,81 @@ def check_docker_reachable() -> CheckResult:
         name="docker:daemon",
         status="ok",
         detail="docker info succeeded",
+    )
+
+
+# ``develop.watch.initial_sync`` first shipped in Docker Compose 2.40.0 (ADR-013).
+MIN_COMPOSE_FOR_DEV_SERVER = (2, 40, 0)
+
+
+def parse_compose_version(output: str) -> tuple[int, ...] | None:
+    """The numbers of ``docker compose version --short`` (``v2.40.3``, ``5.3.0``)."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", output)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def check_compose_for_dev_server(project_path: Path) -> CheckResult | None:
+    """For a project that enables ``frontend.dev_server``, require a Compose that can watch.
+
+    Returns ``None`` when the project does not use the overlay.
+    """
+    manifest = project_path / "forge.toml"
+    if not manifest.is_file():
+        return None
+    try:
+        from forge.sync.manifest import read_forge_toml  # noqa: PLC0415
+
+        enabled = read_forge_toml(manifest).frontend.dev_server
+    except Exception:  # noqa: BLE001
+        return None  # check_forge_toml reports an unreadable manifest
+    if not enabled:
+        return None
+    need = ".".join(str(n) for n in MIN_COMPOSE_FOR_DEV_SERVER)
+    fix = f"Update Docker Desktop or the compose plugin to {need} or newer."
+    exe = shutil.which("docker")
+    if not exe:
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail="docker CLI not on PATH; docker-compose.dev.yaml needs Compose " + need,
+            fix=fix,
+        )
+    try:
+        proc = subprocess.run(
+            [exe, "compose", "version", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail=f"`docker compose version` raised: {e}",
+            fix=fix,
+        )
+    have = parse_compose_version(proc.stdout) if proc.returncode == 0 else None
+    if have is None:
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail="could not read the Docker Compose version",
+            fix=fix,
+        )
+    if have < MIN_COMPOSE_FOR_DEV_SERVER:
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail=(
+                f"Docker Compose {'.'.join(map(str, have))}; docker-compose.dev.yaml needs {need}"
+            ),
+            fix=fix,
+        )
+    return CheckResult(
+        name="docker:compose-dev-server",
+        status="ok",
+        detail=f"Docker Compose {'.'.join(map(str, have))} can watch (needs {need}+)",
     )
 
 
@@ -416,6 +492,9 @@ def run(project_path: Path | None = None) -> DoctorReport:
         report.results.append(check_port_free(port))
 
     report.results.append(check_forge_toml(project_path))
+    dev_server = check_compose_for_dev_server(project_path)
+    if dev_server is not None:
+        report.results.append(dev_server)
     return report
 
 

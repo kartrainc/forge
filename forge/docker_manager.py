@@ -337,6 +337,12 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
     return dockerfile_path
 
 
+# What starts the stack with the dev-server overlay (docker-compose.dev.yaml). The
+# automatic boot cannot: it runs the base file alone, which serves nginx.
+DEV_STACK_COMMAND = (
+    "docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch"
+)
+
 # The lockfile each package manager writes, which a dependency change rebuilds.
 _LOCKFILES = {
     "npm": "package-lock.json",
