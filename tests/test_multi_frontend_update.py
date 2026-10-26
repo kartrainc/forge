@@ -207,11 +207,15 @@ def test_an_owned_update_refuses_a_moved_primary_only(tmp_path: Path) -> None:
     manifest = root / "forge.toml"
     text = manifest.read_text(encoding="utf-8")
     # A further app's entry is rewritten from the recipe; the update proceeds.
-    manifest.write_text(text.replace('app_dir = "apps/admin"', 'app_dir = "apps/staff"'))
+    manifest.write_text(
+        text.replace('app_dir = "apps/admin"', 'app_dir = "apps/staff"'), encoding="utf-8"
+    )
     assert update_owned_project(root, dry_run=True)["passed"]
     # The primary recorded elsewhere is refused before anything is written.
     assert text.count('app_dir = "apps/frontend"') == 2  # [forge.frontend] + the array
-    manifest.write_text(text.replace('app_dir = "apps/frontend"', 'app_dir = "apps/web"'))
+    manifest.write_text(
+        text.replace('app_dir = "apps/frontend"', 'app_dir = "apps/web"'), encoding="utf-8"
+    )
     with pytest.raises(ValueError, match="records the frontend app at apps/web"):
         update_owned_project(root, dry_run=True)
 
