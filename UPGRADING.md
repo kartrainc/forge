@@ -363,6 +363,23 @@ and integration suites always did; so does the content-security check.
   as written again: forcing authentication off had made the app skip those
   mocks.
 
+### Node HTTP service and development overlay (unreleased)
+
+Node backends can take the `http-service` app template
+(`app_template: http-service`): the Node template without a database, its
+migrate step, the sample `items` entity, or the queue and cache fragments.
+Every Node service also gains a development path and two fixes.
+
+- Each Node `Dockerfile` gains a `dev` stage, each service a `.dockerignore`
+  and `tests/integration/setup-env.ts`, and a project with Node services
+  `deploy/compose/dev.yaml`. Run the services from source with
+  `docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch`.
+- An untouched file gets the change on the next update. A `Dockerfile`,
+  `README.md` or `vitest.integration.config.ts` you edited gets a
+  `.forge-merge` sidecar: fold the new stage or setup file into yours.
+- The circuit breaker now adds `@types/opossum` to `dependencies`. If you added
+  it yourself under `devDependencies`, keep one of the two.
+
 ### Frontend content-security policy (unreleased)
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,
