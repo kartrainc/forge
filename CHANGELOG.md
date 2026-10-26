@@ -231,17 +231,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `forge.toml` records several frontends in a `[[forge.frontends]]` array,
   primary first, beside `[forge.frontend]`, which keeps the primary. A project
   with one frontend writes no array. V4 manifests read as a list of one; the
-  re-stamp is automatic. Callers that pin the manifest schema version must
-  update; forge itself needs no action.
+  re-stamp is automatic, and forge reads every older manifest itself; only a
+  tool of your own that checks the version number needs to accept 5.
 
 ### Fixed
-
-- Unit flags (`--frontend`, `--backend-name`, `--features`, `--backend-port`,
-  ...) beside a `frontends:` or `backends:` list, a `--platform` preset's
-  included, stop with an error instead of being ignored, which generated a
-  project other than the one asked for. A `backends:` or `frontends:` key
-  holding a mapping is refused instead of being replaced by one default
-  backend. Set such values in the config file (UPGRADING).
 
 - Template updates re-render every app of a framework and every backend of a
   language, not only the first match; a recorded app that is gone is skipped

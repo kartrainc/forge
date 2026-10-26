@@ -448,18 +448,16 @@ nothing with one frontend.
   the next update), and further apps under `config.frontends`. A version 1
   recipe reads as one frontend, and its `features: []` reads as "every backend
   feature", the meaning it had; the next update writes version 2.
-- **`features` on a frontend is now read.** In a stack file, an absent key
-  means every backend feature, `[]` no CRUD pages and a list those pages; each
-  listed page must be a backend feature or the file is refused. The builder
-  used to drop the key, so a stack file that sets it to a non-empty list now
-  generates only those pages.
-- **Unit flags beside a list are refused.** `--backend-name`, `--features` and
-  the other backend flags beside a `backends:` list, and the frontend flags
-  beside a `frontends:` list, used to be ignored; they now stop with an error.
-  A `--platform` preset brings its own `backends:` list, so a backend flag beside
-  a preset stops too; set the value in a config file. A `backends:` or
-  `frontends:` key holding a mapping instead of a list is refused too, where
-  `backends:` used to fall back to one default backend.
+- **`features` and `name` on a frontend are now read.** In a stack file, an
+  absent `features` means every backend feature, `[]` no CRUD pages and a list
+  those pages; each listed page must be a backend feature or the file is
+  refused. `name` sets the app's folder (`apps/<name>`). Both keys were ignored
+  before, so a `frontend:` table that already set one of them now takes it into
+  account: check such a stack file before updating.
+- **A `frontends:` list reads like a `backends:` list.** Its entries give every
+  value, so frontend CLI flags beside it have no effect, as backend flags have
+  none beside `backends:`; a `frontends:` value that is not a list falls back to
+  the single `frontend:` table, as `backends:` falls back to `backend:`.
 - **Every Kubernetes project's chart gains two inert pieces.**
   `templates/frontends.yaml` renders the further apps from a `frontends:` values
   map, and the gatekeeper container takes `GATEKEEPER_FRONTEND_HOST_LABELS` from

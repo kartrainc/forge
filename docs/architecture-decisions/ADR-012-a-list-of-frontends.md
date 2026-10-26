@@ -28,7 +28,8 @@ the generator's provenance and update path.
 ## Decision
 
 1. **Mirror the backend precedent.** The stack file takes `frontend:` (one app)
-   or `frontends:` (a list); both is an error. `ProjectConfig.frontends` is the
+   or `frontends:` (a list); with both, the list wins, as `backends:` wins over
+   `backend:`. `ProjectConfig.frontends` is the
    list and `frontend` a property returning the first entry, with a setter, as
    `backend` is. `ProjectConfig(frontend=...)` is no longer accepted;
    `ProjectConfig` is internal, outside the plugin API in `forge/api.py`.
@@ -98,7 +99,7 @@ the generator's provenance and update path.
 - `forge.toml` moves to schema v5. Forge reads v1–v4 as before (one frontend
   at most) and re-stamps to v5 on update; a v4 writer cannot record several
   frontends and refuses to. An older forge reading a v5 manifest sees only the
-  primary. Callers that pin `schema_version == 4` must update.
+  primary. Only a tool that checks `schema_version == 4` needs to accept 5.
 - Each further app gets two Helm Ingresses: one for the `/api/<backend>` paths
   with `ingress.annotations`, one for `/` without them, because nginx-ingress
   applies an Ingress's `rewrite-target` to every one of its paths. The

@@ -29,8 +29,7 @@ product names, hosts or count. Decision record:
 
 1. `feat(config)`: the list in `ProjectConfig`, `FrontendConfig.name` and
    `features: list | None`, validation of names, hosts and pages, the builder's
-   `frontends:` and its refusal of unit flags beside a list (backends too), the
-   recipe round trip.
+   `frontends:` (read like `backends:`), the recipe round trip.
 2. `feat(generate)`: per-app contexts, rendering, Dockerfile, nginx, CSP,
    checks and codegen; per-app fragment and component placement in generate,
    `--update` and `--plan-update`; the resolver's any-app gating; the Svelte
