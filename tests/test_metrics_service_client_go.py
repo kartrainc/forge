@@ -20,7 +20,7 @@ def _go_service(options: dict[str, object], *, include_keycloak: bool = False) -
                 name="api", project_name="P", language=BackendLanguage.GO, server_port=8100
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=include_keycloak,
         options=options,
     )

@@ -429,9 +429,11 @@ def test_workspace_dependencies_are_explicit_and_frozen(tmp_path, monkeypatch, l
             BackendConfig(name="node", language=BackendLanguage.NODE, server_port=5001),
             BackendConfig(name="rust", language=BackendLanguage.RUST, server_port=5002),
         ],
-        frontend=FrontendConfig(
-            project_name="locks", framework=FrontendFramework.SVELTE, include_auth=False
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="locks", framework=FrontendFramework.SVELTE, include_auth=False
+            )
+        ],
     )
     write_recipe(tmp_path, config)
     (tmp_path / "package.json").write_text(
@@ -458,12 +460,14 @@ def test_flutter_dependency_generation_is_explicit(tmp_path, monkeypatch):
     config = ProjectConfig(
         project_name="flutter",
         backends=[],
-        frontend=FrontendConfig(
-            project_name="flutter",
-            framework=FrontendFramework.FLUTTER,
-            include_auth=False,
-            include_openapi=True,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="flutter",
+                framework=FrontendFramework.FLUTTER,
+                include_auth=False,
+                include_openapi=True,
+            )
+        ],
     )
     write_recipe(tmp_path, config)
     calls = []
@@ -731,7 +735,7 @@ def test_go_subjects_record_runtime_and_shared_modules(tmp_path) -> None:
     config = ProjectConfig(
         project_name="shop",
         backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
-        frontend=None,
+        frontends=[],
     )
     package = tmp_path / "packages" / "platform-auth-go"
     package.mkdir(parents=True)
@@ -750,7 +754,7 @@ def test_go_dependency_commands(tmp_path, monkeypatch) -> None:
     config = ProjectConfig(
         project_name="shop",
         backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
-        frontend=None,
+        frontends=[],
     )
     write_recipe(tmp_path, config)
     executed: list[list[str]] = []

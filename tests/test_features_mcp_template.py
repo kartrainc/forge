@@ -32,7 +32,7 @@ def _py_mcp_project(options: dict[str, object]) -> ProjectConfig:
                 name="api", project_name="P", language=BackendLanguage.PYTHON, server_port=5000
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=needs_auth,
         options=options,
     )
@@ -211,7 +211,7 @@ def test_mcp_template_server_generates_and_mounts(tmp_path: Path) -> None:
                 sdk_consumption="none",
             )
         ],
-        frontend=None,
+        frontends=[],
         options={"mcp_template.server": True},
     )
     backend = Path(generate(cfg, quiet=True, dry_run=True)) / "services" / "api"

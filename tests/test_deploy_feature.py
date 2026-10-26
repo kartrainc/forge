@@ -124,7 +124,7 @@ def test_multi_backend_emits_one_workload_each():
             BackendConfig(name="user-api", language=BackendLanguage.PYTHON, server_port=8001),
             BackendConfig(name="billing", language=BackendLanguage.NODE, server_port=8002),
         ],
-        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="Multi"),
+        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="Multi")],
         options={"deploy.target": "kubernetes"},
     )
     workloads = _values(_gen(config))["workloads"]
@@ -149,7 +149,7 @@ def _keycloak_k8s_config() -> ProjectConfig:
     return ProjectConfig(
         project_name="Deploy KC",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)],
-        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="Deploy KC"),
+        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="Deploy KC")],
         include_keycloak=True,
         keycloak_port=18080,
         options={"deploy.target": "kubernetes"},

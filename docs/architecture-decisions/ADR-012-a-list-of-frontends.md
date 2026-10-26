@@ -28,11 +28,11 @@ the generator's provenance and update path.
 ## Decision
 
 1. **Mirror the backend precedent.** The stack file takes `frontend:` (one app)
-   or `frontends:` (a list); both is an error. `ProjectConfig.frontends` is the
+   or `frontends:` (a list); with both, the list wins, as `backends:` wins over
+   `backend:`. `ProjectConfig.frontends` is the
    list and `frontend` a property returning the first entry, with a setter, as
-   `backend` is. `ProjectConfig(frontend=x)` stays accepted for now as
-   shorthand for `frontends=[x]`; a follow-up removes it, as `backend` has
-   no such keyword.
+   `backend` is. `ProjectConfig(frontend=...)` is no longer accepted;
+   `ProjectConfig` is internal, outside the plugin API in `forge/api.py`.
 2. **The first entry is the primary and keeps everything it has.** Compose
    service `frontend` on `app.localhost`, the Helm `frontend:` block and
    `<release>-frontend` resources, the root `tests/e2e` harness, the realm's
@@ -42,8 +42,10 @@ the generator's provenance and update path.
    apps, services and routes; only its records and two inert chart pieces
    change (UPGRADING).
 3. **One new key, `name`.** It names the app's folder (`apps/<name>`) and
-   package. The primary defaults to `frontend` and, renamed, moves its folder
-   but keeps its compose service `frontend` and its host `app.localhost`;
+   package. It is set on a `frontends:` entry; the single `frontend:` table
+   ignores it, as it always has, and keeps `apps/frontend`. The primary defaults
+   to `frontend` and, named otherwise in a list, moves its folder but keeps its
+   compose service `frontend` and its host `app.localhost`;
    further entries default to `frontend-<i>` (`frontend_<i>` for Flutter) on
    port `5173 + i`. The name's DNS form (`_` → `-`, for Flutter's snake-case
    names) names a further app's compose service and router, its Helm resources
@@ -99,7 +101,7 @@ the generator's provenance and update path.
 - `forge.toml` moves to schema v5. Forge reads v1–v4 as before (one frontend
   at most) and re-stamps to v5 on update; a v4 writer cannot record several
   frontends and refuses to. An older forge reading a v5 manifest sees only the
-  primary. Callers that pin `schema_version == 4` must update.
+  primary. Only a tool that checks `schema_version == 4` needs to accept 5.
 - Each further app gets two Helm Ingresses: one for the `/api/<backend>` paths
   with `ingress.annotations`, one for `/` without them, because nginx-ingress
   applies an Ingress's `rewrite-target` to every one of its paths. The

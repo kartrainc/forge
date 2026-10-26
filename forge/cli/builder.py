@@ -139,53 +139,6 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "layout": "layout",
     "ui_kit": "ui_kit",
 }
-# CLI flags that describe the single frontend / backend. Beside a ``frontends:``
-# / ``backends:`` list there is no single unit for them to describe.
-_FRONTEND_FLAGS: tuple[str, ...] = ("frontend", *_FRONTEND_FLAG_FOR_KEY.values())
-_BACKEND_FLAGS: tuple[str, ...] = (
-    "backend_language",
-    "backend_name",
-    "backend_port",
-    "features",
-    "python_version",
-    "node_version",
-    "rust_edition",
-    "go_version",
-)
-
-
-def _list_or_absent(cfg: dict[str, Any], key: str) -> list[Any] | None:
-    """The ``backends:`` / ``frontends:`` value: a list, or ``None`` when the key is absent.
-
-    Any other value (a mapping written where a list was meant, a scalar) is
-    refused: falling through to the single-unit path would silently replace
-    what the user wrote with defaults.
-    """
-    value = cfg.get(key)
-    if value is None or isinstance(value, list):
-        return value
-    raise ValueError(
-        f"'{key}:' must be a list of tables, got {type(value).__name__}; "
-        "write each entry as a '- ' list item."
-    )
-
-
-def _reject_flags_with_list(args: argparse.Namespace, flags: tuple[str, ...], key: str) -> None:
-    """Refuse unit CLI flags beside a ``backends:`` / ``frontends:`` list.
-
-    The list branch reads every value from its entries, so a flag would be read
-    from nowhere and the project would silently ignore it — the same
-    confidently-wrong result ``_reject_unknown_top_level_keys`` guards against.
-    Every flag defaults to ``None``; ``--no-auth`` yields ``False`` and counts.
-    """
-    given = [flag for flag in flags if getattr(args, flag, None) is not None]
-    if given:
-        shown = ", ".join("--" + flag.replace("_", "-") for flag in given)
-        raise ValueError(
-            f"{shown} cannot be combined with a '{key}:' list, from the config file "
-            f"or the --platform preset; set the value on the entries of '{key}:' in a "
-            "config file instead."
-        )
 
 
 def _backend_language(value: object) -> BackendLanguage:
@@ -222,13 +175,12 @@ def _build_backends_from_cfg(
 
     Supports both `backends:` (list) and `backend:` (single) for backward compatibility.
     """
-    backends_raw = _list_or_absent(r.cfg, "backends")
+    backends_raw = r.cfg.get("backends")
     if isinstance(backends_raw, list):
         # An explicit list — possibly empty — is the user expressing intent.
         # An empty list means "frontend-only project (backend.mode=none)";
         # ProjectConfig.validate() enforces coherence with options. Only the
         # *absent* key falls through to the single-backend placeholder below.
-        _reject_flags_with_list(r.args, _BACKEND_FLAGS, "backends")
         backends: list[BackendConfig] = []
         for i, raw in enumerate(backends_raw):
             if not isinstance(raw, dict):
@@ -371,9 +323,11 @@ def _build_frontend_from_cfg(
     table = r.cfg.get("frontend")
     table = table if isinstance(table, dict) else {}
     features = _explicit_features(table)
-    # ``name`` has no CLI flag; the table names the app as a list entry does.
-    name = PRIMARY_FRONTEND_NAME if table.get("name") is None else str(table["name"])
-    frontend = _frontend_config(framework, name, get, project_name, description, features=features)
+    # The single table keeps the app at apps/frontend, as it always has; a
+    # name is set on an entry of the frontends: list.
+    frontend = _frontend_config(
+        framework, PRIMARY_FRONTEND_NAME, get, project_name, description, features=features
+    )
     return frontend, frontend.include_auth
 
 
@@ -383,11 +337,12 @@ def _build_frontends_from_cfg(
     """Build the frontend list from CLI args + config file; returns (frontends, include_auth).
 
     Supports both ``frontends:`` (list; the first entry is the primary) and
-    ``frontend:`` (single table), mirroring ``_build_backends_from_cfg``.
+    ``frontend:`` (single table), mirroring ``_build_backends_from_cfg``: with
+    a list, its entries give every value and frontend CLI flags have no effect,
+    as backend flags have none beside ``backends:``.
     """
-    frontends_raw = _list_or_absent(r.cfg, "frontends")
+    frontends_raw = r.cfg.get("frontends")
     if isinstance(frontends_raw, list):
-        _reject_flags_with_list(r.args, _FRONTEND_FLAGS, "frontends")
         frontends: list[FrontendConfig] = []
         for i, raw in enumerate(frontends_raw):
             # Unlike a backend entry, a frontend's position matters (index 0 is
@@ -592,8 +547,6 @@ def _build_config(
     # platform preset is merged in — a silently-dropped ``fronend:`` used to
     # generate a frontend-less project with a 0 exit code.
     _reject_unknown_top_level_keys(cfg)
-    if isinstance(cfg, dict) and "frontend" in cfg and "frontends" in cfg:
-        raise ValueError("Set either 'frontend:' or 'frontends:', not both.")
 
     # Platform preset (Phase 4) — apply BEFORE anything else so it sits as the
     # lowest-priority layer: the preset's config dict is deep-merged UNDER the

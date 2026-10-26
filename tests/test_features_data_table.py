@@ -32,7 +32,7 @@ def _gen(tmp_path: Path, components: list[str]) -> Path:
                 name="api", project_name="N", language=BackendLanguage.PYTHON, features=["items"]
             )
         ],
-        frontend=fc,
+        frontends=[fc],
         components=components,
     )
     return Path(generate(cfg, quiet=True, dry_run=True))

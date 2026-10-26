@@ -1,0 +1,2836 @@
+{
+  "files": {
+    ".agents/skills/forge-platform/SKILL.md": {
+      "size": 3547,
+      "sha256": "231e07d78aa97857"
+    },
+    ".agents/skills/forge-platform/references/workloads.md": {
+      "size": 2397,
+      "sha256": "29d746e3b1958d39"
+    },
+    ".agents/skills/nuxt-ui/LICENSE.md": {
+      "size": 1061,
+      "sha256": "6ccc347b162c0464"
+    },
+    ".agents/skills/nuxt-ui/SKILL.md": {
+      "size": 6405,
+      "sha256": "98f11149fc566b28"
+    },
+    ".agents/skills/nuxt-ui/references/components.md": {
+      "size": 9548,
+      "sha256": "9648870284476354"
+    },
+    ".agents/skills/nuxt-ui/references/guidelines/component-selection.md": {
+      "size": 7153,
+      "sha256": "b4a7bd45aad33768"
+    },
+    ".agents/skills/nuxt-ui/references/guidelines/conventions.md": {
+      "size": 9338,
+      "sha256": "3c9f73e7bf6625af"
+    },
+    ".agents/skills/nuxt-ui/references/guidelines/design-system.md": {
+      "size": 10192,
+      "sha256": "e6e42bd531f82fcc"
+    },
+    ".agents/skills/nuxt-ui/references/guidelines/forms.md": {
+      "size": 6116,
+      "sha256": "2d98511a0c12729c"
+    },
+    ".agents/skills/nuxt-ui/references/layouts/chat.md": {
+      "size": 7734,
+      "sha256": "5326a5ec3a105450"
+    },
+    ".agents/skills/nuxt-ui/references/layouts/dashboard.md": {
+      "size": 6143,
+      "sha256": "fee6235a7cc3b08d"
+    },
+    ".agents/skills/nuxt-ui/references/layouts/docs.md": {
+      "size": 3808,
+      "sha256": "761190a26517a308"
+    },
+    ".agents/skills/nuxt-ui/references/layouts/editor.md": {
+      "size": 4043,
+      "sha256": "7bc96dd3b88e97ad"
+    },
+    ".agents/skills/nuxt-ui/references/layouts/landing.md": {
+      "size": 5621,
+      "sha256": "c9732e93e82e9d9f"
+    },
+    ".agents/skills/nuxt-ui/references/recipes/auth.md": {
+      "size": 5204,
+      "sha256": "85721c3eac6d9d7a"
+    },
+    ".agents/skills/nuxt-ui/references/recipes/data-tables.md": {
+      "size": 6686,
+      "sha256": "7e39fb215dec6eb5"
+    },
+    ".agents/skills/nuxt-ui/references/recipes/navigation.md": {
+      "size": 2084,
+      "sha256": "5c6a7ee61a693859"
+    },
+    ".agents/skills/nuxt-ui/references/recipes/overlays.md": {
+      "size": 4377,
+      "sha256": "109556d0a6768731"
+    },
+    ".claude/settings.json": {
+      "size": 69,
+      "sha256": "062d78308067ddd1"
+    },
+    ".claude/skills/forge-platform/SKILL.md": {
+      "size": 3547,
+      "sha256": "231e07d78aa97857"
+    },
+    ".claude/skills/forge-platform/references/workloads.md": {
+      "size": 2397,
+      "sha256": "29d746e3b1958d39"
+    },
+    ".claude/skills/nuxt-ui/LICENSE.md": {
+      "size": 1061,
+      "sha256": "6ccc347b162c0464"
+    },
+    ".claude/skills/nuxt-ui/SKILL.md": {
+      "size": 6405,
+      "sha256": "98f11149fc566b28"
+    },
+    ".claude/skills/nuxt-ui/references/components.md": {
+      "size": 9548,
+      "sha256": "9648870284476354"
+    },
+    ".claude/skills/nuxt-ui/references/guidelines/component-selection.md": {
+      "size": 7153,
+      "sha256": "b4a7bd45aad33768"
+    },
+    ".claude/skills/nuxt-ui/references/guidelines/conventions.md": {
+      "size": 9338,
+      "sha256": "3c9f73e7bf6625af"
+    },
+    ".claude/skills/nuxt-ui/references/guidelines/design-system.md": {
+      "size": 10192,
+      "sha256": "e6e42bd531f82fcc"
+    },
+    ".claude/skills/nuxt-ui/references/guidelines/forms.md": {
+      "size": 6116,
+      "sha256": "2d98511a0c12729c"
+    },
+    ".claude/skills/nuxt-ui/references/layouts/chat.md": {
+      "size": 7734,
+      "sha256": "5326a5ec3a105450"
+    },
+    ".claude/skills/nuxt-ui/references/layouts/dashboard.md": {
+      "size": 6143,
+      "sha256": "fee6235a7cc3b08d"
+    },
+    ".claude/skills/nuxt-ui/references/layouts/docs.md": {
+      "size": 3808,
+      "sha256": "761190a26517a308"
+    },
+    ".claude/skills/nuxt-ui/references/layouts/editor.md": {
+      "size": 4043,
+      "sha256": "7bc96dd3b88e97ad"
+    },
+    ".claude/skills/nuxt-ui/references/layouts/landing.md": {
+      "size": 5621,
+      "sha256": "c9732e93e82e9d9f"
+    },
+    ".claude/skills/nuxt-ui/references/recipes/auth.md": {
+      "size": 5204,
+      "sha256": "85721c3eac6d9d7a"
+    },
+    ".claude/skills/nuxt-ui/references/recipes/data-tables.md": {
+      "size": 6686,
+      "sha256": "7e39fb215dec6eb5"
+    },
+    ".claude/skills/nuxt-ui/references/recipes/navigation.md": {
+      "size": 2084,
+      "sha256": "5c6a7ee61a693859"
+    },
+    ".claude/skills/nuxt-ui/references/recipes/overlays.md": {
+      "size": 4377,
+      "sha256": "109556d0a6768731"
+    },
+    ".codex/config.toml": {
+      "size": 318,
+      "sha256": "f29e41415b522f66"
+    },
+    ".editorconfig": {
+      "size": 580,
+      "sha256": "2ac15b8600196a9b"
+    },
+    ".forge/quality.json": {
+      "size": 2422,
+      "sha256": "fb69f1a98d231d60"
+    },
+    ".github/workflows/ci.yml": {
+      "size": 1089,
+      "sha256": "3a519b182478cbdf"
+    },
+    ".github/workflows/quality.yml": {
+      "size": 3420,
+      "sha256": "59c4ec23d78fa45a"
+    },
+    ".gitignore": {
+      "size": 523,
+      "sha256": "99517caa29227052"
+    },
+    ".mcp.json": {
+      "size": 110,
+      "sha256": "22e05c81e7fe5963"
+    },
+    ".pre-commit-config.yaml": {
+      "size": 471,
+      "sha256": "52e8e600cab57fa5"
+    },
+    "AGENTS.md": {
+      "size": 1814,
+      "sha256": "9d1d4cc2595631d1"
+    },
+    "CLAUDE.md": {
+      "size": 100,
+      "sha256": "77ac9733140f48bb"
+    },
+    "apps/admin/.copier-answers.yml": {
+      "size": 1339,
+      "sha256": "<version-dependent>"
+    },
+    "apps/admin/.dockerignore": {
+      "size": 510,
+      "sha256": "35cfb7ec48840d8f"
+    },
+    "apps/admin/.env": {
+      "size": 82,
+      "sha256": "3bb1abcd1c14c736"
+    },
+    "apps/admin/.env.development": {
+      "size": 63,
+      "sha256": "d7f619db217c899b"
+    },
+    "apps/admin/.gitignore": {
+      "size": 337,
+      "sha256": "291694b56d67a6e6"
+    },
+    "apps/admin/Dockerfile": {
+      "size": 561,
+      "sha256": "601806cd08a11e8c"
+    },
+    "apps/admin/README.md": {
+      "size": 953,
+      "sha256": "f3efdfb7624a021b"
+    },
+    "apps/admin/env.d.ts": {
+      "size": 396,
+      "sha256": "4686677aaf56ca68"
+    },
+    "apps/admin/eslint.config.js": {
+      "size": 4189,
+      "sha256": "4c3d4296d9064a68"
+    },
+    "apps/admin/index.html": {
+      "size": 985,
+      "sha256": "4bc9412b9888a71f"
+    },
+    "apps/admin/nginx.conf": {
+      "size": 1746,
+      "sha256": "c00a25cf996153d5"
+    },
+    "apps/admin/package.json": {
+      "size": 1869,
+      "sha256": "0325159c7e707f0b"
+    },
+    "apps/admin/playwright.csp.config.ts": {
+      "size": 859,
+      "sha256": "49bd83a59187126c"
+    },
+    "apps/admin/playwright.quality.config.ts": {
+      "size": 385,
+      "sha256": "c0eb8437ca2d3671"
+    },
+    "apps/admin/public/canvas.manifest.json": {
+      "size": 7130,
+      "sha256": "d73104adb44ccb05"
+    },
+    "apps/admin/scripts/browser-coverage.ts": {
+      "size": 1674,
+      "sha256": "0f61424bd6ad73f8"
+    },
+    "apps/admin/scripts/post_generate.py": {
+      "size": 19111,
+      "sha256": "717c3f6f81bd661d"
+    },
+    "apps/admin/scripts/remap-browser.mjs": {
+      "size": 778,
+      "sha256": "078da64f2ee555a7"
+    },
+    "apps/admin/scripts/serve-csp.mjs": {
+      "size": 7087,
+      "sha256": "1299f04f59d3a6df"
+    },
+    "apps/admin/src/app/App.vue": {
+      "size": 557,
+      "sha256": "2e76013f8c1b19e2"
+    },
+    "apps/admin/src/app/NotFoundPage.vue": {
+      "size": 323,
+      "sha256": "e320cdcbb7b8c34c"
+    },
+    "apps/admin/src/app/main.ts": {
+      "size": 1445,
+      "sha256": "88758ab518e5b607"
+    },
+    "apps/admin/src/app/providers/csp.test.ts": {
+      "size": 544,
+      "sha256": "9b455141166e4259"
+    },
+    "apps/admin/src/app/providers/csp.ts": {
+      "size": 961,
+      "sha256": "e97822f3320470d3"
+    },
+    "apps/admin/src/app/providers/head.test.ts": {
+      "size": 999,
+      "sha256": "186d780f6e83d5a4"
+    },
+    "apps/admin/src/app/providers/head.ts": {
+      "size": 728,
+      "sha256": "7202836ae6d581ab"
+    },
+    "apps/admin/src/app/providers/query-client.test.ts": {
+      "size": 1057,
+      "sha256": "efd3e7b49f41c1c6"
+    },
+    "apps/admin/src/app/providers/query-client.ts": {
+      "size": 2407,
+      "sha256": "817e7301af074b0f"
+    },
+    "apps/admin/src/app/router/guards.test.ts": {
+      "size": 6254,
+      "sha256": "6410a69a2387c388"
+    },
+    "apps/admin/src/app/router/guards.ts": {
+      "size": 2178,
+      "sha256": "873d6525e07e36ef"
+    },
+    "apps/admin/src/app/router/index.ts": {
+      "size": 1142,
+      "sha256": "0fe8a31dae1278f2"
+    },
+    "apps/admin/src/app/styles/main.css": {
+      "size": 156,
+      "sha256": "116d1f92db82f98a"
+    },
+    "apps/admin/src/core/ui-protocol/types.ts": {
+      "size": 457,
+      "sha256": "8519e4e3e7f838c3"
+    },
+    "apps/admin/src/custom/theme/nuxt-ui.config.ts": {
+      "size": 1106,
+      "sha256": "a0341d785997a7e8"
+    },
+    "apps/admin/src/custom/theme/tokens.css": {
+      "size": 619,
+      "sha256": "027d68c5c8fe4e98"
+    },
+    "apps/admin/src/features/ai_chat/events.gen.ts": {
+      "size": 4093,
+      "sha256": "1f4a2ec3204179bd"
+    },
+    "apps/admin/src/features/ai_chat/ui_protocol.gen.ts": {
+      "size": 2139,
+      "sha256": "23d26ad54546e2c1"
+    },
+    "apps/admin/src/features/auth/components/SessionTimeoutModal.test.ts": {
+      "size": 3499,
+      "sha256": "f5c6fdb9bb66b728"
+    },
+    "apps/admin/src/features/auth/components/SessionTimeoutModal.vue": {
+      "size": 2998,
+      "sha256": "fb63e116d4c591a0"
+    },
+    "apps/admin/src/features/auth/index.ts": {
+      "size": 164,
+      "sha256": "52ed49ed3bb6aa87"
+    },
+    "apps/admin/src/features/auth/ui/AuthStuckPage.vue": {
+      "size": 559,
+      "sha256": "54c442a6a561560c"
+    },
+    "apps/admin/src/features/auth/ui/LoginPage.vue": {
+      "size": 1748,
+      "sha256": "14040f2de0e7ed1f"
+    },
+    "apps/admin/src/features/home/api/health.schema.test.ts": {
+      "size": 1471,
+      "sha256": "1dad1623e06e0139"
+    },
+    "apps/admin/src/features/home/api/useHealth.test.ts": {
+      "size": 1850,
+      "sha256": "25b4298c7a345e43"
+    },
+    "apps/admin/src/features/home/api/useHealth.ts": {
+      "size": 818,
+      "sha256": "4f4d5252a9af463c"
+    },
+    "apps/admin/src/features/home/api/useInfo.test.ts": {
+      "size": 1283,
+      "sha256": "8a43fd01dc4174b4"
+    },
+    "apps/admin/src/features/home/api/useInfo.ts": {
+      "size": 463,
+      "sha256": "be2f5aa372e00889"
+    },
+    "apps/admin/src/features/home/index.ts": {
+      "size": 258,
+      "sha256": "7d33b8e23a42017f"
+    },
+    "apps/admin/src/features/home/ui/HomePage.vue": {
+      "size": 3670,
+      "sha256": "6320c2e6a771982d"
+    },
+    "apps/admin/src/features/profile/index.ts": {
+      "size": 169,
+      "sha256": "ae25dd85810c96f7"
+    },
+    "apps/admin/src/features/profile/ui/ProfilePage.vue": {
+      "size": 2269,
+      "sha256": "993398d0b6911aee"
+    },
+    "apps/admin/src/features/settings/index.ts": {
+      "size": 174,
+      "sha256": "33b755402b0111b4"
+    },
+    "apps/admin/src/features/settings/ui/SettingsPage.vue": {
+      "size": 1187,
+      "sha256": "480e6812cffa59d1"
+    },
+    "apps/admin/src/shared/api/client-refresh.test.ts": {
+      "size": 1836,
+      "sha256": "8515c9629e1e185e"
+    },
+    "apps/admin/src/shared/api/client.test.ts": {
+      "size": 2480,
+      "sha256": "6c59d4e6116b89e0"
+    },
+    "apps/admin/src/shared/api/client.ts": {
+      "size": 2701,
+      "sha256": "e8b652c208a0f6e7"
+    },
+    "apps/admin/src/shared/api/errors.test.ts": {
+      "size": 1457,
+      "sha256": "d35f0952ee350bc8"
+    },
+    "apps/admin/src/shared/api/errors.ts": {
+      "size": 3192,
+      "sha256": "e047e1050de992c1"
+    },
+    "apps/admin/src/shared/api/schemas/common.schema.test.ts": {
+      "size": 2881,
+      "sha256": "9c6c5f9fcb8097da"
+    },
+    "apps/admin/src/shared/api/schemas/common.schema.ts": {
+      "size": 505,
+      "sha256": "c0b6e4e8ea4c75aa"
+    },
+    "apps/admin/src/shared/api/schemas/health.schema.ts": {
+      "size": 688,
+      "sha256": "14dcfc66ba634301"
+    },
+    "apps/admin/src/shared/api/schemas/index.ts": {
+      "size": 64,
+      "sha256": "2c2974eedd710579"
+    },
+    "apps/admin/src/shared/components/AppHeader.vue": {
+      "size": 2804,
+      "sha256": "6b93505431798107"
+    },
+    "apps/admin/src/shared/components/AppSidebar.vue": {
+      "size": 2831,
+      "sha256": "0258a664f79fd7bb"
+    },
+    "apps/admin/src/shared/components/ConfirmDialog.vue": {
+      "size": 1166,
+      "sha256": "f4ac9c8de265697a"
+    },
+    "apps/admin/src/shared/components/ConfirmHost.vue": {
+      "size": 1289,
+      "sha256": "bcc71408af51e6b3"
+    },
+    "apps/admin/src/shared/components/EmptyState.vue": {
+      "size": 324,
+      "sha256": "b9a209acc7efdee6"
+    },
+    "apps/admin/src/shared/components/HealthIndicator.test.ts": {
+      "size": 712,
+      "sha256": "711c9bea2c7fabf5"
+    },
+    "apps/admin/src/shared/components/HealthIndicator.vue": {
+      "size": 856,
+      "sha256": "fb751dd2cd3d060f"
+    },
+    "apps/admin/src/shared/components/StatusBadge.vue": {
+      "size": 1634,
+      "sha256": "d8f506a8687a7ab9"
+    },
+    "apps/admin/src/shared/composables/formatListSubtitle.test.ts": {
+      "size": 925,
+      "sha256": "d2e2b187f10a31e3"
+    },
+    "apps/admin/src/shared/composables/formatListSubtitle.ts": {
+      "size": 1335,
+      "sha256": "58176f0d3a65b647"
+    },
+    "apps/admin/src/shared/composables/useApiClient.ts": {
+      "size": 160,
+      "sha256": "262f478a4556736f"
+    },
+    "apps/admin/src/shared/composables/useAuth.test.ts": {
+      "size": 5702,
+      "sha256": "8d5c2a5521245732"
+    },
+    "apps/admin/src/shared/composables/useAuth.ts": {
+      "size": 5288,
+      "sha256": "8ef1a66082805f0f"
+    },
+    "apps/admin/src/shared/composables/useBreakpoint.test.ts": {
+      "size": 2063,
+      "sha256": "c6d3b3a6f24cd7b4"
+    },
+    "apps/admin/src/shared/composables/useBreakpoint.ts": {
+      "size": 653,
+      "sha256": "00ddfe913aea89e6"
+    },
+    "apps/admin/src/shared/composables/useCapabilities.test.ts": {
+      "size": 1442,
+      "sha256": "ab963dc86a8937f7"
+    },
+    "apps/admin/src/shared/composables/useCapabilities.ts": {
+      "size": 2443,
+      "sha256": "d4c9b196c188a45d"
+    },
+    "apps/admin/src/shared/composables/useConfirm.test.ts": {
+      "size": 1705,
+      "sha256": "ae45f3ba70998397"
+    },
+    "apps/admin/src/shared/composables/useConfirm.ts": {
+      "size": 2130,
+      "sha256": "fc7e2a6064bbd12c"
+    },
+    "apps/admin/src/shared/composables/useContainerSize.test.ts": {
+      "size": 2597,
+      "sha256": "188ff3621b98a888"
+    },
+    "apps/admin/src/shared/composables/useContainerSize.ts": {
+      "size": 2574,
+      "sha256": "49accc9614fd9de4"
+    },
+    "apps/admin/src/shared/composables/useEventStream.test.ts": {
+      "size": 2405,
+      "sha256": "04a4b78a01d686e3"
+    },
+    "apps/admin/src/shared/composables/useEventStream.ts": {
+      "size": 4098,
+      "sha256": "b6c7c9642ed9bbe1"
+    },
+    "apps/admin/src/shared/composables/usePageHeader.test.ts": {
+      "size": 2118,
+      "sha256": "28ec09c340706b3e"
+    },
+    "apps/admin/src/shared/composables/usePageHeader.ts": {
+      "size": 3666,
+      "sha256": "2ce3e684b6f03eac"
+    },
+    "apps/admin/src/shared/composables/useRowSelection.test.ts": {
+      "size": 1080,
+      "sha256": "5f643077c22d8d6b"
+    },
+    "apps/admin/src/shared/composables/useRowSelection.ts": {
+      "size": 2499,
+      "sha256": "6b7ed7b730c0c2b1"
+    },
+    "apps/admin/src/shared/composables/useSavedViews.test.ts": {
+      "size": 1067,
+      "sha256": "2bbb26a16b92f917"
+    },
+    "apps/admin/src/shared/composables/useSavedViews.ts": {
+      "size": 1630,
+      "sha256": "415a5a1d58b41e87"
+    },
+    "apps/admin/src/shared/composables/useSessionTimeout.test.ts": {
+      "size": 9217,
+      "sha256": "83b2c4af4f8b9d13"
+    },
+    "apps/admin/src/shared/composables/useSessionTimeout.ts": {
+      "size": 9925,
+      "sha256": "35a26e80e20a90bb"
+    },
+    "apps/admin/src/shared/composables/useSidebarShortcut.test.ts": {
+      "size": 1441,
+      "sha256": "96f52db4faf09ad4"
+    },
+    "apps/admin/src/shared/composables/useSidebarShortcut.ts": {
+      "size": 2113,
+      "sha256": "ccd8513dcd113c96"
+    },
+    "apps/admin/src/shared/composables/useUrlState.test.ts": {
+      "size": 2004,
+      "sha256": "2025e53f0ecfdbc0"
+    },
+    "apps/admin/src/shared/composables/useUrlState.ts": {
+      "size": 2077,
+      "sha256": "5039bdfa053a4be8"
+    },
+    "apps/admin/src/shared/composables/useZodForm.test.ts": {
+      "size": 3106,
+      "sha256": "8281a74223ebd062"
+    },
+    "apps/admin/src/shared/composables/useZodForm.ts": {
+      "size": 4267,
+      "sha256": "9cc38aed121517bd"
+    },
+    "apps/admin/src/shared/config/runtime.test.ts": {
+      "size": 927,
+      "sha256": "58cb17a5fc1fdf53"
+    },
+    "apps/admin/src/shared/config/runtime.ts": {
+      "size": 5860,
+      "sha256": "a8c704eef9441ad1"
+    },
+    "apps/admin/src/shared/enums/approval_mode.ts": {
+      "size": 284,
+      "sha256": "614efe149a0be14b"
+    },
+    "apps/admin/src/shared/enums/item_status.ts": {
+      "size": 236,
+      "sha256": "d93d8731bb37d0ab"
+    },
+    "apps/admin/src/shared/layouts/AuthLayout.vue": {
+      "size": 200,
+      "sha256": "a00660e1261b5925"
+    },
+    "apps/admin/src/shared/layouts/MainLayout.vue": {
+      "size": 530,
+      "sha256": "ef6c5ac01bfb9547"
+    },
+    "apps/admin/src/shared/mocks/browser.ts": {
+      "size": 128,
+      "sha256": "fb850d02c8328e6d"
+    },
+    "apps/admin/src/shared/mocks/handlers.test.ts": {
+      "size": 1821,
+      "sha256": "e350a34264717b3f"
+    },
+    "apps/admin/src/shared/mocks/handlers.ts": {
+      "size": 871,
+      "sha256": "0d959bc21fba02e4"
+    },
+    "apps/admin/src/shared/mocks/node.ts": {
+      "size": 125,
+      "sha256": "ee73808045d6c550"
+    },
+    "apps/admin/src/shared/mocks/scenarios.ts": {
+      "size": 644,
+      "sha256": "00a6a11aafe3b2db"
+    },
+    "apps/admin/src/shared/observability/sentry.test.ts": {
+      "size": 1155,
+      "sha256": "cfcf25b01ef4e411"
+    },
+    "apps/admin/src/shared/observability/sentry.ts": {
+      "size": 3935,
+      "sha256": "546780df05447bbf"
+    },
+    "apps/admin/src/shared/observability/telemetry.test.ts": {
+      "size": 1114,
+      "sha256": "3ae169381114ec46"
+    },
+    "apps/admin/src/shared/observability/telemetry.ts": {
+      "size": 3020,
+      "sha256": "20b2cae43f6c2728"
+    },
+    "apps/admin/src/shared/stores/ui.store.test.ts": {
+      "size": 3441,
+      "sha256": "fbd0116ffd6874ca"
+    },
+    "apps/admin/src/shared/stores/ui.store.ts": {
+      "size": 1948,
+      "sha256": "e5c74a24c0b3092b"
+    },
+    "apps/admin/src/shared/types/index.ts": {
+      "size": 202,
+      "sha256": "54fdfd3610a6c3ab"
+    },
+    "apps/admin/src/test/setup.ts": {
+      "size": 1247,
+      "sha256": "f49fe0e3aff99dab"
+    },
+    "apps/admin/tests/e2e/application.spec.ts": {
+      "size": 2361,
+      "sha256": "83dd3284baacde40"
+    },
+    "apps/admin/tests/e2e/crud.ts": {
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
+    },
+    "apps/admin/tests/e2e/health.ts": {
+      "size": 817,
+      "sha256": "063adfff636cfecf"
+    },
+    "apps/admin/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
+    },
+    "apps/admin/tests/integration/crud.ts": {
+      "size": 9416,
+      "sha256": "ef8581fa5e9149c6"
+    },
+    "apps/admin/tests/integration/home-page.test.ts": {
+      "size": 2746,
+      "sha256": "6794ae138f64d901"
+    },
+    "apps/admin/tests/integration/profile-page.test.ts": {
+      "size": 1813,
+      "sha256": "74ddbf82b16c5ab7"
+    },
+    "apps/admin/tests/integration/settings-page.test.ts": {
+      "size": 1466,
+      "sha256": "a1bfe1a80ec7f422"
+    },
+    "apps/admin/tests/integration/status-confirmation.test.ts": {
+      "size": 1750,
+      "sha256": "87c28a0ed9664002"
+    },
+    "apps/admin/tsconfig.app.json": {
+      "size": 863,
+      "sha256": "575b81d10ab3952d"
+    },
+    "apps/admin/tsconfig.json": {
+      "size": 119,
+      "sha256": "770b4140bbb581e2"
+    },
+    "apps/admin/tsconfig.node.json": {
+      "size": 641,
+      "sha256": "9611582f3c200d0c"
+    },
+    "apps/admin/vite.config.ts": {
+      "size": 2923,
+      "sha256": "f184a0b343341dba"
+    },
+    "apps/admin/vitest.config.ts": {
+      "size": 389,
+      "sha256": "265be468dd68260a"
+    },
+    "apps/admin/vitest.integration.config.ts": {
+      "size": 242,
+      "sha256": "121f68f0347a5788"
+    },
+    "apps/frontend/.copier-answers.yml": {
+      "size": 1355,
+      "sha256": "<version-dependent>"
+    },
+    "apps/frontend/.dockerignore": {
+      "size": 510,
+      "sha256": "35cfb7ec48840d8f"
+    },
+    "apps/frontend/.env": {
+      "size": 82,
+      "sha256": "3bb1abcd1c14c736"
+    },
+    "apps/frontend/.env.development": {
+      "size": 63,
+      "sha256": "ef70b936f826a0cc"
+    },
+    "apps/frontend/.gitignore": {
+      "size": 317,
+      "sha256": "fee1dc76e03de16a"
+    },
+    "apps/frontend/Dockerfile": {
+      "size": 561,
+      "sha256": "601806cd08a11e8c"
+    },
+    "apps/frontend/README.md": {
+      "size": 1073,
+      "sha256": "15931cb50cf20699"
+    },
+    "apps/frontend/components.json": {
+      "size": 430,
+      "sha256": "15821e8bc7371908"
+    },
+    "apps/frontend/env.d.ts": {
+      "size": 396,
+      "sha256": "4686677aaf56ca68"
+    },
+    "apps/frontend/eslint.config.js": {
+      "size": 4189,
+      "sha256": "4c3d4296d9064a68"
+    },
+    "apps/frontend/index.html": {
+      "size": 666,
+      "sha256": "3194c866e53def81"
+    },
+    "apps/frontend/nginx.conf": {
+      "size": 1746,
+      "sha256": "c00a25cf996153d5"
+    },
+    "apps/frontend/package.json": {
+      "size": 2124,
+      "sha256": "c3b057c2d0716d36"
+    },
+    "apps/frontend/playwright.csp.config.ts": {
+      "size": 859,
+      "sha256": "49bd83a59187126c"
+    },
+    "apps/frontend/playwright.quality.config.ts": {
+      "size": 385,
+      "sha256": "c0eb8437ca2d3671"
+    },
+    "apps/frontend/public/canvas.manifest.json": {
+      "size": 7130,
+      "sha256": "d73104adb44ccb05"
+    },
+    "apps/frontend/scripts/browser-coverage.ts": {
+      "size": 1674,
+      "sha256": "0f61424bd6ad73f8"
+    },
+    "apps/frontend/scripts/post_generate.py": {
+      "size": 19111,
+      "sha256": "717c3f6f81bd661d"
+    },
+    "apps/frontend/scripts/remap-browser.mjs": {
+      "size": 778,
+      "sha256": "078da64f2ee555a7"
+    },
+    "apps/frontend/scripts/serve-csp.mjs": {
+      "size": 7087,
+      "sha256": "1299f04f59d3a6df"
+    },
+    "apps/frontend/src/app/App.vue": {
+      "size": 462,
+      "sha256": "980a6f9ccf61ac5e"
+    },
+    "apps/frontend/src/app/NotFoundPage.vue": {
+      "size": 528,
+      "sha256": "5e29cf8f140381a5"
+    },
+    "apps/frontend/src/app/main.ts": {
+      "size": 1613,
+      "sha256": "637a9a10fb1365dc"
+    },
+    "apps/frontend/src/app/providers/csp.test.ts": {
+      "size": 544,
+      "sha256": "9b455141166e4259"
+    },
+    "apps/frontend/src/app/providers/csp.ts": {
+      "size": 961,
+      "sha256": "e97822f3320470d3"
+    },
+    "apps/frontend/src/app/providers/query-client.test.ts": {
+      "size": 1175,
+      "sha256": "5f8fcddfc32bbc7c"
+    },
+    "apps/frontend/src/app/providers/query-client.ts": {
+      "size": 1950,
+      "sha256": "dc8146d5380a1094"
+    },
+    "apps/frontend/src/app/router/guards.test.ts": {
+      "size": 6254,
+      "sha256": "6410a69a2387c388"
+    },
+    "apps/frontend/src/app/router/guards.ts": {
+      "size": 2178,
+      "sha256": "873d6525e07e36ef"
+    },
+    "apps/frontend/src/app/router/index.ts": {
+      "size": 1283,
+      "sha256": "feac198e6d894d28"
+    },
+    "apps/frontend/src/app/styles/main.css": {
+      "size": 6181,
+      "sha256": "142445b3f8032448"
+    },
+    "apps/frontend/src/core/ui-protocol/types.ts": {
+      "size": 457,
+      "sha256": "8519e4e3e7f838c3"
+    },
+    "apps/frontend/src/features/ai_chat/events.gen.ts": {
+      "size": 4093,
+      "sha256": "1f4a2ec3204179bd"
+    },
+    "apps/frontend/src/features/ai_chat/ui_protocol.gen.ts": {
+      "size": 2139,
+      "sha256": "23d26ad54546e2c1"
+    },
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.test.ts": {
+      "size": 3215,
+      "sha256": "cae16b9a18c504d5"
+    },
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue": {
+      "size": 4487,
+      "sha256": "30841dcb97710d3c"
+    },
+    "apps/frontend/src/features/auth/index.ts": {
+      "size": 164,
+      "sha256": "52ed49ed3bb6aa87"
+    },
+    "apps/frontend/src/features/auth/ui/AuthStuckPage.vue": {
+      "size": 921,
+      "sha256": "c648826d2c1556b2"
+    },
+    "apps/frontend/src/features/auth/ui/LoginPage.vue": {
+      "size": 2432,
+      "sha256": "0f2808af0d202823"
+    },
+    "apps/frontend/src/features/home/api/health.schema.test.ts": {
+      "size": 1471,
+      "sha256": "1dad1623e06e0139"
+    },
+    "apps/frontend/src/features/home/api/useHealth.test.ts": {
+      "size": 1850,
+      "sha256": "25b4298c7a345e43"
+    },
+    "apps/frontend/src/features/home/api/useHealth.ts": {
+      "size": 818,
+      "sha256": "4f4d5252a9af463c"
+    },
+    "apps/frontend/src/features/home/api/useInfo.test.ts": {
+      "size": 1283,
+      "sha256": "8a43fd01dc4174b4"
+    },
+    "apps/frontend/src/features/home/api/useInfo.ts": {
+      "size": 463,
+      "sha256": "be2f5aa372e00889"
+    },
+    "apps/frontend/src/features/home/index.ts": {
+      "size": 258,
+      "sha256": "7d33b8e23a42017f"
+    },
+    "apps/frontend/src/features/home/ui/HomePage.vue": {
+      "size": 4939,
+      "sha256": "b2fa53f75de5c91b"
+    },
+    "apps/frontend/src/features/items/api/queryKeys.ts": {
+      "size": 312,
+      "sha256": "2bb5879b534efebe"
+    },
+    "apps/frontend/src/features/items/api/useItems.ts": {
+      "size": 3051,
+      "sha256": "94a493b4bd9e1c8d"
+    },
+    "apps/frontend/src/features/items/index.ts": {
+      "size": 708,
+      "sha256": "d218cc69b4862001"
+    },
+    "apps/frontend/src/features/items/model/item.schema.test.ts": {
+      "size": 1190,
+      "sha256": "9acb1b7d93079208"
+    },
+    "apps/frontend/src/features/items/model/item.schema.ts": {
+      "size": 518,
+      "sha256": "e0cf1b1bf4ed785f"
+    },
+    "apps/frontend/src/features/items/ui/ItemCreatePage.vue": {
+      "size": 2544,
+      "sha256": "6a7ac7dc6297966b"
+    },
+    "apps/frontend/src/features/items/ui/ItemDetailPage.vue": {
+      "size": 5013,
+      "sha256": "cb89683c71ed3beb"
+    },
+    "apps/frontend/src/features/items/ui/ItemsListPage.vue": {
+      "size": 5664,
+      "sha256": "461a9ac5092f00b1"
+    },
+    "apps/frontend/src/features/orders/api/queryKeys.ts": {
+      "size": 318,
+      "sha256": "3038e9010043c006"
+    },
+    "apps/frontend/src/features/orders/api/useOrders.ts": {
+      "size": 3075,
+      "sha256": "c4d3832292aa7e95"
+    },
+    "apps/frontend/src/features/orders/index.ts": {
+      "size": 733,
+      "sha256": "af3ef73313f65213"
+    },
+    "apps/frontend/src/features/orders/model/order.schema.test.ts": {
+      "size": 1207,
+      "sha256": "e3f951d8430ebea9"
+    },
+    "apps/frontend/src/features/orders/model/order.schema.ts": {
+      "size": 525,
+      "sha256": "eb10df8f171e4662"
+    },
+    "apps/frontend/src/features/orders/ui/OrderCreatePage.vue": {
+      "size": 2567,
+      "sha256": "923b44121c142c2d"
+    },
+    "apps/frontend/src/features/orders/ui/OrderDetailPage.vue": {
+      "size": 5057,
+      "sha256": "f497a26e54a4f3b6"
+    },
+    "apps/frontend/src/features/orders/ui/OrdersListPage.vue": {
+      "size": 5709,
+      "sha256": "219c8d6b7ca88be3"
+    },
+    "apps/frontend/src/features/profile/index.ts": {
+      "size": 169,
+      "sha256": "ae25dd85810c96f7"
+    },
+    "apps/frontend/src/features/profile/ui/ProfilePage.vue": {
+      "size": 2840,
+      "sha256": "4c0c82a3167c4db7"
+    },
+    "apps/frontend/src/features/settings/index.ts": {
+      "size": 174,
+      "sha256": "33b755402b0111b4"
+    },
+    "apps/frontend/src/features/settings/ui/SettingsPage.vue": {
+      "size": 5116,
+      "sha256": "9daaeb69ceb32438"
+    },
+    "apps/frontend/src/shared/api/client-refresh.test.ts": {
+      "size": 1836,
+      "sha256": "8515c9629e1e185e"
+    },
+    "apps/frontend/src/shared/api/client.test.ts": {
+      "size": 2480,
+      "sha256": "6c59d4e6116b89e0"
+    },
+    "apps/frontend/src/shared/api/client.ts": {
+      "size": 2701,
+      "sha256": "e8b652c208a0f6e7"
+    },
+    "apps/frontend/src/shared/api/errors.test.ts": {
+      "size": 1457,
+      "sha256": "d35f0952ee350bc8"
+    },
+    "apps/frontend/src/shared/api/errors.ts": {
+      "size": 3192,
+      "sha256": "e047e1050de992c1"
+    },
+    "apps/frontend/src/shared/api/schemas/common.schema.test.ts": {
+      "size": 2881,
+      "sha256": "9c6c5f9fcb8097da"
+    },
+    "apps/frontend/src/shared/api/schemas/common.schema.ts": {
+      "size": 505,
+      "sha256": "c0b6e4e8ea4c75aa"
+    },
+    "apps/frontend/src/shared/api/schemas/health.schema.ts": {
+      "size": 688,
+      "sha256": "14dcfc66ba634301"
+    },
+    "apps/frontend/src/shared/api/schemas/index.ts": {
+      "size": 64,
+      "sha256": "2c2974eedd710579"
+    },
+    "apps/frontend/src/shared/components/AppHeader.vue": {
+      "size": 3181,
+      "sha256": "79684c5d5a90a16f"
+    },
+    "apps/frontend/src/shared/components/AppSidebar.vue": {
+      "size": 6555,
+      "sha256": "d402413a557c70c1"
+    },
+    "apps/frontend/src/shared/components/ConfirmDialog.vue": {
+      "size": 1475,
+      "sha256": "d85068150273b69f"
+    },
+    "apps/frontend/src/shared/components/ConfirmHost.vue": {
+      "size": 1289,
+      "sha256": "bcc71408af51e6b3"
+    },
+    "apps/frontend/src/shared/components/EmptyState.vue": {
+      "size": 465,
+      "sha256": "0910d278779dbf0a"
+    },
+    "apps/frontend/src/shared/components/HealthIndicator.test.ts": {
+      "size": 1515,
+      "sha256": "5bc9b5881bacfcbc"
+    },
+    "apps/frontend/src/shared/components/HealthIndicator.vue": {
+      "size": 854,
+      "sha256": "7b9a4c9b465f05c5"
+    },
+    "apps/frontend/src/shared/components/StatusBadge.vue": {
+      "size": 2265,
+      "sha256": "0721fccf3352ebdb"
+    },
+    "apps/frontend/src/shared/components/VerticalSplitter.vue": {
+      "size": 1221,
+      "sha256": "7372f68352277f3a"
+    },
+    "apps/frontend/src/shared/composables/formatListSubtitle.test.ts": {
+      "size": 925,
+      "sha256": "d2e2b187f10a31e3"
+    },
+    "apps/frontend/src/shared/composables/formatListSubtitle.ts": {
+      "size": 1335,
+      "sha256": "58176f0d3a65b647"
+    },
+    "apps/frontend/src/shared/composables/useApiClient.ts": {
+      "size": 160,
+      "sha256": "262f478a4556736f"
+    },
+    "apps/frontend/src/shared/composables/useAuth.test.ts": {
+      "size": 5702,
+      "sha256": "8d5c2a5521245732"
+    },
+    "apps/frontend/src/shared/composables/useAuth.ts": {
+      "size": 5288,
+      "sha256": "8ef1a66082805f0f"
+    },
+    "apps/frontend/src/shared/composables/useBreakpoint.test.ts": {
+      "size": 2063,
+      "sha256": "c6d3b3a6f24cd7b4"
+    },
+    "apps/frontend/src/shared/composables/useBreakpoint.ts": {
+      "size": 653,
+      "sha256": "00ddfe913aea89e6"
+    },
+    "apps/frontend/src/shared/composables/useCapabilities.test.ts": {
+      "size": 1442,
+      "sha256": "ab963dc86a8937f7"
+    },
+    "apps/frontend/src/shared/composables/useCapabilities.ts": {
+      "size": 2443,
+      "sha256": "d4c9b196c188a45d"
+    },
+    "apps/frontend/src/shared/composables/useConfirm.test.ts": {
+      "size": 1705,
+      "sha256": "ae45f3ba70998397"
+    },
+    "apps/frontend/src/shared/composables/useConfirm.ts": {
+      "size": 2130,
+      "sha256": "fc7e2a6064bbd12c"
+    },
+    "apps/frontend/src/shared/composables/useContainerSize.test.ts": {
+      "size": 2597,
+      "sha256": "188ff3621b98a888"
+    },
+    "apps/frontend/src/shared/composables/useContainerSize.ts": {
+      "size": 2574,
+      "sha256": "49accc9614fd9de4"
+    },
+    "apps/frontend/src/shared/composables/useEventStream.test.ts": {
+      "size": 2405,
+      "sha256": "04a4b78a01d686e3"
+    },
+    "apps/frontend/src/shared/composables/useEventStream.ts": {
+      "size": 4098,
+      "sha256": "b6c7c9642ed9bbe1"
+    },
+    "apps/frontend/src/shared/composables/usePageHeader.test.ts": {
+      "size": 2118,
+      "sha256": "28ec09c340706b3e"
+    },
+    "apps/frontend/src/shared/composables/usePageHeader.ts": {
+      "size": 3555,
+      "sha256": "26425a1a28f28a2f"
+    },
+    "apps/frontend/src/shared/composables/useRowSelection.test.ts": {
+      "size": 1080,
+      "sha256": "5f643077c22d8d6b"
+    },
+    "apps/frontend/src/shared/composables/useRowSelection.ts": {
+      "size": 2499,
+      "sha256": "6b7ed7b730c0c2b1"
+    },
+    "apps/frontend/src/shared/composables/useSavedViews.test.ts": {
+      "size": 1067,
+      "sha256": "2bbb26a16b92f917"
+    },
+    "apps/frontend/src/shared/composables/useSavedViews.ts": {
+      "size": 1630,
+      "sha256": "415a5a1d58b41e87"
+    },
+    "apps/frontend/src/shared/composables/useSessionTimeout.test.ts": {
+      "size": 9217,
+      "sha256": "83b2c4af4f8b9d13"
+    },
+    "apps/frontend/src/shared/composables/useSessionTimeout.ts": {
+      "size": 9925,
+      "sha256": "35a26e80e20a90bb"
+    },
+    "apps/frontend/src/shared/composables/useSidebarShortcut.test.ts": {
+      "size": 1441,
+      "sha256": "96f52db4faf09ad4"
+    },
+    "apps/frontend/src/shared/composables/useSidebarShortcut.ts": {
+      "size": 2113,
+      "sha256": "ccd8513dcd113c96"
+    },
+    "apps/frontend/src/shared/composables/useTheme.ts": {
+      "size": 385,
+      "sha256": "754919cf7282ac23"
+    },
+    "apps/frontend/src/shared/composables/useUrlState.test.ts": {
+      "size": 2004,
+      "sha256": "2025e53f0ecfdbc0"
+    },
+    "apps/frontend/src/shared/composables/useUrlState.ts": {
+      "size": 2077,
+      "sha256": "5039bdfa053a4be8"
+    },
+    "apps/frontend/src/shared/composables/useZodForm.test.ts": {
+      "size": 3106,
+      "sha256": "8281a74223ebd062"
+    },
+    "apps/frontend/src/shared/composables/useZodForm.ts": {
+      "size": 4267,
+      "sha256": "9cc38aed121517bd"
+    },
+    "apps/frontend/src/shared/config/runtime.test.ts": {
+      "size": 927,
+      "sha256": "58cb17a5fc1fdf53"
+    },
+    "apps/frontend/src/shared/config/runtime.ts": {
+      "size": 5860,
+      "sha256": "a8c704eef9441ad1"
+    },
+    "apps/frontend/src/shared/enums/approval_mode.ts": {
+      "size": 284,
+      "sha256": "614efe149a0be14b"
+    },
+    "apps/frontend/src/shared/enums/item_status.ts": {
+      "size": 236,
+      "sha256": "d93d8731bb37d0ab"
+    },
+    "apps/frontend/src/shared/layouts/AuthLayout.vue": {
+      "size": 200,
+      "sha256": "a00660e1261b5925"
+    },
+    "apps/frontend/src/shared/layouts/MainLayout.vue": {
+      "size": 1907,
+      "sha256": "c288adac7842191c"
+    },
+    "apps/frontend/src/shared/lib/utils.test.ts": {
+      "size": 811,
+      "sha256": "1bf92589779264e9"
+    },
+    "apps/frontend/src/shared/lib/utils.ts": {
+      "size": 166,
+      "sha256": "746e4d9beb1a5b6f"
+    },
+    "apps/frontend/src/shared/mocks/browser.ts": {
+      "size": 128,
+      "sha256": "fb850d02c8328e6d"
+    },
+    "apps/frontend/src/shared/mocks/handlers.test.ts": {
+      "size": 1821,
+      "sha256": "e350a34264717b3f"
+    },
+    "apps/frontend/src/shared/mocks/handlers.ts": {
+      "size": 1012,
+      "sha256": "d1010cf021893a21"
+    },
+    "apps/frontend/src/shared/mocks/items.handlers.ts": {
+      "size": 2539,
+      "sha256": "ce90cf1fa47623e6"
+    },
+    "apps/frontend/src/shared/mocks/node.ts": {
+      "size": 125,
+      "sha256": "ee73808045d6c550"
+    },
+    "apps/frontend/src/shared/mocks/orders.handlers.ts": {
+      "size": 2553,
+      "sha256": "06fb60cc9abc0038"
+    },
+    "apps/frontend/src/shared/mocks/scenarios.ts": {
+      "size": 644,
+      "sha256": "00a6a11aafe3b2db"
+    },
+    "apps/frontend/src/shared/observability/sentry.test.ts": {
+      "size": 1155,
+      "sha256": "cfcf25b01ef4e411"
+    },
+    "apps/frontend/src/shared/observability/sentry.ts": {
+      "size": 3935,
+      "sha256": "546780df05447bbf"
+    },
+    "apps/frontend/src/shared/observability/telemetry.test.ts": {
+      "size": 1114,
+      "sha256": "3ae169381114ec46"
+    },
+    "apps/frontend/src/shared/observability/telemetry.ts": {
+      "size": 3020,
+      "sha256": "20b2cae43f6c2728"
+    },
+    "apps/frontend/src/shared/stores/settings.store.test.ts": {
+      "size": 2898,
+      "sha256": "8e721ebc48c6cb96"
+    },
+    "apps/frontend/src/shared/stores/settings.store.ts": {
+      "size": 5674,
+      "sha256": "ca5fdeb279efca9d"
+    },
+    "apps/frontend/src/shared/stores/ui.store.test.ts": {
+      "size": 3441,
+      "sha256": "fbd0116ffd6874ca"
+    },
+    "apps/frontend/src/shared/stores/ui.store.ts": {
+      "size": 1948,
+      "sha256": "e5c74a24c0b3092b"
+    },
+    "apps/frontend/src/shared/types/index.ts": {
+      "size": 202,
+      "sha256": "54fdfd3610a6c3ab"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/AlertDialogContent.vue": {
+      "size": 1528,
+      "sha256": "b940b722431fd006"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/AlertDialogDescription.vue": {
+      "size": 589,
+      "sha256": "870158fa17366427"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/AlertDialogFooter.vue": {
+      "size": 325,
+      "sha256": "9b776c6ec82cefb4"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/AlertDialogHeader.vue": {
+      "size": 314,
+      "sha256": "241f87e13f970f62"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/AlertDialogTitle.vue": {
+      "size": 579,
+      "sha256": "a5215d9c2a55cdee"
+    },
+    "apps/frontend/src/shared/ui/alert-dialog/index.ts": {
+      "size": 491,
+      "sha256": "ad6527f5b48b9595"
+    },
+    "apps/frontend/src/shared/ui/avatar/Avatar.vue": {
+      "size": 427,
+      "sha256": "23d41c6ba9e257c9"
+    },
+    "apps/frontend/src/shared/ui/avatar/AvatarFallback.vue": {
+      "size": 473,
+      "sha256": "4b104910b2238d48"
+    },
+    "apps/frontend/src/shared/ui/avatar/AvatarImage.vue": {
+      "size": 378,
+      "sha256": "079a09dcc2c3f3f1"
+    },
+    "apps/frontend/src/shared/ui/avatar/index.ts": {
+      "size": 173,
+      "sha256": "7a769dfa24a76cdd"
+    },
+    "apps/frontend/src/shared/ui/badge/Badge.vue": {
+      "size": 490,
+      "sha256": "c577254832756134"
+    },
+    "apps/frontend/src/shared/ui/badge/index.ts": {
+      "size": 90,
+      "sha256": "85bf7e918b618876"
+    },
+    "apps/frontend/src/shared/ui/badge/variants.ts": {
+      "size": 754,
+      "sha256": "c466dea8ed36e522"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/Breadcrumb.vue": {
+      "size": 77,
+      "sha256": "46ceea9ec1ea7bc3"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/BreadcrumbItem.vue": {
+      "size": 296,
+      "sha256": "5bab1be419c4db30"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/BreadcrumbLink.vue": {
+      "size": 379,
+      "sha256": "9a52747fc3e03c4f"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/BreadcrumbList.vue": {
+      "size": 396,
+      "sha256": "2d431f46ffe5477c"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/BreadcrumbPage.vue": {
+      "size": 367,
+      "sha256": "762bdeb837f6e52f"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/BreadcrumbSeparator.vue": {
+      "size": 421,
+      "sha256": "5549fcee598f880b"
+    },
+    "apps/frontend/src/shared/ui/breadcrumb/index.ts": {
+      "size": 392,
+      "sha256": "261492045e28fd29"
+    },
+    "apps/frontend/src/shared/ui/button/Button.vue": {
+      "size": 887,
+      "sha256": "9c3c4c865b44f413"
+    },
+    "apps/frontend/src/shared/ui/button/index.ts": {
+      "size": 93,
+      "sha256": "5947e44f4fd22381"
+    },
+    "apps/frontend/src/shared/ui/button/variants.ts": {
+      "size": 1235,
+      "sha256": "a4edb311958604e6"
+    },
+    "apps/frontend/src/shared/ui/card/Card.vue": {
+      "size": 319,
+      "sha256": "f25d5553c47bd0c5"
+    },
+    "apps/frontend/src/shared/ui/card/CardContent.vue": {
+      "size": 274,
+      "sha256": "9d1b67ebd01206b5"
+    },
+    "apps/frontend/src/shared/ui/card/CardDescription.vue": {
+      "size": 291,
+      "sha256": "2aea1a004d900713"
+    },
+    "apps/frontend/src/shared/ui/card/CardFooter.vue": {
+      "size": 292,
+      "sha256": "7ae7a1c30a4c822e"
+    },
+    "apps/frontend/src/shared/ui/card/CardHeader.vue": {
+      "size": 293,
+      "sha256": "a1afd7ee220659f1"
+    },
+    "apps/frontend/src/shared/ui/card/CardTitle.vue": {
+      "size": 305,
+      "sha256": "eee4dd58db319429"
+    },
+    "apps/frontend/src/shared/ui/card/index.ts": {
+      "size": 340,
+      "sha256": "d89f115aa8ad80a6"
+    },
+    "apps/frontend/src/shared/ui/dialog/DialogContent.vue": {
+      "size": 2013,
+      "sha256": "401dc905de322ac3"
+    },
+    "apps/frontend/src/shared/ui/dialog/DialogDescription.vue": {
+      "size": 564,
+      "sha256": "165b544dec67a8df"
+    },
+    "apps/frontend/src/shared/ui/dialog/DialogFooter.vue": {
+      "size": 325,
+      "sha256": "9b776c6ec82cefb4"
+    },
+    "apps/frontend/src/shared/ui/dialog/DialogHeader.vue": {
+      "size": 314,
+      "sha256": "241f87e13f970f62"
+    },
+    "apps/frontend/src/shared/ui/dialog/DialogTitle.vue": {
+      "size": 554,
+      "sha256": "f5f4622224683fab"
+    },
+    "apps/frontend/src/shared/ui/dialog/index.ts": {
+      "size": 415,
+      "sha256": "9898817e850d487c"
+    },
+    "apps/frontend/src/shared/ui/dropdown-menu/DropdownMenuContent.vue": {
+      "size": 1151,
+      "sha256": "44ca10fb81a5c997"
+    },
+    "apps/frontend/src/shared/ui/dropdown-menu/DropdownMenuItem.vue": {
+      "size": 885,
+      "sha256": "0ddcb20c7d5332b7"
+    },
+    "apps/frontend/src/shared/ui/dropdown-menu/DropdownMenuLabel.vue": {
+      "size": 617,
+      "sha256": "4648e08e445ae6ba"
+    },
+    "apps/frontend/src/shared/ui/dropdown-menu/DropdownMenuSeparator.vue": {
+      "size": 530,
+      "sha256": "5080a32e9916adeb"
+    },
+    "apps/frontend/src/shared/ui/dropdown-menu/index.ts": {
+      "size": 495,
+      "sha256": "a6f07b8e34ee0196"
+    },
+    "apps/frontend/src/shared/ui/input/Input.vue": {
+      "size": 897,
+      "sha256": "0bdd70bc6d63acd4"
+    },
+    "apps/frontend/src/shared/ui/input/index.ts": {
+      "size": 47,
+      "sha256": "09ebfb7b7805ec2c"
+    },
+    "apps/frontend/src/shared/ui/label/Label.vue": {
+      "size": 511,
+      "sha256": "844e28d25386aa4e"
+    },
+    "apps/frontend/src/shared/ui/label/index.ts": {
+      "size": 47,
+      "sha256": "4f6cdf31660b5464"
+    },
+    "apps/frontend/src/shared/ui/segmented-button/SegmentedButton.vue": {
+      "size": 532,
+      "sha256": "b87d53d38403b187"
+    },
+    "apps/frontend/src/shared/ui/segmented-button/SegmentedButtonItem.vue": {
+      "size": 778,
+      "sha256": "5322e97a3d548741"
+    },
+    "apps/frontend/src/shared/ui/segmented-button/context.ts": {
+      "size": 252,
+      "sha256": "44721b8b8eab3d3a"
+    },
+    "apps/frontend/src/shared/ui/segmented-button/index.ts": {
+      "size": 142,
+      "sha256": "15b8e753db153324"
+    },
+    "apps/frontend/src/shared/ui/select/SelectContent.vue": {
+      "size": 1537,
+      "sha256": "aaf3f5d9a4c66254"
+    },
+    "apps/frontend/src/shared/ui/select/SelectItem.vue": {
+      "size": 1065,
+      "sha256": "6f248a77287ed434"
+    },
+    "apps/frontend/src/shared/ui/select/SelectLabel.vue": {
+      "size": 527,
+      "sha256": "9430bffccf6d4355"
+    },
+    "apps/frontend/src/shared/ui/select/SelectSeparator.vue": {
+      "size": 506,
+      "sha256": "169c8bd6539102ec"
+    },
+    "apps/frontend/src/shared/ui/select/SelectTrigger.vue": {
+      "size": 1010,
+      "sha256": "60193f396f1cd0ad"
+    },
+    "apps/frontend/src/shared/ui/select/index.ts": {
+      "size": 407,
+      "sha256": "30f10701ee4ba78c"
+    },
+    "apps/frontend/src/shared/ui/separator/Separator.vue": {
+      "size": 686,
+      "sha256": "6009c05ffcc58631"
+    },
+    "apps/frontend/src/shared/ui/separator/index.ts": {
+      "size": 55,
+      "sha256": "5e79dd5256c2212b"
+    },
+    "apps/frontend/src/shared/ui/sidebar/Sidebar.vue": {
+      "size": 634,
+      "sha256": "ed55d7404abc4f17"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarContent.vue": {
+      "size": 255,
+      "sha256": "7962961486777dd7"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarFooter.vue": {
+      "size": 230,
+      "sha256": "ee0f5b32a283910f"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarGroup.vue": {
+      "size": 248,
+      "sha256": "ca0980fb17da5106"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarGroupContent.vue": {
+      "size": 221,
+      "sha256": "2ad037c68ab9d4cf"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarGroupLabel.vue": {
+      "size": 603,
+      "sha256": "d57e67259054f74d"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarHeader.vue": {
+      "size": 230,
+      "sha256": "ee0f5b32a283910f"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarInset.vue": {
+      "size": 306,
+      "sha256": "c1a6866cf239f4ef"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarMenu.vue": {
+      "size": 239,
+      "sha256": "f78ff70ea5445a6b"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarMenuButton.vue": {
+      "size": 1211,
+      "sha256": "2379b7e0bf7c133d"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarMenuItem.vue": {
+      "size": 229,
+      "sha256": "a94947f4879b491b"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarProvider.vue": {
+      "size": 680,
+      "sha256": "50a8cbbdd58ce898"
+    },
+    "apps/frontend/src/shared/ui/sidebar/SidebarTrigger.vue": {
+      "size": 454,
+      "sha256": "09e815a4b8748430"
+    },
+    "apps/frontend/src/shared/ui/sidebar/context.ts": {
+      "size": 207,
+      "sha256": "fe79a38dc6bddb15"
+    },
+    "apps/frontend/src/shared/ui/sidebar/index.ts": {
+      "size": 839,
+      "sha256": "d2d35eb49df61c10"
+    },
+    "apps/frontend/src/shared/ui/skeleton/Skeleton.vue": {
+      "size": 284,
+      "sha256": "91f3ff78c79f1b6c"
+    },
+    "apps/frontend/src/shared/ui/skeleton/index.ts": {
+      "size": 53,
+      "sha256": "63c46cdea19ddec2"
+    },
+    "apps/frontend/src/shared/ui/sonner/index.ts": {
+      "size": 37,
+      "sha256": "6109de62b5340d3c"
+    },
+    "apps/frontend/src/shared/ui/table/Table.vue": {
+      "size": 360,
+      "sha256": "489e8a3f853e5fef"
+    },
+    "apps/frontend/src/shared/ui/table/TableBody.vue": {
+      "size": 296,
+      "sha256": "9632588f0f28addf"
+    },
+    "apps/frontend/src/shared/ui/table/TableCell.vue": {
+      "size": 390,
+      "sha256": "fd43740ebee3003e"
+    },
+    "apps/frontend/src/shared/ui/table/TableHead.vue": {
+      "size": 440,
+      "sha256": "01ae90b4f2c39f72"
+    },
+    "apps/frontend/src/shared/ui/table/TableHeader.vue": {
+      "size": 285,
+      "sha256": "ce42c9a2c956e3a6"
+    },
+    "apps/frontend/src/shared/ui/table/TableRow.vue": {
+      "size": 383,
+      "sha256": "473a493a8004d106"
+    },
+    "apps/frontend/src/shared/ui/table/index.ts": {
+      "size": 324,
+      "sha256": "e4868e3d2ba0e055"
+    },
+    "apps/frontend/src/shared/ui/textarea/Textarea.vue": {
+      "size": 791,
+      "sha256": "43468ffd6a96fda1"
+    },
+    "apps/frontend/src/shared/ui/textarea/index.ts": {
+      "size": 53,
+      "sha256": "1b7316231e53ee33"
+    },
+    "apps/frontend/src/shared/ui/toggle-group/ToggleGroup.vue": {
+      "size": 566,
+      "sha256": "8f818fb2470fde32"
+    },
+    "apps/frontend/src/shared/ui/toggle-group/ToggleGroupItem.vue": {
+      "size": 987,
+      "sha256": "484e865a8f6b31b8"
+    },
+    "apps/frontend/src/shared/ui/toggle-group/index.ts": {
+      "size": 126,
+      "sha256": "4ed073394cbea01b"
+    },
+    "apps/frontend/src/shared/ui/tooltip/TooltipContent.vue": {
+      "size": 1040,
+      "sha256": "1623eaecac536644"
+    },
+    "apps/frontend/src/shared/ui/tooltip/index.ts": {
+      "size": 173,
+      "sha256": "0dcdb8605fd8f9b6"
+    },
+    "apps/frontend/src/test/setup.ts": {
+      "size": 539,
+      "sha256": "1172e1baef2987f5"
+    },
+    "apps/frontend/tailwind.config.ts": {
+      "size": 163,
+      "sha256": "e309286e33878d5e"
+    },
+    "apps/frontend/tests/e2e/application.spec.ts": {
+      "size": 2128,
+      "sha256": "07edb98af8299473"
+    },
+    "apps/frontend/tests/e2e/crud.ts": {
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
+    },
+    "apps/frontend/tests/e2e/health.ts": {
+      "size": 817,
+      "sha256": "063adfff636cfecf"
+    },
+    "apps/frontend/tests/e2e/items.spec.ts": {
+      "size": 69,
+      "sha256": "6ba1aadca935d60b"
+    },
+    "apps/frontend/tests/e2e/orders.spec.ts": {
+      "size": 71,
+      "sha256": "cc281f01080a837f"
+    },
+    "apps/frontend/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
+    },
+    "apps/frontend/tests/integration/button.test.ts": {
+      "size": 504,
+      "sha256": "3faf42307082123a"
+    },
+    "apps/frontend/tests/integration/crud.ts": {
+      "size": 8983,
+      "sha256": "bc70a0fe8260e80b"
+    },
+    "apps/frontend/tests/integration/home-page.test.ts": {
+      "size": 2920,
+      "sha256": "3d2acf6bbbc25cb0"
+    },
+    "apps/frontend/tests/integration/items.test.ts": {
+      "size": 135,
+      "sha256": "8fed7f7ba3dc5c70"
+    },
+    "apps/frontend/tests/integration/orders.test.ts": {
+      "size": 140,
+      "sha256": "890a410d520974b9"
+    },
+    "apps/frontend/tests/integration/primitives.test.ts": {
+      "size": 4257,
+      "sha256": "6dfe9c29568abf47"
+    },
+    "apps/frontend/tests/integration/profile-page.test.ts": {
+      "size": 1879,
+      "sha256": "4769e6ff4487ed23"
+    },
+    "apps/frontend/tests/integration/settings-page.test.ts": {
+      "size": 2895,
+      "sha256": "a1823f975f07c5f2"
+    },
+    "apps/frontend/tests/integration/splitter.test.ts": {
+      "size": 888,
+      "sha256": "7db86e57be4f485b"
+    },
+    "apps/frontend/tests/integration/status-confirmation.test.ts": {
+      "size": 1627,
+      "sha256": "14953eba2c634ff1"
+    },
+    "apps/frontend/tsconfig.app.json": {
+      "size": 782,
+      "sha256": "6862427a29043fa7"
+    },
+    "apps/frontend/tsconfig.json": {
+      "size": 119,
+      "sha256": "770b4140bbb581e2"
+    },
+    "apps/frontend/tsconfig.node.json": {
+      "size": 553,
+      "sha256": "aba9539ccbfa500e"
+    },
+    "apps/frontend/vite.config.ts": {
+      "size": 2413,
+      "sha256": "aa7e0c489644f7ea"
+    },
+    "apps/frontend/vitest.config.ts": {
+      "size": 389,
+      "sha256": "265be468dd68260a"
+    },
+    "apps/frontend/vitest.integration.config.ts": {
+      "size": 242,
+      "sha256": "121f68f0347a5788"
+    },
+    "deploy/compose/init-db.sh": {
+      "size": 337,
+      "sha256": "da27485bdd9e4e50"
+    },
+    "deploy/infra/gatekeeper/.gitignore": {
+      "size": 494,
+      "sha256": "f27b7dd313f5239b"
+    },
+    "deploy/infra/gatekeeper/Dockerfile": {
+      "size": 1437,
+      "sha256": "6f7ab7e130a98c5b"
+    },
+    "deploy/infra/gatekeeper/README.md": {
+      "size": 549,
+      "sha256": "2feeb9c03f762d51"
+    },
+    "deploy/infra/gatekeeper/config/default.yaml": {
+      "size": 1896,
+      "sha256": "0defe6343b5fc6b9"
+    },
+    "deploy/infra/gatekeeper/config/development.yaml": {
+      "size": 69,
+      "sha256": "8ee9220daf14615a"
+    },
+    "deploy/infra/gatekeeper/config/production.yaml": {
+      "size": 1184,
+      "sha256": "96b81110decce336"
+    },
+    "deploy/infra/gatekeeper/config/secrets.production.yaml.example": {
+      "size": 280,
+      "sha256": "7201c2d371db6668"
+    },
+    "deploy/infra/gatekeeper/config/staging.yaml": {
+      "size": 1222,
+      "sha256": "4245b692a1baee92"
+    },
+    "deploy/infra/gatekeeper/pyproject.toml": {
+      "size": 2965,
+      "sha256": "5a652b32fa5cce01"
+    },
+    "deploy/infra/gatekeeper/scripts/keygen.py": {
+      "size": 2386,
+      "sha256": "d9a27fe2e47a92fa"
+    },
+    "deploy/infra/gatekeeper/scripts/realm_sync.py": {
+      "size": 7957,
+      "sha256": "1280b7585e377e5b"
+    },
+    "deploy/infra/gatekeeper/scripts/validate_internal.py": {
+      "size": 7193,
+      "sha256": "75807986350c099a"
+    },
+    "deploy/infra/gatekeeper/scripts/validate_tenant_hook.py": {
+      "size": 15196,
+      "sha256": "fb00c2d9990b2cb0"
+    },
+    "deploy/infra/gatekeeper/secrets/service_registry.yaml": {
+      "size": 2862,
+      "sha256": "45fd3463d175a0ba"
+    },
+    "deploy/infra/gatekeeper/src/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/__main__.py": {
+      "size": 80,
+      "sha256": "ddb60cabe1d6edc6"
+    },
+    "deploy/infra/gatekeeper/src/app/__init__.py": {
+      "size": 50,
+      "sha256": "781242d150234ed5"
+    },
+    "deploy/infra/gatekeeper/src/app/__main__.py": {
+      "size": 84,
+      "sha256": "ab441efaf55e32d6"
+    },
+    "deploy/infra/gatekeeper/src/app/api/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/api/v1/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/api/v1/api.py": {
+      "size": 215,
+      "sha256": "a3ea2fe7c73c5dd9"
+    },
+    "deploy/infra/gatekeeper/src/app/api/v1/endpoints/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/api/v1/endpoints/health.py": {
+      "size": 4428,
+      "sha256": "f2bc1bdc54baf42f"
+    },
+    "deploy/infra/gatekeeper/src/app/api/v1/endpoints/home.py": {
+      "size": 372,
+      "sha256": "13486d784b639bdc"
+    },
+    "deploy/infra/gatekeeper/src/app/cli/__init__.py": {
+      "size": 247,
+      "sha256": "eae2e82e1018d93c"
+    },
+    "deploy/infra/gatekeeper/src/app/cli/server.py": {
+      "size": 1685,
+      "sha256": "896e570285d3db89"
+    },
+    "deploy/infra/gatekeeper/src/app/core/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/core/config/__init__.py": {
+      "size": 805,
+      "sha256": "824f021819eeddd5"
+    },
+    "deploy/infra/gatekeeper/src/app/core/config/domain.py": {
+      "size": 2842,
+      "sha256": "2288835faa0c03cf"
+    },
+    "deploy/infra/gatekeeper/src/app/core/config/loader.py": {
+      "size": 3683,
+      "sha256": "b4af3995425e4cde"
+    },
+    "deploy/infra/gatekeeper/src/app/core/config/sources.py": {
+      "size": 5179,
+      "sha256": "245bbc9d767021be"
+    },
+    "deploy/infra/gatekeeper/src/app/core/errors.py": {
+      "size": 2298,
+      "sha256": "c286523002cca398"
+    },
+    "deploy/infra/gatekeeper/src/app/core/lifecycle.py": {
+      "size": 9589,
+      "sha256": "a98d40091689a57e"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/__init__.py": {
+      "size": 697,
+      "sha256": "34bcdba3aaf1d37b"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/apikeys.py": {
+      "size": 8762,
+      "sha256": "b192fd702de61396"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/apikeys_api.py": {
+      "size": 12618,
+      "sha256": "97fff7148e9cbbf9"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/authz.py": {
+      "size": 2901,
+      "sha256": "0d031823b3226dd2"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/config.py": {
+      "size": 18261,
+      "sha256": "112aa7d57b5dee43"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/delegation_grant.py": {
+      "size": 7041,
+      "sha256": "2c7322a606f0fcb5"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/helpers.py": {
+      "size": 11176,
+      "sha256": "550b68fe9ec298bd"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/http_client.py": {
+      "size": 4803,
+      "sha256": "f5df6111bae0c0c4"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/internal_token.py": {
+      "size": 6370,
+      "sha256": "881fa215637bf95f"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/internal_token_cache.py": {
+      "size": 11373,
+      "sha256": "fc3074e3a2111eb6"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/jwks.py": {
+      "size": 5508,
+      "sha256": "fc54102cfcf19458"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/key_store.py": {
+      "size": 8629,
+      "sha256": "5d560ac4905cd9b7"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/keycloak_admin.py": {
+      "size": 3877,
+      "sha256": "ed1916c3f4369498"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/metrics.py": {
+      "size": 4897,
+      "sha256": "7b3deae1cb54bd9e"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/oidc.py": {
+      "size": 4359,
+      "sha256": "e5153f781070d1a1"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/oidc_pkce.py": {
+      "size": 4901,
+      "sha256": "7600958719f667d7"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/ratelimit.py": {
+      "size": 2766,
+      "sha256": "27019929bb1db31d"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/realm_invariants.py": {
+      "size": 7408,
+      "sha256": "5dcfb41fc0592d61"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/redis.py": {
+      "size": 24989,
+      "sha256": "bebbec570db9b36e"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/routes.py": {
+      "size": 41357,
+      "sha256": "5de9958fd346872b"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/routes_jwks.py": {
+      "size": 1839,
+      "sha256": "a291d21841b463ae"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/routes_session.py": {
+      "size": 9103,
+      "sha256": "198b4e60cbf9e241"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/scopes.py": {
+      "size": 1718,
+      "sha256": "9c78204cea910aa0"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/server_session.py": {
+      "size": 14896,
+      "sha256": "52c90aac44694e93"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/service_registry.py": {
+      "size": 5998,
+      "sha256": "65c6f0db128246a0"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/service_token.py": {
+      "size": 26223,
+      "sha256": "a4f996456f26ceb0"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/service_verifier.py": {
+      "size": 18301,
+      "sha256": "57ac8f8bd6d5c3fe"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/tenant_config.py": {
+      "size": 5480,
+      "sha256": "22f0589261f4851a"
+    },
+    "deploy/infra/gatekeeper/src/app/main.py": {
+      "size": 4090,
+      "sha256": "4ff0c4c607abc166"
+    },
+    "deploy/infra/gatekeeper/src/app/middleware/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/middleware/api_version.py": {
+      "size": 2177,
+      "sha256": "8c8d63d3825703e6"
+    },
+    "deploy/infra/gatekeeper/src/app/middleware/log_redaction.py": {
+      "size": 4068,
+      "sha256": "4147b8b1df4b0262"
+    },
+    "deploy/infra/gatekeeper/src/app/middleware/logging.py": {
+      "size": 3741,
+      "sha256": "712ce80f20efea6b"
+    },
+    "deploy/infra/gatekeeper/src/app/middleware/security_headers.py": {
+      "size": 1434,
+      "sha256": "7df306e69c1e0749"
+    },
+    "deploy/infra/gatekeeper/src/app/observability/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/src/app/observability/json_logging.py": {
+      "size": 2442,
+      "sha256": "e59c43fba7d12bae"
+    },
+    "deploy/infra/gatekeeper/src/app/observability/metrics.py": {
+      "size": 4039,
+      "sha256": "d686b6e46321522b"
+    },
+    "deploy/infra/gatekeeper/src/app/observability/tracing.py": {
+      "size": 3373,
+      "sha256": "38e9323eee76a69c"
+    },
+    "deploy/infra/gatekeeper/src/py.typed": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "deploy/infra/gatekeeper/uv.lock": {
+      "size": 382508,
+      "sha256": "1447b23872702fb7"
+    },
+    "deploy/infra/keycloak/Dockerfile": {
+      "size": 368,
+      "sha256": "173308d6bc79f077"
+    },
+    "deploy/infra/keycloak/themes/vscode/login/resources/css/styles.css": {
+      "size": 23365,
+      "sha256": "6708c30f946a4b96"
+    },
+    "deploy/infra/keycloak/themes/vscode/login/theme.properties": {
+      "size": 64,
+      "sha256": "b0d710cd06b5c9d2"
+    },
+    "deploy/infra/keycloak-realm.json": {
+      "size": 6094,
+      "sha256": "916e2cde8c2fd2c6"
+    },
+    "docker-compose.yml": {
+      "size": 13865,
+      "sha256": "bdb8deaf173bef47"
+    },
+    "forge.toml": {
+      "size": 186570,
+      "sha256": "<version-dependent>"
+    },
+    "package.json": {
+      "size": 688,
+      "sha256": "6d0010f24a113cdc"
+    },
+    "packages/platform-auth/README.md": {
+      "size": 1468,
+      "sha256": "9c06875bd132381d"
+    },
+    "packages/platform-auth/pyproject.toml": {
+      "size": 1368,
+      "sha256": "4d9c7acb2299e4fb"
+    },
+    "packages/platform-auth/src/platform_auth/__init__.py": {
+      "size": 1490,
+      "sha256": "f89b9b770112c796"
+    },
+    "packages/platform-auth/src/platform_auth/auth_guard.py": {
+      "size": 22049,
+      "sha256": "4e3249203fe1a3d1"
+    },
+    "packages/platform-auth/src/platform_auth/exceptions.py": {
+      "size": 3572,
+      "sha256": "3bc6b1044252cf7d"
+    },
+    "packages/platform-auth/src/platform_auth/identity.py": {
+      "size": 3270,
+      "sha256": "cb553a1cd1e23402"
+    },
+    "packages/platform-auth/src/platform_auth/jwks.py": {
+      "size": 8694,
+      "sha256": "94512b209c637d91"
+    },
+    "packages/platform-auth/src/platform_auth/may_act.py": {
+      "size": 3475,
+      "sha256": "3165b352ef048e2d"
+    },
+    "packages/platform-auth/src/platform_auth/revocation.py": {
+      "size": 3477,
+      "sha256": "1037b6bf08105da5"
+    },
+    "packages/platform-auth/src/platform_auth/s2s_client.py": {
+      "size": 14321,
+      "sha256": "59f11508546bd665"
+    },
+    "packages/platform-auth/src/platform_auth/scopes.py": {
+      "size": 5190,
+      "sha256": "17c5ba9839c89cd8"
+    },
+    "packages/platform-auth/src/platform_auth/testing.py": {
+      "size": 13715,
+      "sha256": "e7d1d4bb00f1e8a0"
+    },
+    "packages/platform-auth/src/platform_auth/trust.py": {
+      "size": 5793,
+      "sha256": "08d3cad0ab84903e"
+    },
+    "packages/platform-auth/tests/README.md": {
+      "size": 1245,
+      "sha256": "0afc5d668d2a43a1"
+    },
+    "packages/platform-auth/tests/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "packages/platform-auth/tests/conftest.py": {
+      "size": 442,
+      "sha256": "f02ef1b9a90a1070"
+    },
+    "packages/platform-auth/tests/unit/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "packages/platform-auth/tests/unit/test_auth_guard.py": {
+      "size": 29458,
+      "sha256": "3fca2d840ccfbbd3"
+    },
+    "packages/platform-auth/tests/unit/test_exceptions.py": {
+      "size": 3263,
+      "sha256": "518dea43aee23632"
+    },
+    "packages/platform-auth/tests/unit/test_identity.py": {
+      "size": 4403,
+      "sha256": "0d530c468751e489"
+    },
+    "packages/platform-auth/tests/unit/test_jwks.py": {
+      "size": 17042,
+      "sha256": "01782d9bb8229327"
+    },
+    "packages/platform-auth/tests/unit/test_may_act.py": {
+      "size": 3104,
+      "sha256": "fa24827c8a26ac11"
+    },
+    "packages/platform-auth/tests/unit/test_require_scope.py": {
+      "size": 4685,
+      "sha256": "55e8d7c5d07a24f8"
+    },
+    "packages/platform-auth/tests/unit/test_revocation.py": {
+      "size": 4212,
+      "sha256": "84179ea433e24a59"
+    },
+    "packages/platform-auth/tests/unit/test_s2s_client.py": {
+      "size": 20250,
+      "sha256": "d578dd0735e223fb"
+    },
+    "packages/platform-auth/tests/unit/test_s2s_client_tenant.py": {
+      "size": 7474,
+      "sha256": "319dbe1d8be035e2"
+    },
+    "packages/platform-auth/tests/unit/test_scopes.py": {
+      "size": 6527,
+      "sha256": "16076a88259dbac9"
+    },
+    "packages/platform-auth/tests/unit/test_trust.py": {
+      "size": 6026,
+      "sha256": "92b4d508b4aa3d9b"
+    },
+    "packages/platform-auth/uv.lock": {
+      "size": 174339,
+      "sha256": "459f95079ae5c647"
+    },
+    "services/api/.copier-answers.yml": {
+      "size": 543,
+      "sha256": "<version-dependent>"
+    },
+    "services/api/.env.example": {
+      "size": 307,
+      "sha256": "3642388451347786"
+    },
+    "services/api/.gitignore": {
+      "size": 158,
+      "sha256": "3efb3e509a4c13dd"
+    },
+    "services/api/.python-version": {
+      "size": 5,
+      "sha256": "02e735b3dfe1c328"
+    },
+    "services/api/Dockerfile": {
+      "size": 3637,
+      "sha256": "705cbbb1c3522151"
+    },
+    "services/api/OBSERVABILITY.md": {
+      "size": 2870,
+      "sha256": "88eb592be6414cd8"
+    },
+    "services/api/OPERATIONS.md": {
+      "size": 2644,
+      "sha256": "adb3e5aea64be980"
+    },
+    "services/api/README.md": {
+      "size": 33686,
+      "sha256": "b891350fb641d6b2"
+    },
+    "services/api/alembic/env.py": {
+      "size": 2601,
+      "sha256": "f4cf81b3a4cea15a"
+    },
+    "services/api/alembic/script.py.mako": {
+      "size": 634,
+      "sha256": "0dd9fc884e17a48a"
+    },
+    "services/api/alembic/versions/0001_initial.py": {
+      "size": 4069,
+      "sha256": "1fffa083caa7f77c"
+    },
+    "services/api/alembic.ini": {
+      "size": 621,
+      "sha256": "fc4635dcb0b2a6d1"
+    },
+    "services/api/config/default.yaml": {
+      "size": 2342,
+      "sha256": "c7ed56a09bdea768"
+    },
+    "services/api/config/development.yaml": {
+      "size": 129,
+      "sha256": "03aaca310beae07a"
+    },
+    "services/api/config/production.yaml": {
+      "size": 425,
+      "sha256": "34ff0de7a81f7123"
+    },
+    "services/api/config/testing.yaml": {
+      "size": 148,
+      "sha256": "c0859dec5b712b9b"
+    },
+    "services/api/docker-compose.fragment.yaml": {
+      "size": 2946,
+      "sha256": "c56d8d2cbb9ccdeb"
+    },
+    "services/api/docker-compose.yaml": {
+      "size": 866,
+      "sha256": "66de67c35887d2bb"
+    },
+    "services/api/entrypoint.sh": {
+      "size": 506,
+      "sha256": "df2a39103908a6ed"
+    },
+    "services/api/pyproject.toml": {
+      "size": 5132,
+      "sha256": "1754d1d9f73c714e"
+    },
+    "services/api/sdks/forge-core/pyproject.toml": {
+      "size": 1613,
+      "sha256": "01420ff3fa4323e0"
+    },
+    "services/api/sdks/forge-core/src/forge_core/__init__.py": {
+      "size": 1949,
+      "sha256": "a7c18e6f20003f79"
+    },
+    "services/api/sdks/forge-core/src/forge_core/api/__init__.py": {
+      "size": 917,
+      "sha256": "8ac90195a1df3f51"
+    },
+    "services/api/sdks/forge-core/src/forge_core/api/filtering.py": {
+      "size": 2248,
+      "sha256": "8b50efca6c6c506d"
+    },
+    "services/api/sdks/forge-core/src/forge_core/api/pagination.py": {
+      "size": 3206,
+      "sha256": "533210dd695884dd"
+    },
+    "services/api/sdks/forge-core/src/forge_core/discovery.py": {
+      "size": 3804,
+      "sha256": "51e8e7dcaad2316d"
+    },
+    "services/api/sdks/forge-core/src/forge_core/domain/__init__.py": {
+      "size": 1521,
+      "sha256": "291c8008ab5eb1c8"
+    },
+    "services/api/sdks/forge-core/src/forge_core/domain/account.py": {
+      "size": 2692,
+      "sha256": "de26155a2ab0f33f"
+    },
+    "services/api/sdks/forge-core/src/forge_core/domain/config.py": {
+      "size": 4962,
+      "sha256": "87a92787ccce4025"
+    },
+    "services/api/sdks/forge-core/src/forge_core/domain/context.py": {
+      "size": 2570,
+      "sha256": "4c9ed98bb42b1d54"
+    },
+    "services/api/sdks/forge-core/src/forge_core/domain/user.py": {
+      "size": 1115,
+      "sha256": "65359e9f45d86c15"
+    },
+    "services/api/sdks/forge-core/src/forge_core/errors.py": {
+      "size": 4732,
+      "sha256": "3dd662ba623e334f"
+    },
+    "services/api/sdks/forge-core/src/forge_core/observability/__init__.py": {
+      "size": 458,
+      "sha256": "4db699c5df045892"
+    },
+    "services/api/sdks/forge-core/src/forge_core/observability/correlation.py": {
+      "size": 1340,
+      "sha256": "469c75492e7b0576"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/__init__.py": {
+      "size": 2053,
+      "sha256": "062b0f67b21c93bb"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/account.py": {
+      "size": 1422,
+      "sha256": "c658dd9b8415799e"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/config.py": {
+      "size": 2581,
+      "sha256": "cf342799fdab8e40"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/database.py": {
+      "size": 3253,
+      "sha256": "79f95915e394a46b"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/mixins.py": {
+      "size": 2437,
+      "sha256": "379f67c70b4ddb5b"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/repository.py": {
+      "size": 13313,
+      "sha256": "3b7efc87011f7cfb"
+    },
+    "services/api/sdks/forge-core/src/forge_core/persistence/unit_of_work.py": {
+      "size": 11037,
+      "sha256": "3ac04acb9960986d"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/__init__.py": {
+      "size": 3323,
+      "sha256": "91334c4bfc65def0"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/auth.py": {
+      "size": 10539,
+      "sha256": "1b2f6df7961da043"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/exceptions.py": {
+      "size": 2580,
+      "sha256": "bc43add6875ea5db"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/guard.py": {
+      "size": 10974,
+      "sha256": "ddff959f667ded9f"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/identity.py": {
+      "size": 2387,
+      "sha256": "9d00f0903d0cda1e"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/jwks.py": {
+      "size": 7009,
+      "sha256": "d49b3ef847eb378f"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/platform_auth_setup.py": {
+      "size": 2547,
+      "sha256": "49a80fb935f54d02"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/s2s.py": {
+      "size": 6287,
+      "sha256": "68eebecf556f6bba"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/scopes.py": {
+      "size": 2461,
+      "sha256": "7058a4d951a65e70"
+    },
+    "services/api/sdks/forge-core/src/forge_core/security/trust.py": {
+      "size": 2434,
+      "sha256": "02537bdaf981bd87"
+    },
+    "services/api/sdks/forge-core/tests/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/sdks/forge-core/tests/unit/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_api.py": {
+      "size": 2434,
+      "sha256": "ddc88d9222018357"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_discovery.py": {
+      "size": 4322,
+      "sha256": "09f61a217c51a931"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_domain.py": {
+      "size": 6505,
+      "sha256": "69e8438c447e3bd9"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_errors.py": {
+      "size": 4360,
+      "sha256": "9796a6e4750f1eca"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_observability.py": {
+      "size": 799,
+      "sha256": "8d06b1988ef7d35a"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_persistence.py": {
+      "size": 13276,
+      "sha256": "bb1452ffb85a6abc"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_persistence_internals.py": {
+      "size": 16165,
+      "sha256": "48fb5a7a68b0f3ad"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_s2s.py": {
+      "size": 2953,
+      "sha256": "5b01c1e0d70302b2"
+    },
+    "services/api/sdks/forge-core/tests/unit/test_security.py": {
+      "size": 27201,
+      "sha256": "0964461100e1f9b1"
+    },
+    "services/api/src/app/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/__main__.py": {
+      "size": 62,
+      "sha256": "27e9f1d08fa86704"
+    },
+    "services/api/src/app/adapters/error_default.py": {
+      "size": 1953,
+      "sha256": "f6fa9ccd76f74181"
+    },
+    "services/api/src/app/api/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/api/v1/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/api/v1/api.py": {
+      "size": 456,
+      "sha256": "dc0d0f332efb5cb7"
+    },
+    "services/api/src/app/api/v1/endpoints/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/api/v1/endpoints/admin.py": {
+      "size": 2918,
+      "sha256": "32cddbe55cf8be29"
+    },
+    "services/api/src/app/api/v1/endpoints/health.py": {
+      "size": 1505,
+      "sha256": "45ddbefb8e3c392c"
+    },
+    "services/api/src/app/api/v1/endpoints/home.py": {
+      "size": 444,
+      "sha256": "bfb0586626078b40"
+    },
+    "services/api/src/app/api/v1/endpoints/items.py": {
+      "size": 3369,
+      "sha256": "9e794f143b758941"
+    },
+    "services/api/src/app/cli/__init__.py": {
+      "size": 307,
+      "sha256": "8513702a5bd16c8e"
+    },
+    "services/api/src/app/cli/db.py": {
+      "size": 1016,
+      "sha256": "89af57fa1664e95c"
+    },
+    "services/api/src/app/cli/server.py": {
+      "size": 1146,
+      "sha256": "d0af8b659babeb52"
+    },
+    "services/api/src/app/core/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/core/auth.py": {
+      "size": 1922,
+      "sha256": "8ef5f598e7746191"
+    },
+    "services/api/src/app/core/config/__init__.py": {
+      "size": 605,
+      "sha256": "d9795309dc89bd45"
+    },
+    "services/api/src/app/core/config/domain.py": {
+      "size": 7181,
+      "sha256": "0ad8006e87e54a4a"
+    },
+    "services/api/src/app/core/config/loader.py": {
+      "size": 3530,
+      "sha256": "a7449363dcc21662"
+    },
+    "services/api/src/app/core/config/sources.py": {
+      "size": 4342,
+      "sha256": "850993b1d8d07bd9"
+    },
+    "services/api/src/app/core/container.py": {
+      "size": 907,
+      "sha256": "cb788464f33846c2"
+    },
+    "services/api/src/app/core/db.py": {
+      "size": 1793,
+      "sha256": "112704f0cb4111ea"
+    },
+    "services/api/src/app/core/db_pool.py": {
+      "size": 1391,
+      "sha256": "bb9b532d9b2aa7b4"
+    },
+    "services/api/src/app/core/errors.py": {
+      "size": 17805,
+      "sha256": "698342351b7ce3c0"
+    },
+    "services/api/src/app/core/ioc/__init__.py": {
+      "size": 437,
+      "sha256": "e1e94703a680e8c6"
+    },
+    "services/api/src/app/core/ioc/infra.py": {
+      "size": 1888,
+      "sha256": "1a6506525224676e"
+    },
+    "services/api/src/app/core/ioc/security.py": {
+      "size": 2354,
+      "sha256": "aeebf8f7b911c784"
+    },
+    "services/api/src/app/core/ioc/services.py": {
+      "size": 616,
+      "sha256": "ec360ce5bde7f803"
+    },
+    "services/api/src/app/core/lifecycle.py": {
+      "size": 5795,
+      "sha256": "8e19e8a466b872fd"
+    },
+    "services/api/src/app/core/pii_redaction.py": {
+      "size": 2600,
+      "sha256": "7bfef1845e66c09d"
+    },
+    "services/api/src/app/data/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/data/models/__init__.py": {
+      "size": 169,
+      "sha256": "0fb981f34efe923e"
+    },
+    "services/api/src/app/data/models/audit.py": {
+      "size": 1490,
+      "sha256": "6416c00e17069e27"
+    },
+    "services/api/src/app/data/models/base.py": {
+      "size": 216,
+      "sha256": "f5597f6c68472bed"
+    },
+    "services/api/src/app/data/models/item.py": {
+      "size": 1036,
+      "sha256": "bf3b2005304be824"
+    },
+    "services/api/src/app/data/repositories/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/data/repositories/base_tenant_aware.py": {
+      "size": 2310,
+      "sha256": "3316dc731f298436"
+    },
+    "services/api/src/app/data/repositories/item_repository.py": {
+      "size": 2566,
+      "sha256": "728686866e1ff03a"
+    },
+    "services/api/src/app/domain/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/domain/base.py": {
+      "size": 384,
+      "sha256": "c65d6235b6631cea"
+    },
+    "services/api/src/app/domain/canvas_events.py": {
+      "size": 2506,
+      "sha256": "c6b4774852475d5a"
+    },
+    "services/api/src/app/domain/canvas_props.py": {
+      "size": 1578,
+      "sha256": "c88c83734c2fb1c4"
+    },
+    "services/api/src/app/domain/enums/approval_mode.py": {
+      "size": 312,
+      "sha256": "75b8cc0b045630d0"
+    },
+    "services/api/src/app/domain/enums/item_status.py": {
+      "size": 266,
+      "sha256": "5a50fddc893ab51b"
+    },
+    "services/api/src/app/domain/health.py": {
+      "size": 795,
+      "sha256": "b75dc1a901e00734"
+    },
+    "services/api/src/app/domain/item.py": {
+      "size": 1218,
+      "sha256": "97481958e01caaf6"
+    },
+    "services/api/src/app/domain/ui_protocol.py": {
+      "size": 2193,
+      "sha256": "44b661c1caec1842"
+    },
+    "services/api/src/app/main.py": {
+      "size": 6154,
+      "sha256": "dae7eefc0ccb0e83"
+    },
+    "services/api/src/app/middleware/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/middleware/audit.py": {
+      "size": 2423,
+      "sha256": "102f4d35b032f83d"
+    },
+    "services/api/src/app/middleware/auth_context.py": {
+      "size": 2377,
+      "sha256": "07c90abea36b7ba1"
+    },
+    "services/api/src/app/middleware/body_limit.py": {
+      "size": 3036,
+      "sha256": "6b05ddb417be48c9"
+    },
+    "services/api/src/app/middleware/correlation.py": {
+      "size": 1275,
+      "sha256": "9755151b405e0d0f"
+    },
+    "services/api/src/app/middleware/logging.py": {
+      "size": 5497,
+      "sha256": "b4fe5bc69a8b07e2"
+    },
+    "services/api/src/app/middleware/rate_limit.py": {
+      "size": 5301,
+      "sha256": "ae03e8ff0673881b"
+    },
+    "services/api/src/app/middleware/security_headers.py": {
+      "size": 2305,
+      "sha256": "d9d4907bee7b69f2"
+    },
+    "services/api/src/app/middleware/tenant_context.py": {
+      "size": 866,
+      "sha256": "ba9355f50bc24209"
+    },
+    "services/api/src/app/ports/error_port.py": {
+      "size": 2600,
+      "sha256": "58dd38cdeae21920"
+    },
+    "services/api/src/app/services/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/src/app/services/health_service.py": {
+      "size": 1110,
+      "sha256": "c667ea4a5d840ed7"
+    },
+    "services/api/src/app/services/item_service.py": {
+      "size": 2534,
+      "sha256": "0d3ce8ef78eeab73"
+    },
+    "services/api/src/service/client/auth.py": {
+      "size": 2305,
+      "sha256": "ecd6e0b353befaf6"
+    },
+    "services/api/src/service/core/context.py": {
+      "size": 889,
+      "sha256": "5667d36eb9d86bbf"
+    },
+    "services/api/src/service/security/auth.py": {
+      "size": 6650,
+      "sha256": "8f2089d9bb7d0bad"
+    },
+    "services/api/src/service/security/platform_auth_setup.py": {
+      "size": 2427,
+      "sha256": "74f1e58e743ec3ca"
+    },
+    "services/api/tests/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/tests/conftest.py": {
+      "size": 587,
+      "sha256": "48dac8b69543cab8"
+    },
+    "services/api/tests/e2e/test_network.py": {
+      "size": 1265,
+      "sha256": "48b1a2c8b792bf29"
+    },
+    "services/api/tests/integration/test_application.py": {
+      "size": 2383,
+      "sha256": "81b5b8f2882907da"
+    },
+    "services/api/tests/unit/__init__.py": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "services/api/tests/unit/conftest.py": {
+      "size": 1104,
+      "sha256": "0667082bdaf3cf68"
+    },
+    "services/api/tests/unit/test_app_errors.py": {
+      "size": 7483,
+      "sha256": "42883eed7a0d73f4"
+    },
+    "services/api/tests/unit/test_app_main.py": {
+      "size": 1925,
+      "sha256": "1b1774d8770720db"
+    },
+    "services/api/tests/unit/test_config.py": {
+      "size": 1494,
+      "sha256": "7698911ed45d1d0d"
+    },
+    "services/api/tests/unit/test_config_sources.py": {
+      "size": 3338,
+      "sha256": "4786aabcf5ea6ea7"
+    },
+    "services/api/tests/unit/test_domain_models.py": {
+      "size": 5641,
+      "sha256": "08349a964b3f67f8"
+    },
+    "services/api/tests/unit/test_errors.py": {
+      "size": 7746,
+      "sha256": "fce7eab120fb593b"
+    },
+    "services/api/tests/unit/test_health_service.py": {
+      "size": 1294,
+      "sha256": "e2fb712da9e6456e"
+    },
+    "services/api/tests/unit/test_item_repository.py": {
+      "size": 4115,
+      "sha256": "e8f99dec937695e6"
+    },
+    "services/api/tests/unit/test_item_service.py": {
+      "size": 4175,
+      "sha256": "563726c53a3c031d"
+    },
+    "services/api/tests/unit/test_lifecycle.py": {
+      "size": 2820,
+      "sha256": "b02381bf3974d2d6"
+    },
+    "services/api/tests/unit/test_middleware_unit.py": {
+      "size": 10428,
+      "sha256": "5e556918e44ad021"
+    },
+    "services/api/tests/unit/test_orm_models.py": {
+      "size": 3277,
+      "sha256": "bafaee5c46ad2911"
+    },
+    "services/api/tests/unit/test_ui_contract.py": {
+      "size": 2690,
+      "sha256": "ccb44b9a90a16578"
+    },
+    "services/api/tests/utils/__init__.py": {
+      "size": 459,
+      "sha256": "b9e4dd0edc59a926"
+    },
+    "services/api/tests/utils/errors.py": {
+      "size": 1998,
+      "sha256": "7720ace6f64ebf2d"
+    },
+    "services/api/tests/utils/tenant.py": {
+      "size": 2094,
+      "sha256": "3e7454fc99b0eed2"
+    },
+    "services/api/uv.lock": {
+      "size": 296601,
+      "sha256": "870f96fcdc8d9e3d"
+    },
+    "tests/e2e/.agent-context/prompt.md": {
+      "size": 2571,
+      "sha256": "f35106d8d70d3f4c"
+    },
+    "tests/e2e/.copier-answers.yml": {
+      "size": 590,
+      "sha256": "<version-dependent>"
+    },
+    "tests/e2e/Dockerfile": {
+      "size": 461,
+      "sha256": "8ba57ee26349df3c"
+    },
+    "tests/e2e/_tasks/answers.json": {
+      "size": 87,
+      "sha256": "78e4dcb60092b5a0"
+    },
+    "tests/e2e/_tasks/post_generate.py": {
+      "size": 3135,
+      "sha256": "ce5fbfdb46967c4b"
+    },
+    "tests/e2e/_tasks/spec_templates.py": {
+      "size": 5970,
+      "sha256": "1877d21fe43019e8"
+    },
+    "tests/e2e/e2e-platform/actions/ApiHelper.ts": {
+      "size": 2621,
+      "sha256": "20d9c2485912e1ae"
+    },
+    "tests/e2e/e2e-platform/actions/Assertions.ts": {
+      "size": 1246,
+      "sha256": "f700959984e76096"
+    },
+    "tests/e2e/e2e-platform/actions/Navigation.ts": {
+      "size": 1123,
+      "sha256": "9480f7f2fd0f9c1a"
+    },
+    "tests/e2e/e2e-platform/auth/AuthManager.ts": {
+      "size": 1292,
+      "sha256": "bdbc6c4dc5192c35"
+    },
+    "tests/e2e/e2e-platform/auth/global-setup.ts": {
+      "size": 1574,
+      "sha256": "417364421f57de6b"
+    },
+    "tests/e2e/e2e-platform/fixtures/app.ts": {
+      "size": 770,
+      "sha256": "0002aa59bb6cb351"
+    },
+    "tests/e2e/package.json": {
+      "size": 517,
+      "sha256": "52c2a32691d1619d"
+    },
+    "tests/e2e/playwright.config.ts": {
+      "size": 679,
+      "sha256": "2c7caa2c24f2d7cd"
+    },
+    "tests/e2e/tests/.gitkeep": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c14"
+    },
+    "tests/e2e/tsconfig.json": {
+      "size": 499,
+      "sha256": "33ee667c28346d4c"
+    },
+    "validate.sh": {
+      "size": 1380,
+      "sha256": "94b74b73ba42f532"
+    }
+  }
+}

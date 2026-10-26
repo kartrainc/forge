@@ -64,7 +64,7 @@ def _frontend_only_config(api_target_url: str = "https://api.example.com") -> Pr
     return ProjectConfig(
         project_name="External Consumer",
         backends=[],
-        frontend=fc,
+        frontends=[fc],
         options={
             "backend.mode": "none",
             "frontend.api_target_url": api_target_url,
@@ -84,7 +84,7 @@ class TestLayerModeValidation:
         config = ProjectConfig(
             project_name="Conflict",
             backends=[bc],
-            frontend=None,
+            frontends=[],
             options={"backend.mode": "none"},
         )
         with pytest.raises(ValueError, match=r"backend\.mode=none.*incompatible"):
@@ -100,7 +100,7 @@ class TestLayerModeValidation:
             config.validate()
 
     def test_empty_project_rejected(self):
-        config = ProjectConfig(project_name="Empty", backends=[], frontend=None)
+        config = ProjectConfig(project_name="Empty", backends=[], frontends=[])
         with pytest.raises(ValueError, match=r"Empty project"):
             config.validate()
 
@@ -139,7 +139,7 @@ class TestFrontendApiUrls:
             keycloak_realm="master",
             keycloak_client_id="local",
         )
-        config = ProjectConfig(project_name="Local", backends=[bc], frontend=fc)
+        config = ProjectConfig(project_name="Local", backends=[bc], frontends=[fc])
         config.validate()
         api, proxy, env = variable_mapper._frontend_api_urls(
             config, backend_name="api", backend_port=5000
@@ -268,7 +268,7 @@ def test_mode_none_ignores_backendlanguage_sentinels():
     config = ProjectConfig(
         project_name="Guard",
         backends=[],
-        frontend=fc,
+        frontends=[fc],
         options={
             "backend.mode": "none",
             "frontend.api_target_url": "https://api.example.com",
