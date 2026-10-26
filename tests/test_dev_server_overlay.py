@@ -119,33 +119,32 @@ class TestOverlay:
         assert "http://127.0.0.1:5173/" in test[3]
         assert "wget" not in " ".join(test) and "curl" not in " ".join(test)
 
-    def test_the_sync_rules_use_paths_that_exist_and_sync_at_start(self, on: Path) -> None:
+    def test_the_project_is_synced_from_the_start_into_the_app_directory(self, on: Path) -> None:
         watch = _frontend(_load(on / "docker-compose.dev.yaml"))["develop"]["watch"]
-        for rule in watch:
-            path = on / rule["path"]
-            if rule["path"].endswith("package-lock.json"):
-                continue  # written by the install, after generation
-            assert path.exists(), rule["path"]
-            if rule["action"].startswith("sync"):
-                assert rule["initial_sync"] is True, rule["path"]
-                assert rule["target"].startswith("/app/")
-            else:
-                assert rule["action"] == "rebuild" and "target" not in rule
+        sync = [rule for rule in watch if rule["action"].startswith("sync")]
+        assert len(sync) == 1
+        assert sync[0]["action"] == "sync"
+        assert sync[0]["path"] == "./apps/frontend" and (on / sync[0]["path"]).is_dir()
+        assert sync[0]["target"] == "/app"
+        assert sync[0]["initial_sync"] is True
 
-    def test_dependencies_and_the_generated_declarations_are_not_synced(self, on: Path) -> None:
+    def test_dependencies_build_output_and_the_generated_declarations_are_not_synced(
+        self, on: Path
+    ) -> None:
         watch = _frontend(_load(on / "docker-compose.dev.yaml"))["develop"]["watch"]
-        synced = [rule["path"] for rule in watch if rule["action"].startswith("sync")]
-        assert not any("node_modules" in p or "package" in p or "dist" in p for p in synced)
-        src = next(rule for rule in watch if rule["path"].endswith("/src"))
-        assert set(src["ignore"]) == {"auto-imports.d.ts", "components.d.ts"}
+        ignored = set(watch[0]["ignore"])
+        assert {"node_modules", "dist", "coverage"} <= ignored
+        assert {"package.json", "package-lock.json"} <= ignored
+        assert {"src/auto-imports.d.ts", "src/components.d.ts"} <= ignored
 
     def test_the_manifest_and_the_lockfile_each_rebuild(self, on: Path) -> None:
         watch = _frontend(_load(on / "docker-compose.dev.yaml"))["develop"]["watch"]
-        rebuilds = [rule["path"] for rule in watch if rule["action"] == "rebuild"]
+        rebuilds = [rule for rule in watch if rule["action"] == "rebuild"]
         assert rebuilds == [
-            "./apps/frontend/package.json",
-            "./apps/frontend/package-lock.json",
+            {"action": "rebuild", "path": "./apps/frontend/package.json"},
+            {"action": "rebuild", "path": "./apps/frontend/package-lock.json"},
         ]
+        assert (on / "apps/frontend/package.json").is_file()
 
     @pytest.mark.parametrize(
         ("manager", "lockfile"),
@@ -160,6 +159,7 @@ class TestOverlay:
         try:
             watch = _frontend(_load(root / "docker-compose.dev.yaml"))["develop"]["watch"]
             assert watch[-1] == {"action": "rebuild", "path": f"./apps/frontend/{lockfile}"}
+            assert lockfile in watch[0]["ignore"]
         finally:
             shutil.rmtree(root.parent, ignore_errors=True)
 
@@ -173,8 +173,8 @@ class TestOverlay:
 class TestWrapper:
     def test_it_wraps_the_projects_own_config_in_every_shape(self, on: Path) -> None:
         wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
-        assert "import base from './vite.config'" in wrapper
-        assert "typeof base === 'function' ? base(env) : base" in wrapper
+        assert "import base from './vite.config.ts'" in wrapper
+        assert "typeof exported === 'function' ? exported(env) : exported" in wrapper
         assert "await" in wrapper and "mergeConfig(" in wrapper
 
     def test_it_allows_only_the_routed_host_and_never_moves_the_port(self, on: Path) -> None:
@@ -220,4 +220,8 @@ def test_the_merged_compose_file_serves_vite_behind_the_same_router(on: Path) ->
     assert labels["traefik.http.services.frontend.loadbalancer.server.port"] == "5173"
     assert labels["traefik.http.routers.frontend.rule"] == "Host(`app.localhost`)"
     assert frontend["healthcheck"]["test"][:3] == ["CMD", "node", "-e"]
-    assert len(frontend["develop"]["watch"]) >= 6
+    assert [rule["action"] for rule in frontend["develop"]["watch"]] == [
+        "sync",
+        "rebuild",
+        "rebuild",
+    ]

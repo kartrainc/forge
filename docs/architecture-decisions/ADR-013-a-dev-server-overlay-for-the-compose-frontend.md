@@ -46,8 +46,11 @@ What it learned shapes this decision:
 
 1. **A per-frontend field, Vue first.** `frontend.dev_server` (boolean,
    default `false`) is a `FrontendConfig` field, travelling the way `ui_kit`
-   does (ADR-011): the stack file, `--dev-server`, the interactive prompt,
-   `[forge.frontend]` in `forge.toml`, the recipe. It is not an option-registry
+   does (ADR-011): the stack file, `--dev-server`, `[forge.frontend]` in
+   `forge.toml`, the recipe. There is no interactive prompt: it is an opt-in for
+   a project that wants hot reload, and a prompt would ask every Vue user.
+   `forge.toml` records it only when on, so a project without it keeps the
+   manifest it had; the recipe always holds the field. It is not an option-registry
    path. It applies to Vue first; Svelte follows in a separate change with the
    same tests; Flutter is refused. The overlay overrides the project's one
    `frontend` service (`apps/<frontend_slug>`, host `app.localhost`). A list of
@@ -68,41 +71,46 @@ What it learned shapes this decision:
    tree, including Vite's cache directories, is writable by that user; the
    files arrive with `COPY --chown`.
 3. **A generated `docker-compose.dev.yaml` overrides the `frontend` service.**
-   It sets the build target to `dev`, the
-   command (the project's own `dev` script with `--host 0.0.0.0` and
-   `--config vite.dev.config.ts`, per package manager), a Node-based health
-   check, and the Traefik labels. It replaces inherited values explicitly:
-   `volumes: !override`, `labels: !override`, `healthcheck: !override`. Because
-   `!override` replaces all labels, the overlay writes out every label the
-   frontend router still needs, from the same values the base Compose template
-   reads (`app.localhost`, the router name `frontend`), with the service port
-   set to the frontend's `server_port`; a test compares the two. The minimum is **Docker Compose 2.24.4**, the release that added
-   `!override`. Forge already depends on `!reset` (2.24) in its Compose boot
-   test; `forge doctor` reports an older Compose.
+   It sets the build target to `dev`, a Node-based health check, and the Traefik
+   labels. The `dev` stage's `CMD` runs the project's own `dev` script with
+   `--host 0.0.0.0` and `--config vite.dev.config.ts`, per package manager, so
+   the image runs without Compose too. The overlay replaces inherited values
+   explicitly: `volumes: !reset []`, `labels: !override`,
+   `healthcheck: !override`. Because `!override` replaces all labels, the
+   overlay writes out every label the frontend router still needs, from the same
+   values the base Compose template reads (`app.localhost`, the router name
+   `frontend`), with the service port set to the frontend's `server_port`; a
+   test compares the two. The minimum is **Docker Compose 2.40.0**:
+   `develop.watch.initial_sync` first shipped there (docker/compose#13232), and
+   it is later than `!override` (2.24.4) and `!reset` (2.24), which forge's
+   Compose boot test already needs. `forge doctor` reports an older Compose.
 4. **Compose Watch is the sync mechanism, not a bind mount.** The overlay
-   declares `develop.watch` with `initial_sync: true`:
-   - `sync` for the source tree and configuration files that exist in the
-     rendered app, excluding `node_modules`, build output, coverage artifacts,
-     package manifests, lockfiles, and the generated declaration files
-     (`src/auto-imports.d.ts`, `src/components.d.ts`);
-   - `sync+restart` for `vite.config.ts` and `vite.dev.config.ts`, which Vite
-     reads once;
-   - `rebuild` for `package.json`, and a separate `rebuild` rule for the
-     package manager's lockfile.
+   declares `develop.watch`:
+   - one `sync` rule, with `initial_sync: true`, from the frontend's directory
+     to `/app`, ignoring `node_modules`, build output, coverage artifacts, the
+     package manifest and the lockfile, and the generated declaration files
+     (`src/auto-imports.d.ts`, `src/components.d.ts`). New and deleted files
+     follow. No `sync+restart`: Vite restarts itself when its config, what the
+     config imports, or an `.env` file changes, and a Compose restart on top
+     of that restarted the server twice (observed);
+   - a `rebuild` rule for `package.json` and a separate one for the package
+     manager's lockfile.
    The stack is started with `docker compose -f docker-compose.yml -f
    docker-compose.dev.yaml up --build --watch`. Sync is one way: files the dev
    server generates stay in the container, so no host file is created by it
    and the host needs no uid mapping. Dependencies are in the image's `deps`
    layer, so no install volume, no one-shot install service and no
-   `--ignore-scripts` workaround exist. Watch needs Compose 2.22; the
-   2.24.4 minimum above is the higher bound.
+   `--ignore-scripts` workaround exist.
 5. **A wrapper Vite config, never an edit of the project's own.**
    `apps/<frontend_slug>/vite.dev.config.ts` resolves the base `vite.config.ts` whether
    it exports an object, a function of `ConfigEnv`, or a promise, merges it with
    Vite's `mergeConfig`, and sets `server.host` to `0.0.0.0`, `strictPort`,
    and `allowedHosts` to the frontend's exact generated Traefik hostname,
-   `app.localhost`, read from the same place the Compose template reads it. It never sets `allowedHosts: true`. File polling is off unless the
-   Playwright check in the plan shows sync events do not reach the watcher.
+   `app.localhost`, read from the same place the Compose template reads it. It
+   never sets `allowedHosts: true`. File polling is off: Compose writes the
+   synced files inside the container, where Vite's watcher sees them (measured:
+   an edit reaches the browser in under a second). It imports the project's
+   config with its `.ts` extension, which Vite 8's native config loader asks for.
    The HMR WebSocket stays on the page's own origin; Traefik proxies it.
    `tsconfig.node.json` includes the wrapper.
 6. **The dev frontend behaves like the built one with respect to sign-in, and
@@ -134,12 +142,12 @@ What it learned shapes this decision:
    wrapper on that transition when they are unmodified since generation, and
    reports one that was edited. The Dockerfile falls back to the single-stage
    form through the normal sidecar path.
-8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.24.4
+8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.40.0
    or newer, where Watch's sync is too slow or a filesystem does not suit it,
    generated docs say how to mount `src/` into the `dev` target instead. An older
    Compose cannot use the overlay at all.
-   Only paths that exist are mounted (the Vue template has no `public/`; Svelte's
-   static assets are `static/`), and the docs name the caveats: on Linux the
+   Only paths that exist are mounted (the Vue template tree has no `public/`,
+   though a rendered app can; Svelte's static assets are `static/`), and the docs name the caveats: on Linux the
    container writes as its own uid, and the generated declaration files then
    appear in the checkout owned by that uid. It is not a second generated mode.
 9. **Forge does not boot the dev stack itself.** After generation `boot()`
@@ -191,13 +199,18 @@ Rejected. It is the second-origin setup the Context describes.
 - With the field off, the rendered Dockerfile and Compose files are
   unchanged. `forge.toml` and `.forge/quality.json` gain `dev_server = false`
   on the next update, so golden snapshots, the manifest and the recipe change.
-- Projects on Docker Compose older than 2.24.4 cannot use the overlay.
+- Projects on Docker Compose older than 2.40.0 cannot use the overlay.
 - A change under `package.json` or a lockfile rebuilds the image and restarts
   the service; a change to the Vite config restarts it without a rebuild.
 - The host does not see the generated declaration files the dev server writes.
   An editor's types follow a host install or build.
 - A project that edits the generated Dockerfile receives a sidecar the first
   time it enables the field.
+- Traefik's Docker provider reads every container on the daemon. A dev stack
+  and another stack that route `Host(app.localhost)` on one daemon collide on
+  the router name `frontend`; stop the other stack, or constrain this Traefik
+  to its own Compose project (`TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS`). The same
+  holds for the built stack.
 - Kartra's adoption must move its `COPY --from=<context>` lines into `source`
   and decide which of its additional build contexts (shared pricing and
   geographic data) are watched; an unwatched one needs a rebuild, as today.

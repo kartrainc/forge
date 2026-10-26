@@ -24,36 +24,22 @@ services:
       start_period: 20s
     develop:
       watch:
-        # The source tree is copied in; the files the dev server generates
-        # (Vite writes them at startup) stay in the container.
+        # The project is copied in as it changes. Vite restarts itself when its
+        # config, its imports or an .env file change. What the install owns
+        # stays in the image, and the files Vite generates at startup stay in
+        # the container, so nothing the container writes lands in the checkout.
         - action: sync
-          path: ./apps/{{ frontend_slug }}/src
-          target: /app/src
+          path: ./apps/{{ frontend_slug }}
+          target: /app
           initial_sync: true
           ignore:
-            - auto-imports.d.ts
-            - components.d.ts
-        - action: sync
-          path: ./apps/{{ frontend_slug }}/index.html
-          target: /app/index.html
-          initial_sync: true
-        # Vite reads these once at startup.
-        - action: sync+restart
-          path: ./apps/{{ frontend_slug }}/vite.config.ts
-          target: /app/vite.config.ts
-          initial_sync: true
-        - action: sync+restart
-          path: ./apps/{{ frontend_slug }}/vite.dev.config.ts
-          target: /app/vite.dev.config.ts
-          initial_sync: true
-        - action: sync+restart
-          path: ./apps/{{ frontend_slug }}/scripts
-          target: /app/scripts
-          initial_sync: true
-        - action: sync+restart
-          path: ./apps/{{ frontend_slug }}/.env.development
-          target: /app/.env.development
-          initial_sync: true
+            - node_modules
+            - dist
+            - coverage
+            - package.json
+            - {{ lockfile }}
+            - src/auto-imports.d.ts
+            - src/components.d.ts
         # A changed dependency list needs a new image.
         - action: rebuild
           path: ./apps/{{ frontend_slug }}/package.json
