@@ -139,15 +139,25 @@ def _app_components(config: ProjectConfig, fc: FrontendConfig, names: Iterable[s
     """The selected components (of ``names``) that the app ``fc`` receives.
 
     A Vue app receives a component only when its UI kit renders the component's
-    whole closure (``forge.capability_resolver.component_fragments_for_kit``);
-    other frameworks are not filtered.
+    whole closure (``forge.capability_resolver.component_fragments_for_kit``).
+    A further app of another framework receives only components whose fragment
+    targets that framework, as placement does; the primary keeps every selected
+    component, as a project with one frontend always has.
     """
+    from forge.components import component_fragment_name  # noqa: PLC0415
+    from forge.fragments import FRAGMENT_REGISTRY  # noqa: PLC0415
     from forge.ui_kits import applies_to  # noqa: PLC0415
 
     if not applies_to(fc.framework):
-        return list(names)
+        if config.is_primary_frontend(fc):
+            return list(names)
+        return [
+            n
+            for n in names
+            if fc.framework
+            in getattr(FRAGMENT_REGISTRY.get(component_fragment_name(n)), "target_frontends", ())
+        ]
     from forge.capability_resolver import component_fragments_for_kit  # noqa: PLC0415
-    from forge.components import component_fragment_name  # noqa: PLC0415
 
     allowed = component_fragments_for_kit(config, fc.ui_kit)
     return [n for n in names if component_fragment_name(n) in allowed]

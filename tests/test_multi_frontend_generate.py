@@ -23,6 +23,22 @@ from forge.config import (
 from forge.generator import generate
 
 
+@pytest.fixture(autouse=True)
+def _features_loaded() -> None:
+    """Generate with the built-in features (and their components) loaded.
+
+    A test elsewhere can leave the feature loader reset for the rest of its
+    process (tests/test_contract_types_emit.py ends with
+    ``feature_loader.reset_for_tests()``), and component contracts are found
+    through the loaded features. Reload them, as that test does, when missing.
+    """
+    from forge import feature_loader
+
+    if not feature_loader.LOADED_FEATURES:
+        feature_loader.reset_for_tests()
+        feature_loader.load_builtin_features()
+
+
 def _frontend(framework: FrontendFramework, name: str, port: int, **kw: object) -> FrontendConfig:
     return FrontendConfig(
         project_name="mf",
@@ -247,3 +263,24 @@ def test_nuxt_ui_agent_tooling_comes_with_any_nuxt_ui_app(two_vue: Path, three: 
     for rel in (".agents/skills/nuxt-ui/SKILL.md", ".claude/skills/nuxt-ui/SKILL.md", ".mcp.json"):
         assert (two_vue / rel).is_file(), rel
         assert not (three / rel).exists(), rel
+
+
+def test_component_contracts_reach_only_the_apps_that_get_the_component(tmp_path: Path) -> None:
+    # Component fragments target Vue: a Svelte app beside a Vue primary gets
+    # neither the component nor its contract types.
+    root = _generate(
+        tmp_path,
+        _frontend(FrontendFramework.VUE, "frontend", 5173),
+        _frontend(FrontendFramework.SVELTE, "portal", 5174, features=[]),
+        components=["EntityList"],
+    )
+
+    def contracts(app: str) -> list[str]:
+        return sorted(
+            p.name
+            for p in (root / "apps" / app).rglob("*")
+            if p.name.endswith(".contract.ts") or p.name == "contract-bindings.toml"
+        )
+
+    assert contracts("frontend") == ["EntityList.contract.ts"]
+    assert contracts("portal") == []
