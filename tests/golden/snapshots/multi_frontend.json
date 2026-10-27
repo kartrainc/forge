@@ -1877,8 +1877,8 @@
       "sha256": "0d031823b3226dd2"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/config.py": {
-      "size": 20047,
-      "sha256": "407074386f5b71a2"
+      "size": 20281,
+      "sha256": "46ebfe898cee3d90"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/delegation_grant.py": {
       "size": 7041,
@@ -1941,8 +1941,8 @@
       "sha256": "6bcd0424245f4160"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes.py": {
-      "size": 52695,
-      "sha256": "89aed3dc918b5943"
+      "size": 54171,
+      "sha256": "8aa9bc3ee45d6350"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes_jwks.py": {
       "size": 1839,

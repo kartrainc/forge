@@ -168,13 +168,16 @@ async def _store_auth_state(
     code_verifier: str,
     login_uri: str,
     binding: str,
+    own_organization: bool = False,
 ) -> None:
     """Persist the Authorization-Code-flow envelope server-side.
 
     Keyed by the opaque ``state`` and given a bounded TTL so a leaked
     ``state`` cannot be replayed indefinitely. Atomic set-with-TTL via
     ``setex``. ``binding`` is the value of the browser's login cookie
-    (see :func:`_set_login_cookie`).
+    (see :func:`_set_login_cookie`). ``own_organization`` marks the sign-in
+    the callback starts into the organization it found or created for the
+    user, so it is not started twice.
     """
     cfg = get_settings()
     envelope = {
@@ -183,6 +186,7 @@ async def _store_auth_state(
         "code_verifier": code_verifier,
         "login_uri": login_uri,
         "binding": binding,
+        "own_organization": own_organization,
         "issued_at": int(time.time()),
     }
     redis = get_redis()
@@ -380,6 +384,7 @@ async def _begin_oidc_login(
     tc: TenantConfig | None = None,
     organization: str | None = None,
     idp_hint: str | None = None,
+    own_organization: bool = False,
 ) -> Response:
     """Mint + store the bound-state envelope and 302 to Keycloak.
 
@@ -415,6 +420,7 @@ async def _begin_oidc_login(
             code_verifier=code_verifier,
             login_uri=safe_redirect,
             binding=binding,
+            own_organization=own_organization,
         )
     except Exception as exc:  # noqa: BLE001 — fail closed on any store error
         logger.error("Could not persist OIDC bound-state envelope: %s", exc)
@@ -900,9 +906,9 @@ async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str 
     """The organization a user in none signs in to; create it when needed.
 
     ``SELF_REGISTRATION=own_organization``. Returns the alias of the user's
-    only organization, creating it (with the user as its member) when they
-    have none, or ``None`` when they belong to several (Keycloak asks which
-    one at sign-in). A per-user Redis lock keeps two concurrent first sign-ins
+    only enabled organization, creating it (with the user as its member) when
+    they have none, or ``None`` when they belong to several (Keycloak asks
+    which one at sign-in) or only to disabled ones. A per-user Redis lock keeps two concurrent first sign-ins
     (two tabs, a resubmitted callback) from creating two organizations: the
     second waits for the first and signs in to the organization it created,
     or raises :class:`_OrganizationBusy` when it is still running.
@@ -919,11 +925,17 @@ async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str 
     )
 
     async def existing() -> str | None | bool:
-        """The only organization's alias, None for several, False for none."""
+        """The only enabled organization's alias, False for none at all.
+
+        None otherwise: several (Keycloak asks which one), or only disabled
+        ones, which Keycloak never makes active and which must not be
+        replaced by a new organization.
+        """
         organizations = await admin.user_organizations(sub)
         if not organizations:
             return False
-        return str(organizations[0]["alias"]) if len(organizations) == 1 else None
+        enabled = [o for o in organizations if o.get("enabled", True)]
+        return str(enabled[0]["alias"]) if len(enabled) == 1 else None
 
     redis = get_redis()
     lock = f"gk:own-organization:{tc.realm_name}:{sub}"
@@ -1074,8 +1086,9 @@ async def callback(
         logger.warning("OIDC nonce mismatch on /callback — rejecting")
         return Response(status_code=401, content="Nonce verification failed")
 
-    # 4b. Auto-assign tenant_id for self-registered users.
-    # Keycloak's built-in registration form does not collect the
+    # 4b. Auto-assign tenant_id for self-registered users
+    # (SELF_REGISTRATION=default_tenant). Keycloak's built-in registration
+    # form does not collect the
     # ``tenant_id`` user attribute, so the access token it just minted
     # lacks the ``https://forge/tenant_id`` claim that backend
     # services require — without this hook the user would land in a
@@ -1100,7 +1113,11 @@ async def callback(
         # gets one of their own and signs in to it (Keycloak reuses the SSO
         # session); otherwise the sign-in is refused and the Keycloak session
         # ended, so the next attempt asks for credentials again.
-        if cfg.self_registration == "own_organization":
+        # The sign-in into the user's own organization came back without it
+        # (Keycloak did not grant it): refuse rather than sign in again.
+        if cfg.self_registration == "own_organization" and not envelope.get(
+            "own_organization"
+        ):
             try:
                 alias = await _own_organization(tc, claims)
             except _OrganizationBusy:
@@ -1127,6 +1144,7 @@ async def callback(
                     safe_state,
                     tc=tc,
                     organization=alias,
+                    own_organization=True,
                 )
                 _delete_login_cookie(again, state=state)
                 return again
@@ -1137,6 +1155,16 @@ async def callback(
         return Response(
             status_code=403,
             content="No active organization: the user must belong to an organization",
+        )
+    if cfg.tenant_id_claim not in claims and cfg.self_registration != "default_tenant":
+        # No tenant_id attribute. Only SELF_REGISTRATION=default_tenant gives
+        # such a user the default tenant (shared by every one of them); else
+        # they are refused like a user in no organization.
+        logger.warning("Sign-in without a tenant for sub=%s", claims.get("sub"))
+        await _end_keycloak_session(tenant, refresh_token, tc)
+        return Response(
+            status_code=403,
+            content="No tenant: the user must be assigned a tenant",
         )
     if cfg.tenant_id_claim not in claims:
         sub = claims.get("sub", "")

@@ -29,9 +29,11 @@ Header / subdomain with a verified identity: a client chooses the header (and
 the host), so when the request has a verified identity (bound by an outer auth
 middleware, or a bearer token the middleware verifies with the app's auth
 guard) it answers 403 unless the requested tenant is the identity's: its
-tenant id, or its tenant slug for a value that is not a UUID. Without one
-nothing is verified and the request tenant is used as is
-(``database.allow_unverified_tenant``).
+tenant id, or its tenant slug for a value that is not a UUID; the identity's
+tenant id is then bound. Without one (a route that needs no sign-in, or no
+token) nothing is verified and the request tenant is used as is
+(``database.allow_unverified_tenant``): a public route serves whichever
+tenant the header or host names.
 """
 
 from __future__ import annotations
@@ -142,8 +144,12 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
         tenant_id = resolver.resolve(request)
         if tenant_id is not None and resolver.settings.resolution != "token_claim":
             identity = await verified_identity(request)
-            if identity is not None and not same_tenant(tenant_id, identity):
-                return _tenant_mismatch(request)
+            if identity is not None:
+                if not same_tenant(tenant_id, identity):
+                    return _tenant_mismatch(request)
+                # Bind the identity's tenant id: a matching slug (``acme``)
+                # is not what the RLS policies compare with.
+                tenant_id = str(getattr(identity, "tenant_id", None) or tenant_id)
         setattr(request.state, TENANT_STATE_KEY, tenant_id)
         token = current_tenant_var.set(tenant_id)
         try:

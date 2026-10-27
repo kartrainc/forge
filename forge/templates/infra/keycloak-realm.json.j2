@@ -5,7 +5,7 @@
   "displayName": "{{ project_name }}",
   "displayNameHtml": "<strong>{{ project_name }}</strong>",
   "sslRequired": "none",
-  "registrationAllowed": {{ "false" if organizations and self_registration == "off" else "true" }},
+  "registrationAllowed": {{ "false" if self_registration == "off" else "true" }},
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,

@@ -263,6 +263,11 @@ rate limit. forge therefore refuses ``database.multitenancy`` ``shared_rls`` or
 Set this to ``true`` only when a trusted gateway in front of the services
 authenticates the caller and sets or strips the tenant header itself.
 
+With authentication, a request with a verified identity may only name that
+identity's tenant (403 otherwise). A route that needs no sign-in still serves
+whichever tenant the header or host names: keep tenant data that is not
+public behind routes that require one.
+
 BACKENDS: python, go. Checked at generation.""",
             category=FeatureCategory.PLATFORM,
             # Inert unless database.multitenancy=shared_rls, which itself

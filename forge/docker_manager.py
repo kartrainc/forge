@@ -474,8 +474,8 @@ def render_keycloak_realm(
         # auth.keycloak_tenant_source=organization: enable organizations, seed
         # the dev organization and map the active one's id into the token.
         "organizations": keycloak_tenant_source(config.options) == "organization",
-        # auth.keycloak_self_registration: own_organization lets the gatekeeper
-        # create organizations; off closes registration under organizations.
+        # auth.keycloak_self_registration: off closes registration;
+        # own_organization lets the gatekeeper create organizations.
         "self_registration": keycloak_self_registration(config.options),
         # The gatekeeper's logout returns to the app's own origin only.
         "app_origins": app_origins(config),

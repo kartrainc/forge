@@ -272,7 +272,7 @@ infra:
     clientSecret: "CHANGEME"
     # auth.keycloak_tenant_source: organization | user_attribute.
     tenantSource: {{ topology.keycloak_tenant_source }}
-    # auth.keycloak_self_registration: off | own_organization.
+    # auth.keycloak_self_registration: off | own_organization | default_tenant.
     selfRegistration: {{ topology.keycloak_self_registration }}
 {%- endif %}
 

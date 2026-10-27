@@ -69,7 +69,7 @@ def test_the_tokens_own_tenant_passes(requested: str) -> None:
         "/items", headers={"X-Tenant-ID": requested, "Authorization": f"Bearer token-{TENANT_A}"}
     )
     assert response.status_code == 200
-    assert response.json() == {"tenant": requested}
+    assert response.json() == {"tenant": TENANT_A}
 
 
 def test_subdomain_tenant_is_checked_too() -> None:
@@ -87,6 +87,9 @@ def test_a_subdomain_slug_compares_with_the_tokens_slug(host: str, status: int) 
         headers={"Host": f"{host}.example.com", "Authorization": f"Bearer token-{TENANT_A}"},
     )
     assert response.status_code == status
+    if status == 200:
+        # The verified tenant id is bound, not the slug RLS cannot compare.
+        assert response.json() == {"tenant": TENANT_A}
 
 
 def test_an_identity_bound_without_a_bearer_token_constrains_the_tenant() -> None:

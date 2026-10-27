@@ -28,13 +28,13 @@ class GatekeeperSettings(BaseSettings):
     | JWKS_CACHE_TTL            | JWKS cache TTL in seconds (default 900)      |
     | REDIS_URL                 | Redis connection URL                         |
     | DEFAULT_RATE_LIMIT        | Default requests-per-minute per tenant        |
-    | DEFAULT_TENANT_ID         | Tenant UUID assigned to self-registered users|
+    | DEFAULT_TENANT_ID         | Tenant of sign-ups (default_tenant)          |
     | TENANT_ID_CLAIM           | JWT claim name carrying the tenant_id        |
     | KEYCLOAK_ADMIN_REALM      | Realm users sign in to (no TMS route)        |
     | GATEKEEPER_FRONTEND_HOST_LABELS | Further frontends' host labels         |
     | TENANT_SOURCE             | organization or user_attribute               |
     | ORGANIZATION_CLAIM        | Claim mapping org alias to {id}              |
-    | SELF_REGISTRATION         | off or own_organization                      |
+    | SELF_REGISTRATION         | off, own_organization or default_tenant      |
     | REALM_PER_HOST            | Realm = first host label when no TMS route   |
     | MINT_INTERNAL_TOKEN_ENABLED | Mint gatekeeper-signed internal JWTs       |
     | FORWARD_INTERNAL_TOKEN_ENABLED | Forward internal JWT in Authorization  |
@@ -78,7 +78,7 @@ class GatekeeperSettings(BaseSettings):
     # OAuth redirect timeout.
     oidc_state_envelope_ttl_seconds: int = 300  # 5 min
 
-    # Auto-assignment of tenant_id for self-registered users.
+    # Tenant of self-registered users (SELF_REGISTRATION=default_tenant).
     # The Keycloak built-in registration form does not collect tenant_id, so
     # newly-registered users would otherwise produce tokens missing the
     # `https://forge/tenant_id` claim that downstream services require.
@@ -107,13 +107,16 @@ class GatekeeperSettings(BaseSettings):
     # ``/auth/organization`` switches the active one.
     tenant_source: Literal["user_attribute", "organization"] = "user_attribute"
     organization_claim: str = "https://forge/organization"
-    # ── Self-registered users with organizations (auth.keycloak_self_registration)
-    # ``off``: the realm does not allow registration; a user in no
-    # organization is refused at /callback and their Keycloak session ended.
-    # ``own_organization``: on the first sign-in of a user in no organization
-    # the gatekeeper creates one through the Admin API, with the user as its
-    # only member, and signs them in to it.
-    self_registration: Literal["off", "own_organization"] = "off"
+    # ── Self-registered users (auth.keycloak_self_registration) ──
+    # ``off``: the realm does not allow registration; a user without a
+    # tenant (no organization, no tenant_id attribute) is refused at
+    # /callback and their Keycloak session ended.
+    # ``own_organization`` (organizations): on the first sign-in of a user in
+    # no organization the gatekeeper creates one through the Admin API, with
+    # the user as its only member, and signs them in to it.
+    # ``default_tenant`` (tenant_id attribute): a user without the attribute
+    # is given ``default_tenant_id``, so every such user shares that tenant.
+    self_registration: Literal["off", "own_organization", "default_tenant"] = "off"
 
     # Without a TMS ``tenant-route`` for the host, sign users in to
     # ``keycloak_admin_realm``. ``true`` restores realm-per-subdomain: the

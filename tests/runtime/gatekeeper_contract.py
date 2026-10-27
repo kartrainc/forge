@@ -499,7 +499,7 @@ async def test_user_delegation_preserves_scope_expiry_and_grant_binding(runtime)
     assert 0 < await r.redis.ttl(redis_key) <= ttl
 
 
-async def _begin(r, state, nonce, login_uri="/"):
+async def _begin(r, state, nonce, login_uri="/", own_organization=False):
     """Store a sign-in envelope and bind it to the test client's browser."""
     await routes._store_auth_state(
         state=state,
@@ -507,20 +507,32 @@ async def _begin(r, state, nonce, login_uri="/"):
         code_verifier="v" * 43,
         login_uri=login_uri,
         binding=f"binding-{state}",
+        own_organization=own_organization,
     )
     r.client.cookies.set(routes.login_cookie_name(state), f"binding-{state}")
 
 
 @pytest.mark.parametrize(
     "mode,expected",
-    [("normal", 302), ("assign", 302), ("wrong-tenant", 403), ("wrong-issuer", 401)],
+    [
+        ("normal", 302),
+        ("assign", 302),
+        ("unassigned", 403),
+        ("wrong-tenant", 403),
+        ("wrong-issuer", 401),
+    ],
 )
 async def test_callback_binds_verified_tenant(runtime, monkeypatch, mode, expected):
     r = runtime
+    # Only SELF_REGISTRATION=default_tenant gives a user without a tenant_id
+    # attribute the default tenant; otherwise they are refused.
+    monkeypatch.setattr(
+        r.cfg, "self_registration", "off" if mode == "unassigned" else "default_tenant"
+    )
     token = await r.login(
         tenant=OTHER if mode == "wrong-tenant" else TENANT,
         issuer="https://wrong.test/realms/app" if mode == "wrong-issuer" else ISSUER,
-        omit=("https://forge/tenant_id",) if mode == "assign" else (),
+        omit=("https://forge/tenant_id",) if mode in ("assign", "unassigned") else (),
     )
     refreshed = await r.login()
     r.client.cookies.clear()
@@ -552,6 +564,7 @@ async def test_callback_binds_verified_tenant(runtime, monkeypatch, mode, expect
             assert session.access_token == refreshed
     else:
         assert "tenant_session_id" not in response.cookies
+        assert assigned == []
 
 
 @pytest.mark.parametrize(
@@ -730,10 +743,10 @@ def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
     return jwt.encode(payload, r.rsa_key, algorithm="RS256", headers={"kid": "oidc-test"})
 
 
-async def _callback(r, monkeypatch, access_token):
+async def _callback(r, monkeypatch, access_token, *, own_organization=False):
     nonce = "org-nonce"
     id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
-    await _begin(r, "org-state", nonce)
+    await _begin(r, "org-state", nonce, own_organization=own_organization)
 
     async def exchange(*args, **kwargs):
         return {"access_token": access_token, "refresh_token": "refresh", "id_token": id_token}
@@ -904,6 +917,47 @@ async def test_own_organization_never_adds_a_member_of_one(organizations, monkey
     assert response.status_code == 403
     assert orgs.created == [] and orgs.members == []
     assert ended == ["refresh"]
+
+
+async def test_own_organization_is_not_replaced_when_disabled(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    existing = [{"alias": "u-suspended", "enabled": False}]
+    orgs = _FakeOrganizations(existing=existing).install(monkeypatch)
+    monkeypatch.setattr(routes, "end_session", _noop_end_session)
+    r.client.cookies.clear()
+    # Keycloak never makes a disabled organization active: signing in to it
+    # again would loop, and a new one would escape the suspension.
+    response, _ = await _callback(r, monkeypatch, _org_token(r, organizations=None))
+    assert response.status_code == 403
+    assert orgs.created == [] and orgs.members == []
+
+
+async def test_own_organization_signs_in_again_only_once(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    orgs = _FakeOrganizations(existing=[{"alias": "u-mine"}]).install(monkeypatch)
+    looked_up = []
+
+    async def user_organizations(self, user_id):
+        looked_up.append(user_id)
+        return orgs.existing
+
+    monkeypatch.setattr(routes.GatekeeperKeycloakAdmin, "user_organizations", user_organizations)
+    monkeypatch.setattr(routes, "end_session", _noop_end_session)
+    r.client.cookies.clear()
+    # The sign-in the callback started into the user's organization came back
+    # without it: refused instead of redirecting to Keycloak again.
+    response, _ = await _callback(
+        r, monkeypatch, _org_token(r, organizations=None), own_organization=True
+    )
+    assert response.status_code == 403
+    assert "location" not in response.headers
+    assert looked_up == [] and orgs.created == []
+
+
+async def _noop_end_session(tenant, refresh_token, **kwargs):
+    return None
 
 
 async def test_own_organization_admin_failure_fails_closed(organizations, monkeypatch):

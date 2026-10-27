@@ -36,11 +36,15 @@ Each safeguard below is an option, so a project can choose another strategy.
   passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
   `tenant-route` keeps the TMS tenant. `user_attribute` keeps the `tenant_id`
   attribute. Keycloak moves to 26.6, which Organizations require.
-- `auth.keycloak_self_registration` (default `off`): with organizations, `off`
-  closes the realm's registration, and a user in no organization is refused
-  with their Keycloak session ended. `own_organization` keeps registration and
-  gives each new user an organization of their own through the Admin API; a
-  concurrent first sign-in waits for it, or gets a retryable 503.
+- `auth.keycloak_self_registration` (default `off`): `off` closes the realm's
+  registration, and a user without a tenant (in no organization, or without a
+  `tenant_id` attribute) is refused with their Keycloak session ended.
+  `own_organization` (organizations) keeps registration and gives each new
+  user an organization of their own through the Admin API; a concurrent first
+  sign-in waits for it, or gets a retryable 503, and a user whose only
+  organizations are disabled is refused rather than given a new one.
+  `default_tenant` (`user_attribute`) keeps the previous behaviour: every
+  self-registered user gets the default tenant, and so shares its data.
 
 ### Dependency compatibility
 
@@ -285,6 +289,8 @@ Each safeguard below is an option, so a project can choose another strategy.
   redirects only from the apps' origins: every frontend's local host in
   Compose, and in Helm `ingress.host` and each frontend's host, filled in at
   install.
+- With a header or subdomain tenant that matches the verified identity by
+  slug, Python services bind the identity's tenant id for RLS, not the slug.
 - A sign-in completes only in the browser that started it: `/auth/login` sets
   a short-lived HttpOnly, SameSite=Lax cookie (path `/callback`) whose value
   the OIDC state envelope holds, and `/callback` refuses the state without it.

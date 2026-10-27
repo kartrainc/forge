@@ -1118,26 +1118,31 @@ Keys are disabled by default, including their management routes.
 
 **Type:** `enum` · **Default:** `off` · **Stability:** `stable` · **Backends:** —
 
-**Allowed values:** `off`, `own_organization`
+**Allowed values:** `off`, `own_organization`, `default_tenant`
 
-_Whether users can sign themselves up when tenants are Keycloak organizations._
+_Whether users can sign themselves up, and which tenant they get._
 
-Self-registration with ``auth.keycloak_tenant_source=organization``, where a
-user's tenant is the organization they belong to.
+Self-registration through the realm's registration form.
 
 - ``off`` (default): the realm does not offer registration. Users are created
-  and added to organizations by an administrator (or an organization's
-  identity provider). A user in no organization is refused at sign-in and
-  their Keycloak session is ended.
-- ``own_organization``: the realm offers registration. On the first sign-in
-  of a user in no organization the Gatekeeper creates an organization with
-  that user as its only member, through the Keycloak Admin API, and signs
-  them in to it, so every sign-up starts its own tenant. The Gatekeeper's
-  service account is granted ``manage-realm`` for this.
+  by an administrator (or an identity provider) with their tenant: added to an
+  organization, or given the ``tenant_id`` attribute. A user without a tenant
+  is refused at sign-in and their Keycloak session is ended.
+- ``own_organization`` (``auth.keycloak_tenant_source=organization``): the
+  realm offers registration. On the first sign-in of a user in no
+  organization the Gatekeeper creates an organization with that user as its
+  only member, through the Keycloak Admin API, and signs them in to it, so
+  every sign-up starts its own tenant. The Gatekeeper's service account is
+  granted ``manage-realm`` for this, and nothing limits how many sign-ups
+  (organizations) are created: consider a captcha or rate limit on the
+  registration form.
+- ``default_tenant`` (``auth.keycloak_tenant_source=user_attribute``): the
+  realm offers registration, and a user without a ``tenant_id`` attribute is
+  given the default tenant at their first sign-in. Every self-registered user
+  shares that tenant and its data: only for a single-tenant application.
 
-With ``user_attribute`` the realm keeps offering registration (new users get
-the default tenant) and only ``off`` is accepted. Sets the Gatekeeper's
-``SELF_REGISTRATION`` and the realm's ``registrationAllowed``.
+Sets the Gatekeeper's ``SELF_REGISTRATION`` and the realm's
+``registrationAllowed``.
 
 ### `auth.keycloak_tenant_source`
 
@@ -1159,8 +1164,9 @@ which the services isolate data by.
   passes ``kc_idp_hint`` to go straight to an organization's identity
   provider. A user in no organization cannot sign in unless
   ``auth.keycloak_self_registration=own_organization``.
-- ``user_attribute``: the ``tenant_id`` user attribute. A self-registered
-  user without one gets the default tenant, so every such user shares it.
+- ``user_attribute``: the ``tenant_id`` user attribute, set by an
+  administrator (or, with ``auth.keycloak_self_registration=default_tenant``,
+  the default tenant for every self-registered user).
 
 A host with a TMS ``tenant-route`` keeps the TMS model in both modes: TMS
 pins the host to one tenant and its realm's ``tenant_id`` claim is used.
@@ -1235,6 +1241,11 @@ rate limit. forge therefore refuses ``database.multitenancy`` ``shared_rls`` or
 
 Set this to ``true`` only when a trusted gateway in front of the services
 authenticates the caller and sets or strips the tenant header itself.
+
+With authentication, a request with a verified identity may only name that
+identity's tenant (403 otherwise). A route that needs no sign-in still serves
+whichever tenant the header or host names: keep tenant data that is not
+public behind routes that require one.
 
 BACKENDS: python, go. Checked at generation.
 

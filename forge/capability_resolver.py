@@ -671,22 +671,32 @@ def _check_unverified_tenant(option_values: dict[str, object]) -> None:
     )
 
 
+# The tenant source each self-registration mode gives new users a tenant from.
+_SELF_REGISTRATION_SOURCE = {
+    "own_organization": "organization",
+    "default_tenant": "user_attribute",
+}
+
+
 def _check_self_registration(option_values: dict[str, object]) -> None:
-    """``own_organization`` creates organizations, so it needs them as the tenant."""
+    """A self-registration mode assigns a tenant of its own tenant source.
+
+    ``own_organization`` creates an organization; ``default_tenant`` sets the
+    ``tenant_id`` attribute.
+    """
     source = option_values.get("auth.keycloak_tenant_source", "organization")
-    if option_values.get("auth.keycloak_self_registration") != "own_organization":
-        return
-    if source == "organization":
+    mode = option_values.get("auth.keycloak_self_registration", "off")
+    needed = _SELF_REGISTRATION_SOURCE.get(str(mode))
+    if needed is None or source == needed:
         return
     raise OptionsError(
-        "auth.keycloak_self_registration='own_organization' gives each new user "
-        f"an organization as their tenant, but auth.keycloak_tenant_source={source!r} "
-        "takes the tenant from the tenant_id user attribute. Set "
-        "auth.keycloak_tenant_source='organization', or keep "
+        f"auth.keycloak_self_registration={mode!r} gives new users a tenant through "
+        f"auth.keycloak_tenant_source={needed!r}, but it is {source!r}. Set "
+        f"auth.keycloak_tenant_source={needed!r}, or keep "
         "auth.keycloak_self_registration='off'.",
         code=OPTIONS_INVALID_VALUE,
         context={
-            "auth.keycloak_self_registration": "own_organization",
+            "auth.keycloak_self_registration": mode,
             "auth.keycloak_tenant_source": source,
         },
     )

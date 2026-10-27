@@ -33,6 +33,12 @@ keep a different strategy.
   closed unless `auth.keycloak_self_registration="own_organization"`, which
   also needs `manage-realm` for `service-account-gatekeeper`. To keep the
   `tenant_id` attribute instead, set `auth.keycloak_tenant_source="user_attribute"`.
+- **Self-registration with `user_attribute`:** registration is closed too, and
+  a user without a `tenant_id` attribute is refused at sign-in instead of being
+  given the default tenant (which put every self-registered user in the same
+  tenant). For a single-tenant application that wants open sign-up, set
+  `auth.keycloak_self_registration="default_tenant"`. An existing realm keeps
+  `registrationAllowed` until changed in Keycloak.
 - **Organization switch:** `/auth/organization` is now a form `POST` (`alias`,
   optional `redirect_uri`) from the app's own origin; a `GET` link no longer
   switches, and `/auth/login` ignores an `organization` parameter.

@@ -179,7 +179,7 @@ def _gatekeeper_roles(realm: dict) -> list[str]:
 def test_self_registration_defaults_to_off() -> None:
     option = OPTION_REGISTRY["auth.keycloak_self_registration"]
     assert option.type is OptionType.ENUM
-    assert option.options == ("off", "own_organization")
+    assert option.options == ("off", "own_organization", "default_tenant")
     assert option.default == "off"
 
 
@@ -188,7 +188,18 @@ def test_self_registration_defaults_to_off() -> None:
     [
         ({}, False, False, "off"),
         ({"auth.keycloak_self_registration": "own_organization"}, True, True, "own_organization"),
-        ({"auth.keycloak_tenant_source": "user_attribute"}, True, False, "off"),
+        # user_attribute: registration closes too unless new users are
+        # explicitly given the (shared) default tenant.
+        ({"auth.keycloak_tenant_source": "user_attribute"}, False, False, "off"),
+        (
+            {
+                "auth.keycloak_tenant_source": "user_attribute",
+                "auth.keycloak_self_registration": "default_tenant",
+            },
+            True,
+            False,
+            "default_tenant",
+        ),
     ],
 )
 def test_self_registration_renders_realm_and_gatekeeper(
@@ -196,14 +207,18 @@ def test_self_registration_renders_realm_and_gatekeeper(
 ) -> None:
     root = _generate(tmp_path, **options)
     realm = _realm(root)
-    # off with organizations: a user in no organization could never sign in,
-    # so the realm offers no registration.
+    # off: a user without a tenant could never sign in, so the realm offers
+    # no registration.
     assert realm["registrationAllowed"] is registration
     assert ("manage-realm" in _gatekeeper_roles(realm)) is manage_realm
     assert _compose(root)["gatekeeper"]["environment"]["SELF_REGISTRATION"] == env
 
 
-def test_own_organization_needs_organizations() -> None:
+@pytest.mark.parametrize(
+    ("source", "mode"),
+    [("user_attribute", "own_organization"), ("organization", "default_tenant")],
+)
+def test_self_registration_needs_its_tenant_source(source: str, mode: str) -> None:
     from forge.capability_resolver import resolve  # noqa: PLC0415
     from forge.errors import OptionsError  # noqa: PLC0415
 
@@ -217,12 +232,12 @@ def test_own_organization_needs_organizations() -> None:
         frontends=[],
         include_keycloak=True,
         options={
-            "auth.keycloak_tenant_source": "user_attribute",
-            "auth.keycloak_self_registration": "own_organization",
+            "auth.keycloak_tenant_source": source,
+            "auth.keycloak_self_registration": mode,
         },
     )
     # Refused while validating the configuration (the resolver runs there).
-    with pytest.raises((OptionsError, ValueError), match="own_organization"):
+    with pytest.raises((OptionsError, ValueError), match=mode):
         config.validate()
         resolve(config)
 
