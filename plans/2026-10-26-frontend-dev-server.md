@@ -106,8 +106,8 @@ frontend root; keep its own auth routes and gatekeeper overlay as its own concer
 | readme | the generated app README gains the Compose section only with the field on |
 | ownership | the dev server writes nothing into the checkout as a different uid; Vite's cache directory is writable |
 | runtime HMR | Playwright through Traefik, started with `up --watch --build`: edit a watched source component, the DOM changes, and the document did not navigate or reload (a `window` marker survives, no new main-frame navigation); a `package.json` change rebuilds |
-| matrix | render tests for npm, pnpm and yarn (stages, `CMD`, corepack location) and for shadcn and nuxt-ui. Runtime coverage is npm, pnpm and yarn with shadcn and sign-in off; nuxt-ui and sign-in on are not run |
-| origin | the overlay publishes no port for the frontend and sets no `environment`, so the rendered `.env` value of `VITE_AUTH_DISABLED` reaches the dev server unchanged |
+| matrix | render tests for npm, pnpm and yarn (stages, `CMD`, corepack location) and for shadcn and nuxt-ui. Runtime coverage is npm, pnpm and yarn with shadcn, and npm with nuxt-ui, all with sign-in off; sign-in on is not run |
+| origin | the overlay publishes no port for the frontend and sets only `VITE_API_BASE_URL` (empty, so the page calls the API on its own origin through the router), so the rendered `.env` value of `VITE_AUTH_DISABLED` reaches the dev server unchanged; the e2e test checks the value the dev server serves |
 | production | the existing Compose, Helm and CSP tests still pass unchanged with the field off |
 
 ## Risks and open points
@@ -123,7 +123,7 @@ frontend root; keep its own auth routes and gatekeeper overlay as its own concer
   scaffold on disk. The exception is limited to the overlay and wrapper and to
   unmodified files; it is a new rule, so it is called out for review.
 - **pnpm and yarn.** Run end to end now. pnpm needed a fix shared with the production build (the image installed `pnpm@latest`, whose `minimumReleaseAge` policy refused a lockfile the host's pnpm 10 had just written; the Dockerfile now installs pnpm 10). Yarn failed only on a host Node below the project's engine range (jsdom wants 22.22.2, 24.15 or 26).
-- **Nuxt UI and sign-in on at run time.** Not run; they rest on the render tests and the Nuxt UI quality lane.
+- **Sign-in on at run time.** Not run; it rests on the render tests. Nuxt UI runs in the e2e test (npm).
 - **Port.** The overlay reads the frontend's `server_port` rather than assuming
   5173.
 - **Svelte unknowns.** Its dev command, wrapper and generated files are not

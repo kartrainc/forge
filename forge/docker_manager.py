@@ -369,7 +369,9 @@ _LOCKFILES = {
     "npm": "package-lock.json",
     "pnpm": "pnpm-lock.yaml",
     "yarn": "yarn.lock",
-    # Bun 1.2 writes a text bun.lock; older versions wrote the binary bun.lockb.
+    # Bun 1.2 writes a text bun.lock; older versions wrote the binary bun.lockb. Not
+    # reachable yet (dev_server is Vue-only and Vue has no bun); a frontend that gets it must
+    # also make its Dockerfile copy bun.lock, which today copies bun.lockb* only.
     "bun": "bun.lock",
 }
 _LOCKFILE_ALIASES = {"bun": ("bun.lock", "bun.lockb")}

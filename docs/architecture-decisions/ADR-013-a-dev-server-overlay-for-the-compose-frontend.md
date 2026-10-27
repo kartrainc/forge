@@ -169,10 +169,13 @@ What it learned shapes this decision:
    `ownership()`, so an edited copy receives a `.forge-merge` sidecar on update
    and an untouched copy is rewritten. Vanished scaffold is normally left on
    disk (ADR-006); for these files that would leave a stale overlay after
-   `dev_server` goes `true → false`. The updater deletes the overlay and the
-   wrapper on that transition when they are unmodified since generation, and
-   reports one that was edited. The Dockerfile falls back to the single-stage
-   form through the normal sidecar path.
+   `dev_server` goes `true → false`. On every update, while forge no longer
+   writes the overlay or a wrapper, the updater deletes it once it matches its
+   recorded digest, and reports one that was edited (`left_in_place`); it keeps
+   an edited one recorded as forge's own, so turning the option on again meets a
+   sidecar instead of a collision, and it never touches a file the project owns
+   (`origin` user) under the same name. The Dockerfile falls back to the
+   single-stage form through the normal sidecar path.
 8. **Bind mounts are a documented, best-effort fallback.** On Compose 2.39.4
    or newer, where Watch's sync is too slow or a filesystem does not suit it,
    generated docs say how to mount `src/` into the `dev` target instead. An older
