@@ -47,9 +47,7 @@ services:
             - dist
             - coverage
             - package.json
-{% for name in app.ignore_lockfiles %}
-            - {{ name }}
-{% endfor %}
+            - {{ app.lockfile }}
             - src/auto-imports.d.ts
             - src/components.d.ts
         # A changed dependency list needs a new image.

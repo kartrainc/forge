@@ -149,9 +149,7 @@ def _require_compose_that_can_watch() -> None:
     )
 
 
-def _served_api_base_url(
-    compose: list[str], root: Path, service: str, port: int = 5173
-) -> str:
+def _served_api_base_url(compose: list[str], root: Path, service: str, port: int = 5173) -> str:
     """The ``VITE_API_BASE_URL`` the dev server hands the HTTP client module, asked from inside.
 
     The generated ``.env.development`` points it at the dev server's own port, which nothing
@@ -163,7 +161,7 @@ def _served_api_base_url(
         + str(port)
         + ",path:'/src/shared/api/client.ts',headers:{Host:'app.localhost'}},r=>{"
         + "let b='';r.on('data',c=>b+=c);r.on('end',()=>{"
-        + "const m=b.match(/\"VITE_API_BASE_URL\":\\s*(\"[^\"]*\")/);console.log(m?m[1]:'missing')})})"
+        + 'const m=b.match(/"VITE_API_BASE_URL":\\s*("[^"]*")/);console.log(m?m[1]:\'missing\')})})'
     )
     out = subprocess.run(
         [*compose, "exec", "-T", service, "node", "-e", script],
@@ -231,6 +229,14 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     root = tmp_path / "out" / "devhmr"
     app = root / "apps" / "frontend"
     assert (root / "docker-compose.dev.yaml").is_file()
+    if manager == "pnpm":
+        # The image installs with the pnpm that wrote the lockfile: the host's, recorded for corepack.
+        host = subprocess.run(
+            ["pnpm", "--version"], capture_output=True, text=True, cwd=app, timeout=60
+        ).stdout.strip()
+        assert f'"packageManager": "pnpm@{host}"' in (app / "package.json").read_text(
+            encoding="utf-8"
+        )
     # The default (nginx) target must still build with the option on: the production image
     # type-checks and bundles the wrapper too, and must not carry a dev server.
     prod_image = f"forgeprod{uuid.uuid4().hex[:8]}"

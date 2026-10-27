@@ -125,8 +125,8 @@
       "sha256": "0f61424bd6ad73f8"
     },
     "apps/frontend/scripts/post_generate.py": {
-      "size": 19111,
-      "sha256": "717c3f6f81bd661d"
+      "size": 20331,
+      "sha256": "de82565770eb4e5e"
     },
     "apps/frontend/scripts/remap-browser.mjs": {
       "size": 778,

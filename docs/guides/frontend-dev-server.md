@@ -105,8 +105,9 @@ new and deleted files, a `package.json` rebuild). macOS and a native Windows ins
 of forge itself are unverified.
 
 pnpm needed one fix, which the production build shares: the image installed `pnpm@latest`, and the newest major refused a lockfile the
-host's pnpm had just written (its `minimumReleaseAge` policy), so the Dockerfile now
-installs pnpm 10. Yarn needs a host Node that satisfies the project's engines.
+host's pnpm had just written (its `minimumReleaseAge` policy). A new project now records the host's
+pnpm in `package.json` (`packageManager`), which the image's corepack installs, so the two agree;
+the Dockerfile's `pnpm@10` is only the default for a project without the field. Yarn needs a host Node that satisfies the project's engines.
 Sign-in on has not been run at run time.
 
 ## Hosts other overlays add

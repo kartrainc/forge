@@ -368,6 +368,8 @@ longer has the `dev` stage it builds, so `up` with it fails with
 
 A pnpm project's Dockerfile now installs pnpm 10 instead of `latest`, with or without this option: the newest major refused a lockfile the host's pnpm had just written, so the frozen install failed. An unedited Dockerfile updates on its own; an edited one gets a `.forge-merge` sidecar.
 
+A newly generated pnpm project also records the host's pnpm in `package.json` (`"packageManager": "pnpm@<version>"`), and corepack installs exactly that version in the image, so the image and the lockfile agree whichever major the host has. The Dockerfile's `pnpm@10` is only the default for a project without the field. An existing project is not changed: add the field yourself (`corepack use pnpm@<your version>`) to take the same protection.
+
 Needs Docker Compose 2.39.4 or newer; `forge doctor` checks it. `forge` no longer
 runs `docker compose up` for a project with the option on, because that would
 start nginx: it prints the command that starts the dev stack.

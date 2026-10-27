@@ -14,10 +14,11 @@ WORKDIR /app
 ENV COREPACK_HOME=/usr/local/share/corepack
 {% endif %}
 {% if package_manager == "pnpm" %}
-# pnpm 10, not `latest`: the lockfile is written on the host by the pnpm that is installed
-# there, and newer majors refuse a lockfile that names versions younger than their
-# minimumReleaseAge, so the frozen install below failed for a freshly generated project.
-# A `packageManager` field in package.json wins over this default (corepack reads it).
+# The lockfile is written on the host by the pnpm that is installed there, and a newer major
+# refuses a lockfile that names versions younger than its minimumReleaseAge. forge records
+# the host's pnpm in package.json's `packageManager`, which corepack reads, so the image
+# installs with the pnpm that wrote the lockfile. This is only the default for a project
+# without that field: pnpm 10, not `latest`.
 RUN corepack enable && corepack prepare pnpm@10 --activate
 {% elif package_manager == "yarn" %}
 {% if dev_server %}

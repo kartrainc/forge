@@ -122,7 +122,7 @@ frontend root; keep its own auth routes and gatekeeper overlay as its own concer
 - **Deleting on `true → false`.** The updater's general rule leaves vanished
   scaffold on disk. The exception is limited to the overlay and wrapper and to
   unmodified files; it is a new rule, so it is called out for review.
-- **pnpm and yarn.** Run end to end now. pnpm needed a fix shared with the production build (the image installed `pnpm@latest`, whose `minimumReleaseAge` policy refused a lockfile the host's pnpm 10 had just written; the Dockerfile now installs pnpm 10). Yarn failed only on a host Node below the project's engine range (jsdom wants 22.22.2, 24.15 or 26).
+- **pnpm and yarn.** Run end to end now. pnpm needed a fix shared with the production build (the image installed `pnpm@latest`, whose `minimumReleaseAge` policy refused a lockfile the host's pnpm 10 had just written; a new project records the host's pnpm in `packageManager`, which corepack installs in the image, and the Dockerfile's pnpm 10 is only the default for a project without it). Yarn failed only on a host Node below the project's engine range (jsdom wants 22.22.2, 24.15 or 26).
 - **Sign-in on at run time.** Not run; it rests on the render tests. Nuxt UI runs in the e2e test (npm).
 - **Port.** The overlay reads the frontend's `server_port` rather than assuming
   5173.

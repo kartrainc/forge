@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -362,6 +363,34 @@ def run_command(label: str, cmd: list[str], timeout: int = 300) -> bool:
         return False
 
 
+def pin_package_manager() -> None:
+    """Record the host's pnpm in package.json, the one that is about to write the lockfile.
+
+    The image installs from that lockfile with corepack, which honours `packageManager`; without
+    the field it uses whatever pnpm it ships, and a newer major refuses a lockfile an older one
+    wrote. A project that already names one keeps it.
+    """
+    if PACKAGE_MANAGER != "pnpm":
+        return
+    manifest = PROJECT_DIR / "package.json"
+    text = manifest.read_text(encoding="utf-8")
+    if '"packageManager"' in text:
+        return
+    exe = shutil.which("pnpm")
+    if exe is None:
+        return
+    try:
+        out = subprocess.run([exe, "--version"], cwd=str(PROJECT_DIR), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    version = out.stdout.strip()
+    anchor = '  "type": "module",\n'
+    if out.returncode != 0 or not re.fullmatch(r"\d+\.\d+\.\d+", version) or anchor not in text:
+        return
+    manifest.write_text(text.replace(anchor, anchor + f'  "packageManager": "pnpm@{version}",\n', 1), encoding="utf-8")
+    print(f"  [ok] packageManager: pnpm@{version}")
+
+
 # ─── Main ───
 
 def main() -> None:
@@ -430,6 +459,7 @@ def main() -> None:
         return
 
     pm = PACKAGE_MANAGER
+    pin_package_manager()
     print(f"\n> Installing project")
     run_command(f"Installing dependencies ({pm} install)", [pm, "install"])
     if not _answers.get("forge_orchestrated", False):

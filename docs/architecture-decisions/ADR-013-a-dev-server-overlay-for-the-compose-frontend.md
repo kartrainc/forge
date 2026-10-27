@@ -70,10 +70,12 @@ What it learned shapes this decision:
    the dev image to have them, which the sidecar merge on enabling the field
    makes explicit. The overlay sets only `build.target`, so the base file's
    `context`, `dockerfile` and `additional_contexts` are inherited. With the field off the rendered Dockerfile is
-   unchanged, byte for byte, for npm and yarn. For pnpm it changes in one line, with the
+   unchanged, byte for byte, for npm and yarn. For pnpm the comment and the default change, with the
    field on or off: the image installed `pnpm@latest`, whose newest major refused a
-   lockfile the host's pnpm had just written (`minimumReleaseAge`), so it now installs
-   pnpm 10, and a `packageManager` field in `package.json` still wins. `dev` runs as a non-root user, and the application
+   lockfile the host's pnpm had just written (`minimumReleaseAge`). The cause is that the
+   image's pnpm is not the one that wrote the lockfile, so a new project now records the
+   host's pnpm in `package.json` as `packageManager`, which corepack honours; the
+   Dockerfile's `pnpm@10` is only the default for a project without that field. `dev` runs as a non-root user, and the application
    tree, including Vite's cache directories, is writable by that user; the
    files arrive with `COPY --chown`.
 3. **A generated `docker-compose.dev.yaml` overrides each enabled frontend's service.**
@@ -232,8 +234,9 @@ Rejected. It is the second-origin setup the Context describes.
 
 - With the field off, the rendered Compose files are unchanged, and so is every
   other generated file. The Dockerfile is too, except that a pnpm project's installs
-  pnpm 10 instead of `latest` (the dev stage needed it; the production build shares
-  the line). `.forge/quality.json` gains
+  pnpm 10 instead of `latest` when `package.json` names no `packageManager` (the dev
+  stage needed it; the production build shares the line), and a newly generated pnpm
+  project's `package.json` records the host's pnpm. `.forge/quality.json` gains
   `dev_server = false` on the next update, so the recipe and the golden
   snapshots that hash it change; `forge.toml` records `dev_server = true` only
   for a project that enables it.

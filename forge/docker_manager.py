@@ -369,12 +369,7 @@ _LOCKFILES = {
     "npm": "package-lock.json",
     "pnpm": "pnpm-lock.yaml",
     "yarn": "yarn.lock",
-    # Bun 1.2 writes a text bun.lock; older versions wrote the binary bun.lockb. Not
-    # reachable yet (dev_server is Vue-only and Vue has no bun); a frontend that gets it must
-    # also make its Dockerfile copy bun.lock, which today copies bun.lockb* only.
-    "bun": "bun.lock",
 }
-_LOCKFILE_ALIASES = {"bun": ("bun.lock", "bun.lockb")}
 
 
 def _lockfile(fc: FrontendConfig) -> str:
@@ -451,8 +446,6 @@ def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
             "name": fc.name,
             "port": fc.server_port,
             "lockfile": _lockfile(fc),
-            # Every name the package manager has used for its lockfile stays out of the sync.
-            "ignore_lockfiles": _LOCKFILE_ALIASES.get(fc.package_manager, (_lockfile(fc),)),
         }
         for fc in config.active_frontends
         if fc.dev_server
