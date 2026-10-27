@@ -2,10 +2,16 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { buildTestToken, generateTestKeypair } from "@forge/platform-auth-node/testing";
-{%- endif %}
+import { afterEach, expect, it, vi } from "vitest";
+{%- else %}
 import { expect, it } from "vitest";
+{%- endif %}
 import { buildApp } from "../../src/app.js";
 {%- if include_platform_auth | default(false) %}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 it("serves real HTTP through the verifier, the middleware and the router", async () => {
   // The issuer's keys from a local server: the verifier fetches them as it would the gatekeeper's.
@@ -15,7 +21,7 @@ it("serves real HTTP through the verifier, the middleware and the router", async
   });
   await new Promise<void>((resolve) => issuerServer.listen(0, "127.0.0.1", resolve));
   const issuer = `http://127.0.0.1:${(issuerServer.address() as AddressInfo).port}`;
-  process.env.GATEKEEPER_ISSUER = issuer;
+  vi.stubEnv("GATEKEEPER_ISSUER", issuer);
   const token = await buildTestToken({
     keypair,
     issuer,
@@ -37,7 +43,7 @@ it("serves real HTTP through the verifier, the middleware and the router", async
     expect((await fetch(address + "/not-found", { headers: authorization })).status).toBe(404);
   } finally {
     await app.close();
-    issuerServer.close();
+    await new Promise<void>((resolve) => issuerServer.close(() => resolve()));
   }
 });
 {%- else %}
