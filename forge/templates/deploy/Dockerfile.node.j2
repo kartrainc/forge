@@ -13,7 +13,10 @@ WORKDIR /app
 # cache: keep pnpm where every user can.
 ENV COREPACK_HOME=/usr/local/share/corepack
 {% endif %}
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# pnpm 10, not `latest`: the lockfile is written on the host by the pnpm that is installed
+# there, and newer majors refuse a lockfile that names versions younger than their
+# minimumReleaseAge, so the frozen install below failed for a freshly generated project.
+RUN corepack enable && corepack prepare pnpm@10 --activate
 {% elif package_manager == "yarn" %}
 RUN corepack enable
 {% elif package_manager == "bun" %}

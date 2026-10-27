@@ -91,11 +91,11 @@ a Windows drive was driven by hand with the Windows `docker.exe` (edits, CRLF fi
 new and deleted files, a `package.json` rebuild). macOS and a native Windows install
 of forge itself are unverified.
 
-pnpm and yarn render correctly (stages, `CMD`, corepack location) but have not run:
-the image's install step for pnpm, which the production build shares, is rejected by
-the newest pnpm for a lockfile generated on the host, and yarn project generation can
-fail at the lint step on some hosts. Both predate this option; until they are fixed,
-treat the dev server as verified with npm.
+The same test runs with pnpm and yarn. pnpm needed one fix, which the production build
+shares: the image installed `pnpm@latest`, and the newest major refused a lockfile the
+host's pnpm had just written (its `minimumReleaseAge` policy), so the Dockerfile now
+installs pnpm 10. Yarn needs a host Node that satisfies the project's engines.
+Nuxt UI and sign-in on have not been run at run time.
 
 ## Hosts other overlays add
 

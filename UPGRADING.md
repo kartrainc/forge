@@ -352,6 +352,8 @@ Turning it on with `forge --update`:
 Turning it off removes the two new files when you have not changed them. A file you
 changed stays on disk and is listed as `left_in_place` in the update report.
 
+A pnpm project's Dockerfile now installs pnpm 10 instead of `latest`, with or without this option: the newest major refused a lockfile the host's pnpm had just written, so the frozen install failed. An unedited Dockerfile updates on its own; an edited one gets a `.forge-merge` sidecar.
+
 Needs Docker Compose 2.39.4 or newer; `forge doctor` checks it. `forge` no longer
 runs `docker compose up` for a project with the option on, because that would
 start nginx: it prints the command that starts the dev stack.

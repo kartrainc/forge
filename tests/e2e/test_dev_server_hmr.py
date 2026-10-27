@@ -5,9 +5,9 @@ the overlay with ``docker compose up --watch``, then drives Chromium through Tra
 an edit to a component on the host must reach the page without a reload, and nothing the
 container writes may be owned by anyone but the developer.
 
-Runtime coverage is npm with the shadcn kit and sign-in off. pnpm and yarn are covered by
-the render tests: their Docker install step and host generation fail before the dev stage
-does (see the plan's risks), so a runtime case for them would not test this feature.
+Runtime coverage is npm, pnpm and yarn with the shadcn kit and sign-in off. Yarn needs a host
+Node that satisfies the project's engines (jsdom asks for 22.22.2, 24.15 or 26); a case is
+skipped when its package manager is not on PATH.
 
 Traefik reads every container on the Docker daemon, so this test constrains its own to the
 test's Compose project and publishes it on a free loopback port. Heavy and opt-in (``e2e``);
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -49,7 +50,7 @@ description: "dev server hot reload"
 include_keycloak: false
 backends:
   - { name: api, language: python, python_version: "3.13", app_template: crud-service, features: [items], server_port: 5010 }
-frontend: { framework: vue, include_auth: false, include_chat: false, package_manager: npm, server_port: 5173, dev_server: true }
+frontend: { framework: vue, include_auth: false, include_chat: false, package_manager: __PM__, server_port: 5173, dev_server: true }
 """
 
 # Runs in the generated app, so its own @playwright/test resolves. Prints one JSON line.
@@ -154,11 +155,14 @@ def _wait(what: str, ready, log: Path, timeout: int) -> None:
     raise AssertionError(f"{what} not reached in {timeout}s:\n{log.read_text()[-3000:]}")
 
 
+@pytest.mark.parametrize("manager", ["npm", "pnpm", "yarn"])
 def test_dev_server_hot_reloads_a_component_through_traefik(
-    tmp_path: Path, has_docker: bool, has_npm: bool
+    tmp_path: Path, has_docker: bool, has_npm: bool, manager: str
 ) -> None:
     if not (has_docker and has_npm):
         pytest.skip("needs Docker and npm")
+    if shutil.which(manager) is None:
+        pytest.skip(f"needs {manager} on PATH")
     version = subprocess.run(
         ["docker", "compose", "version", "--short"], capture_output=True, text=True, timeout=30
     ).stdout
@@ -168,7 +172,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     )
 
     stack = tmp_path / "stack.yaml"
-    stack.write_text(_STACK, encoding="utf-8")
+    stack.write_text(_STACK.replace("__PM__", manager), encoding="utf-8")
     _run(
         [
             sys.executable,

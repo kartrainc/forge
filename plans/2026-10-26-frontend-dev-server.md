@@ -107,7 +107,7 @@ gatekeeper overlay as its own concern.
 | readme | the generated app README gains the Compose section only with the field on |
 | ownership | the dev server writes nothing into the checkout as a different uid; Vite's cache directory is writable |
 | runtime HMR | Playwright through Traefik, started with `up --watch --build`: edit a watched source component, the DOM changes, and the document did not navigate or reload (a `window` marker survives, no new main-frame navigation); a `package.json` change rebuilds |
-| matrix | render tests for npm, pnpm and yarn (stages, `CMD`, corepack location) and for shadcn and nuxt-ui. Runtime coverage is npm, shadcn, sign-in off: pnpm and yarn cannot reach the dev stage today (see Risks) and nuxt-ui and sign-in on are not run |
+| matrix | render tests for npm, pnpm and yarn (stages, `CMD`, corepack location) and for shadcn and nuxt-ui. Runtime coverage is npm, pnpm and yarn with shadcn and sign-in off; nuxt-ui and sign-in on are not run |
 | origin | the overlay publishes no port for the frontend and sets no `environment`, so the rendered `.env` value of `VITE_AUTH_DISABLED` reaches the dev server unchanged |
 | production | the existing Compose, Helm and CSP tests still pass unchanged with the field off |
 
@@ -123,7 +123,7 @@ gatekeeper overlay as its own concern.
 - **Deleting on `true → false`.** The updater's general rule leaves vanished
   scaffold on disk. The exception is limited to the overlay and wrapper and to
   unmodified files; it is a new rule, so it is called out for review.
-- **pnpm and yarn at run time.** Not proven. For pnpm, the install step in the image's `deps` stage (the same command the production build runs) was rejected by the `pnpm@latest` that corepack fetched, which refused the lockfile the host generated ("lockfile contains entries that the active policies reject"). For yarn, generation on this host stopped at the project's lint step (`eslint: not found`) before any image. Both exist without this change; fixing them is separate work.
+- **pnpm and yarn.** Run end to end now. pnpm needed a fix shared with the production build (the image installed `pnpm@latest`, whose `minimumReleaseAge` policy refused a lockfile the host's pnpm 10 had just written; the Dockerfile now installs pnpm 10). Yarn failed only on a host Node below the project's engine range (jsdom wants 22.22.2, 24.15 or 26).
 - **Nuxt UI and sign-in on at run time.** Not run; they rest on the render tests and the Nuxt UI quality lane.
 - **Port.** The overlay reads the frontend's `server_port` rather than assuming
   5173.

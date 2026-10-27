@@ -125,3 +125,17 @@ class TestOn:
         deps = _stage_body(_render(tmp_path, dev_server=True), "deps")
         assert "COPY package.json package-lock.json* ./" in deps
         assert "npm ci" in deps
+
+
+class TestPnpmVersion:
+    """The image installs the pnpm major that writes the project's lockfile, not `latest`."""
+
+    @pytest.mark.parametrize("dev_server", [False, True])
+    def test_pnpm_is_pinned_to_a_major(self, tmp_path: Path, dev_server: bool) -> None:
+        content = _render(tmp_path, dev_server=dev_server, package_manager="pnpm")
+        assert "corepack prepare pnpm@10 --activate" in content
+        assert "pnpm@latest" not in content
+
+    @pytest.mark.parametrize("manager", ["npm", "yarn"])
+    def test_other_managers_are_untouched(self, tmp_path: Path, manager: str) -> None:
+        assert "pnpm" not in _render(tmp_path, dev_server=False, package_manager=manager)
