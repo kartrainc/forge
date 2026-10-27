@@ -21,3 +21,4 @@ proposals.
 | [008](ADR-008-codex-review-worktree.md) | Codex review runs in a separate git worktree | Accepted |
 | [011](ADR-011-ui-kit-option-for-the-vue-template.md) | A UI kit option for the Vue template | Accepted |
 | [012](ADR-012-a-list-of-frontends.md) | A list of frontends | Accepted |
+| [014](ADR-014-a-node-http-service-without-a-database.md) | A Node HTTP service without a database | Proposed |
