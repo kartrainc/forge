@@ -264,6 +264,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `report-to` cannot hide a violation from it, and fails unless a canary page
   of its own, under a fixed policy, is reported: an empty report file used to
   pass.
+- Keep the content-security check's server up on bad input. A report body that
+  is no JSON object threw in the collector, and a path with a malformed
+  percent-escape threw while looking for a file; either ended the server and
+  the run. Both are now answered 400. The body is recorded as an unreadable
+  report, which fails the check instead of vanishing.
 - Generate `deploy/compose/init-db.sh` executable. Postgres runs an init script
   it sees as executable and sources the rest; Docker Desktop's file sharing
   reports a bind-mounted 0644 file as executable but refuses to run it, so on
