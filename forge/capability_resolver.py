@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from forge.config import BackendLanguage, FrontendFramework, ProjectConfig
+from forge.config import BackendLanguage, ProjectConfig
 from forge.errors import (
     OPTIONS_DEP_CYCLE,
     OPTIONS_FRAGMENT_CONFLICT,
@@ -740,13 +740,72 @@ def _collect_component_fragments(config: ProjectConfig) -> set[str]:
     return {component_fragment_name(name) for name in resolved.ordered}
 
 
-def _project_ui_kit(config: ProjectConfig) -> str | None:
-    """The project's Vue UI kit, or ``None`` when its frontend has no kits."""
+def _project_ui_kits(config: ProjectConfig) -> tuple[str, ...]:
+    """The UI kits of the project's Vue frontends, primary first, without repeats.
+
+    Empty when no frontend has kits. A single-frontend project has at most one.
+    """
     from forge.ui_kits import applies_to  # noqa: PLC0415
 
-    if config.frontend is None or not applies_to(config.frontend.framework):
-        return None
-    return config.frontend.ui_kit
+    kits: list[str] = []
+    for fc in config.active_frontends:
+        if applies_to(fc.framework) and fc.ui_kit not in kits:
+            kits.append(fc.ui_kit)
+    return tuple(kits)
+
+
+def _component_closure(name: str, registry: Mapping[str, ComponentNode]) -> set[str]:
+    """``name`` and every component it pulls in, transitively."""
+    closure = {name}
+    found = [name]
+    # ``found`` grows while it is walked, so each component is visited once.
+    for current in found:
+        node = registry.get(current)
+        for child in node.children if node is not None else ():
+            if child not in closure:
+                closure.add(child)
+                found.append(child)
+    return closure
+
+
+def _renders_on(name: str, kit: str, registry: Mapping[str, ComponentNode]) -> bool:
+    """Whether ``name`` and its whole closure render on ``kit``."""
+    return all(
+        kit in registry[n].ui_kits for n in _component_closure(name, registry) if n in registry
+    )
+
+
+def selected_component_fragments(config: ProjectConfig) -> frozenset[str]:
+    """The fragments of every selected component and the components they pull in."""
+    components = list(getattr(config, "components", None) or [])
+    if not components:
+        return frozenset()
+    from forge.components import COMPONENT_REGISTRY, component_fragment_name  # noqa: PLC0415
+
+    names: set[str] = set()
+    for name in components:
+        names |= _component_closure(name, COMPONENT_REGISTRY)
+    return frozenset(component_fragment_name(n) for n in names)
+
+
+def component_fragments_for_kit(config: ProjectConfig, kit: str) -> frozenset[str]:
+    """The component fragments an app on ``kit`` receives.
+
+    A selected component lands in an app only with its whole closure: a
+    component whose child the kit cannot render (``Console`` beside the
+    shadcn-only ``StatCard``) is not applied to that app at all, rather than
+    applied without the child its files import.
+    """
+    components = list(getattr(config, "components", None) or [])
+    if not components:
+        return frozenset()
+    from forge.components import COMPONENT_REGISTRY, component_fragment_name  # noqa: PLC0415
+
+    names: set[str] = set()
+    for name in components:
+        if _renders_on(name, kit, COMPONENT_REGISTRY):
+            names |= _component_closure(name, COMPONENT_REGISTRY)
+    return frozenset(component_fragment_name(n) for n in names)
 
 
 def _check_component_ui_kits(
@@ -755,16 +814,29 @@ def _check_component_ui_kits(
     ordered: tuple[str, ...],
     registry: Mapping[str, ComponentNode],
 ) -> None:
-    """Refuse selected components, or children they pull in, the kit cannot render.
+    """Refuse selected components, or children they pull in, that no frontend's kit can render.
 
-    A refused child is reported through the selected component that needs it,
-    with the component the kit offers instead when the manifest names one.
+    A component is kept when at least one Vue frontend's kit renders it with
+    its whole closure (it is then applied to the apps that can). Otherwise the
+    refusal reports, against the primary's kit, each component that kit cannot
+    render, through the selected component that needs it, with the component
+    the kit offers instead when the manifest names one.
     """
-    kit = _project_ui_kit(config)
-    if kit is None:
+    kits = _project_ui_kits(config)
+    if not kits:
+        return
+    unplaced = [n for n in selected if not any(_renders_on(n, kit, registry) for kit in kits)]
+    if not unplaced:
         return
     from forge.ui_kits import refusal  # noqa: PLC0415
 
+    # Report only what no frontend can take: the closures of the unplaced
+    # components. With one kit that is every component the kit cannot render.
+    reported: set[str] = set()
+    for name in unplaced:
+        reported |= _component_closure(name, registry)
+    ordered = tuple(n for n in ordered if n in reported)
+    kit = kits[0]
     via: dict[str, str | None] = dict.fromkeys(selected)
     pending = list(selected)
     while pending:
@@ -794,16 +866,21 @@ def _check_component_ui_kits(
 
 
 def _check_fragment_ui_kits(config: ProjectConfig, fragment_set: set[str]) -> None:
-    """Refuse frontend fragments that declare kits without the project's."""
-    kit = _project_ui_kit(config)
-    if kit is None:
+    """Refuse frontend fragments that declare kits none of the project's Vue frontends uses.
+
+    A fragment some frontend's kit accepts is kept and applied to those apps only.
+    """
+    kits = _project_ui_kits(config)
+    if not kits:
         return
     from forge.ui_kits import refusal  # noqa: PLC0415
 
+    kit = ", ".join(kits)
     refused = sorted(
         name
         for name in fragment_set
-        if FRAGMENT_REGISTRY[name].ui_kits and kit not in FRAGMENT_REGISTRY[name].ui_kits
+        if FRAGMENT_REGISTRY[name].ui_kits
+        and not any(k in FRAGMENT_REGISTRY[name].ui_kits for k in kits)
     )
     if refused:
         raise OptionsError(
@@ -889,12 +966,9 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
             # impl's language, e.g. a Vue + Node-only project), but it must still
             # be applied. Keep it, targeting its (single) project-scoped impl
             # language so ``apply_project_features`` applies it exactly once.
-            project_frontend = (
-                config.frontend.framework if config.frontend else FrontendFramework.NONE
-            )
             if (
                 frag.target_frontends
-                and project_frontend in frag.target_frontends
+                and any(fc.framework in frag.target_frontends for fc in config.active_frontends)
                 and any(impl.scope == "project" for impl in frag.implementations.values())
             ):
                 project_lang = next(

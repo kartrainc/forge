@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from forge.cli import interactive as _interactive
@@ -103,6 +104,34 @@ def _json_error(stdout_fd, err: object) -> None:
     stdout_fd.write(json.dumps(payload) + "\n")
     stdout_fd.flush()
     sys.exit(exit_code)
+
+
+def _frontend_report(config: ProjectConfig, project_root: Path) -> dict[str, Any]:
+    """The ``--json`` keys that describe the project's frontends.
+
+    ``frontend_dir``, ``framework`` and ``features`` describe the primary, as
+    they always have; ``frontends`` lists every app, the primary first.
+    """
+    if not (config.frontend and config.frontend.framework != FrontendFramework.NONE):
+        return {}
+    return {
+        # The frontend app lives at apps/<slug>/ (the generator's layout),
+        # not project_root/<slug>/ — report the real path to automation.
+        "frontend_dir": str(project_root / "apps" / config.frontend_slug),
+        "framework": config.frontend.framework.value,
+        "features": config.frontend.page_features(config.all_features),
+        "frontends": [
+            {
+                "name": fc.name,
+                "dir": str(project_root / "apps" / fc.name),
+                "framework": fc.framework.value,
+                "port": fc.server_port,
+                "ui_kit": fc.ui_kit,
+                "features": fc.page_features(config.all_features),
+            }
+            for fc in config.active_frontends
+        ],
+    }
 
 
 def main() -> None:
@@ -544,12 +573,7 @@ def main() -> None:
                 for bc in config.backends
             ]
             result["backend_dir"] = str(project_root / config.backends[0].name)
-        if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-            # The frontend app lives at apps/<slug>/ (the generator's layout),
-            # not project_root/<slug>/ — report the real path to automation.
-            result["frontend_dir"] = str(project_root / "apps" / config.frontend_slug)
-            result["framework"] = config.frontend.framework.value
-            result["features"] = config.all_features
+        result.update(_frontend_report(config, project_root))
         # Init #5 — additive: emit the agent-grade GenerationReport
         # under a new top-level ``report`` key so old keys
         # (project_root, backends, frontend_dir, framework, features)

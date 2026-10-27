@@ -7,10 +7,16 @@ Backends deployed:
 {{- if .Values.frontend.enabled }}
   - frontend (nginx) on port {{ .Values.frontend.port }}
 {{- end }}
+{{- range $name, $fe := .Values.frontends }}
+  - {{ $name }} (nginx) on port {{ $fe.port }}
+{{- end }}
 
 {{- if .Values.ingress.enabled }}
 
 Reach the app at: http(s)://{{ .Values.ingress.host }}/
+{{- range $name, $fe := .Values.frontends }}
+Reach {{ $name }} at: http(s)://{{ $fe.host | default (printf "%s.%s" $name $.Values.ingress.host) }}/
+{{- end }}
   Backend APIs are under /api/<backend-name>/...
 {{- end }}
 

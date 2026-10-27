@@ -19,7 +19,7 @@ def _go_project(options: dict[str, object]) -> ProjectConfig:
                 name="api", project_name="P", language=BackendLanguage.GO, server_port=5000
             )
         ],
-        frontend=None,
+        frontends=[],
         options=options,
     )
 

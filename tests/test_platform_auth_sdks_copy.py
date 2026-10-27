@@ -42,11 +42,13 @@ def _auth_project(name: str, language: BackendLanguage, tmp_path: Path) -> Proje
                 language=language,
             )
         ],
-        frontend=FrontendConfig(
-            project_name=name,
-            framework=FrontendFramework.VUE,
-            include_auth=True,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name=name,
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+            )
+        ],
         include_keycloak=True,
     )
 
@@ -93,11 +95,13 @@ def test_noauth_backend_dockerfile_omits_sdks_copy(tmp_path):
         backends=[
             BackendConfig(name="api", project_name="noauth_node", language=BackendLanguage.NODE)
         ],
-        frontend=FrontendConfig(
-            project_name="noauth_node",
-            framework=FrontendFramework.VUE,
-            include_auth=False,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="noauth_node",
+                framework=FrontendFramework.VUE,
+                include_auth=False,
+            )
+        ],
         include_keycloak=False,
     )
     root = generate(cfg, quiet=True, dry_run=True)

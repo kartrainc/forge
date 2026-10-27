@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 1071,
-      "sha256": "2fa35bec07c4c0ff"
+      "size": 1088,
+      "sha256": "0016947e0d6ebe2b"
     },
     ".github/workflows/ci-node.yml": {
       "size": 1053,
@@ -73,7 +73,7 @@
       "sha256": "07715a68b8077b4b"
     },
     "services/api-node/.copier-answers.yml": {
-      "size": 566,
+      "size": 559,
       "sha256": "<version-dependent>"
     },
     "services/api-node/.env.example": {
@@ -345,7 +345,7 @@
       "sha256": "2849d98820cb0d33"
     },
     "services/api-py/.copier-answers.yml": {
-      "size": 563,
+      "size": 556,
       "sha256": "<version-dependent>"
     },
     "services/api-py/.env.example": {

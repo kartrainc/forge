@@ -39,7 +39,7 @@ def _make_config(
     return ProjectConfig(
         project_name="Test App",
         backends=[bc],
-        frontend=fc,
+        frontends=([fc] if fc is not None else []),
         include_keycloak=include_keycloak,
         keycloak_port=8080,
     )
@@ -134,6 +134,107 @@ class TestRenderCompose:
         pg = data["services"]["postgres"]
         assert "healthcheck" in pg
         assert pg["healthcheck"]["retries"] == 5
+
+
+def _several_frontends(include_keycloak=False):
+    def vue(name, port):
+        return FrontendConfig(
+            framework=FrontendFramework.VUE, project_name="Test App", name=name, server_port=port
+        )
+
+    return ProjectConfig(
+        project_name="Test App",
+        backends=[BackendConfig(name="api", project_name="Test App", server_port=5010)],
+        frontends=[vue("frontend", 5173), vue("admin", 5174)],
+        include_keycloak=include_keycloak,
+    )
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """``yaml.safe_load`` keeps the last of two equal keys; this refuses them."""
+
+
+def _no_duplicates(loader, node, deep=False):
+    keys = [loader.construct_object(key, deep=deep) for key, _ in node.value]
+    assert len(keys) == len(set(keys)), f"duplicate keys: {keys}"
+    return loader.construct_mapping(node, deep)
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates)
+
+
+class TestSeveralFrontends:
+    """One compose service and router per frontend; the primary's stay as they are."""
+
+    def _render(self, tmp_path, config, plan=None):
+        return yaml.load(  # noqa: S506 — a SafeLoader subclass
+            render_compose(config, tmp_path, plan).read_text(encoding="utf-8"),
+            Loader=_UniqueKeyLoader,
+        )
+
+    def test_each_frontend_has_its_service_and_host(self, tmp_path):
+        services = self._render(tmp_path, _several_frontends())["services"]
+        assert services["frontend"]["build"]["context"] == "./apps/frontend"
+        assert services["admin"]["build"]["context"] == "./apps/admin"
+        assert services["admin"]["volumes"] == [
+            "./apps/admin/nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+        ]
+        assert (
+            "traefik.http.routers.frontend.rule=Host(`app.localhost`)"
+            in (services["frontend"]["labels"])
+        )
+        assert (
+            "traefik.http.routers.admin.rule=Host(`admin.localhost`)"
+            in (services["admin"]["labels"])
+        )
+        assert services["admin"]["depends_on"] == ["api"]
+
+    def test_a_flutter_app_keeps_its_folder_and_takes_a_dns_service_name(self, tmp_path):
+        config = _several_frontends()
+        config.frontends[1] = FrontendConfig(
+            framework=FrontendFramework.FLUTTER,
+            project_name="Test App",
+            name="frontend_1",
+            server_port=5174,
+            include_openapi=True,
+        )
+        services = self._render(tmp_path, config)["services"]
+        assert "frontend_1" not in services
+        assert services["frontend-1"]["build"]["context"] == "./apps/frontend_1"
+        assert (
+            "traefik.http.routers.frontend-1.rule=Host(`frontend-1.localhost`)"
+            in (services["frontend-1"]["labels"])
+        )
+
+    def test_backend_routes_answer_on_every_frontend_host(self, tmp_path):
+        labels = self._render(tmp_path, _several_frontends())["services"]["api"]["labels"]
+        assert (
+            "traefik.http.routers.api.rule=(Host(`app.localhost`) || Host(`admin.localhost`))"
+            " && PathPrefix(`/api/api`)"
+        ) in labels
+
+    def test_one_frontend_keeps_the_single_host_rule(self, tmp_path):
+        labels = self._render(tmp_path, _make_config())["services"]["backend"]["labels"]
+        assert (
+            "traefik.http.routers.backend.rule=Host(`app.localhost`) && PathPrefix(`/api/backend`)"
+        ) in labels
+
+    def test_the_gatekeeper_learns_the_extra_host_labels(self):
+        # ``generate`` loads the features that register the gatekeeper service.
+        from forge.generator import generate
+
+        several = _several_frontends(include_keycloak=True)
+        single = _make_config(include_keycloak=True)
+        single.backend.server_port = 5010  # the gatekeeper's port is 5000
+        for config, expected in ((several, "admin"), (single, None)):
+            config.validate()
+            root = generate(config, quiet=True, dry_run=True)
+            compose = yaml.load(  # noqa: S506 — a SafeLoader subclass
+                (root / "docker-compose.yml").read_text(encoding="utf-8"),
+                Loader=_UniqueKeyLoader,
+            )
+            env = compose["services"]["gatekeeper"]["environment"]
+            assert env.get("GATEKEEPER_FRONTEND_HOST_LABELS") == expected
 
 
 class TestRenderFrontendDockerfile:

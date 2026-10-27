@@ -53,7 +53,7 @@ from forge.sync.forge_to_project.resolver import (
     _open_editor,
     resolve_sidecars,
 )
-from forge.sync.manifest import read_forge_toml, write_forge_toml
+from forge.sync.manifest import ForgeFrontendData, read_forge_toml, write_forge_toml
 from forge.sync.merge import (
     MergeBlockCollector,
     sha256_of_file,
@@ -145,6 +145,7 @@ def _scaffold_file_project(
     proposed_content: str = "proposed file content\nproposed line 2\nproposed line 3\n",
     fragment_name: str = "demo_files",
     target_relpath: str = "config.yml",
+    frontends: tuple[ForgeFrontendData, ...] | None = None,
 ) -> dict[str, Any]:
     """Project with one file-level (text) sidecar."""
     target = tmp_path / target_relpath
@@ -167,6 +168,7 @@ def _scaffold_file_project(
         templates={"python": "services/python-service-template"},
         options={},
         provenance=provenance,
+        frontends=frontends,
     )
 
     tag = f"{fragment_name}:{target_relpath}"
@@ -354,6 +356,18 @@ class TestFileAccept:
         data = read_forge_toml(tmp_path / "forge.toml")
         new_sha = sha256_of_file(meta["target"])
         assert data.provenance[meta["target_relpath"]]["sha256"] == new_sha
+
+    def test_file_accept_keeps_every_frontend(self, tmp_path: Path) -> None:
+        """The re-stamp after an accept keeps every recorded frontend."""
+        frontends = (
+            ForgeFrontendData(framework="vue", app_dir="apps/frontend"),
+            ForgeFrontendData(framework="svelte", app_dir="apps/portal", layout="topnav"),
+        )
+        _scaffold_file_project(tmp_path, frontends=frontends)
+        with _patch_select("accept"):
+            report = resolve_sidecars(tmp_path, quiet=True)
+        assert report.accepted == 1
+        assert read_forge_toml(tmp_path / "forge.toml").frontends == frontends
 
 
 # ---------------------------------------------------------------------------

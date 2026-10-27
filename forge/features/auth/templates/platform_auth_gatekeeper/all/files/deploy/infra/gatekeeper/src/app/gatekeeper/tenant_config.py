@@ -144,7 +144,16 @@ def get_fallback_config(tenant_slug: str) -> TenantConfig:
     ``REALM_PER_HOST`` the host's first label names the realm instead.
     """
     cfg = get_settings()
-    realm = tenant_slug if cfg.realm_per_host else cfg.keycloak_admin_realm
+    # Further frontends of the project (``GATEKEEPER_FRONTEND_HOST_LABELS``)
+    # are served on hosts of their own and resolve like the admin realm, also
+    # with REALM_PER_HOST.
+    frontend_labels = {
+        label.strip()
+        for label in cfg.gatekeeper_frontend_host_labels.split(",")
+        if label.strip()
+    }
+    per_host = cfg.realm_per_host and tenant_slug not in frontend_labels
+    realm = tenant_slug if per_host else cfg.keycloak_admin_realm
     return TenantConfig(
         tenant_id=(
             cfg.default_tenant_id if realm == cfg.keycloak_admin_realm else realm

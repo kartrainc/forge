@@ -221,9 +221,7 @@ class TestPluginGeneration:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontend=FrontendConfig(
-                framework=FrontendFramework.NONE, project_name="plugin-e2e"
-            ),
+            frontends=[FrontendConfig(framework=FrontendFramework.NONE, project_name="plugin-e2e")],
             options={"example.hello_banner": True},
             output_dir=str(tmp_path),
         )
@@ -286,9 +284,9 @@ class TestPluginUpdateFlow:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontend=FrontendConfig(
-                framework=FrontendFramework.NONE, project_name="plugin-update"
-            ),
+            frontends=[
+                FrontendConfig(framework=FrontendFramework.NONE, project_name="plugin-update")
+            ],
             options={"example.hello_banner": True},
             output_dir=str(tmp_path),
         )

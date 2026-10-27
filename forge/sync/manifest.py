@@ -15,12 +15,15 @@ From schema v4 (Initiative #3) it adds a ``[forge.frontend]`` table
 recording the frontend framework + its on-disk app directory so
 ``forge --update`` can target frontend-only projects (``backend.mode =
 "none"``) and gate ``target_frontends`` fragments without re-deriving
-the framework from disk every run.
+the framework from disk every run. From schema v5 a project with
+several frontends also records each of them, the primary first, in a
+``[[forge.frontends]]`` array; ``[forge.frontend]`` keeps the primary,
+so a project with one frontend writes no array.
 
-Canonical v4 format::
+Canonical v5 format (one frontend)::
 
     [forge]
-    schema_version = 4
+    schema_version = 5
     version = "1.2.0"
     project_name = "acme"
 
@@ -81,6 +84,9 @@ This keeps ``forge --update`` working on pre-v4 projects without a
 manual migration step; the next re-stamp upgrades the manifest in
 place.
 
+Schema v4 manifests are accepted on read — their one
+``[forge.frontend]`` table is the project's only frontend.
+
 Pre-Option shapes (legacy ``[forge.features.*]`` /
 ``[forge.parameters]`` tables) are rejected with a clear error pointing
 to ``forge.toml`` re-generation — the refactor is a hard cutover.
@@ -98,6 +104,12 @@ import tomlkit
 
 logger = logging.getLogger(__name__)
 
+# Bumped from 4 to 5 for several frontends per project: a
+# ``[[forge.frontends]]`` array records every frontend, the primary first,
+# when there is more than one. ``[forge.frontend]`` still holds the primary,
+# so v4 readers see it unchanged and a one-frontend manifest differs from
+# v4 only in this number.
+#
 # Bumped from 3 to 4 in Initiative #3 to introduce a top-level
 # ``[forge.frontend]`` table that records the frontend framework + its
 # on-disk app directory. Pre-bump, ``forge --update`` had to re-derive
@@ -116,7 +128,7 @@ logger = logging.getLogger(__name__)
 # user-set options apart from defaults and would error on persisted
 # defaults whose fragment backends weren't present. v3 fixes that;
 # v2 manifests still read (origins synthesized as all-default).
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -165,8 +177,12 @@ class ForgeTomlData:
     per-block entries; 2 (1.2.0+) carries the richer metadata that
     enables drift verify and reverse-direction harvest; 3 (WS2) adds
     per-option provenance via ``option_origins``; 4 (Initiative #3)
-    adds the ``[forge.frontend]`` table. Manifests without an
-    explicit version are interpreted as v1.
+    adds the ``[forge.frontend]`` table; 5 adds ``[[forge.frontends]]``.
+    Manifests without an explicit version are interpreted as v1.
+
+    ``frontends`` lists every recorded frontend, the primary first;
+    ``frontend`` is the primary (an empty record without one). Either may
+    be given on construction and the other is derived from it.
     """
 
     version: str
@@ -208,6 +224,16 @@ class ForgeTomlData:
     # reconstructed from ``[forge.templates]`` + on-disk inference;
     # see :func:`_infer_frontend_from_v3` for the fallback logic.
     frontend: ForgeFrontendData = field(default_factory=ForgeFrontendData)
+    # Every recorded frontend, the primary first (v5+; one entry or none
+    # before). See ``__post_init__`` for how it pairs with ``frontend``.
+    frontends: tuple[ForgeFrontendData, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.frontends:
+            self.frontends = tuple(self.frontends)
+            self.frontend = self.frontends[0]
+        elif self.frontend.framework:
+            self.frontends = (self.frontend,)
 
 
 def read_forge_toml(path: Path) -> ForgeTomlData:
@@ -314,9 +340,8 @@ def read_forge_toml(path: Path) -> ForgeTomlData:
     # table is missing or carries an empty framework, fall back to
     # the same on-disk inference used for v1 / v2 / v3 manifests —
     # this covers two cases: (a) older manifests pre-dating v4 and
-    # (b) v4 writers (e.g. ``--reapply-baseline``) that don't track
-    # frontend layer metadata and pass ``frontend=None`` through to
-    # ``write_forge_toml``. Reconstruction is best-effort: empty
+    # (b) manifests written without any frontend record (a writer that
+    # passed none to ``write_forge_toml``). Reconstruction is best-effort: empty
     # strings mean "no frontend known", which downstream consumers
     # treat as "frontend layer absent".
     frontend_tbl: dict[str, Any] = {}
@@ -333,6 +358,7 @@ def read_forge_toml(path: Path) -> ForgeTomlData:
         )
     else:
         frontend = _infer_frontend_from_v3(path.parent, templates)
+    frontends = _read_frontends(path, forge) if schema_version >= 5 else ()
 
     return ForgeTomlData(
         version=version,
@@ -346,7 +372,35 @@ def read_forge_toml(path: Path) -> ForgeTomlData:
         provenance=provenance,
         merge_blocks=merge_blocks,
         frontend=frontend,
+        frontends=frontends,
     )
+
+
+def _read_frontends(path: Path, forge: dict[str, Any]) -> tuple[ForgeFrontendData, ...]:
+    """The ``[[forge.frontends]]`` array of a v5 manifest, or ``()`` without one.
+
+    Each entry needs its framework and app directory: only the primary has a
+    conventional location to fall back to.
+    """
+    entries = forge.get("frontends") or []
+    if not isinstance(entries, list):
+        raise ValueError(f"{path}: [forge.frontends] must be an array of tables")
+    frontends = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path}: [[forge.frontends]] entry {i} is not a table")
+        record = ForgeFrontendData(
+            framework=str(_unwrap(entry.get("framework", ""))),
+            app_dir=str(_unwrap(entry.get("app_dir", ""))),
+            layout=str(_unwrap(entry.get("layout", ""))),
+            ui_kit=str(_unwrap(entry.get("ui_kit", ""))),
+        )
+        if not record.framework or not record.app_dir:
+            raise ValueError(
+                f"{path}: [[forge.frontends]] entry {i} needs both 'framework' and 'app_dir'"
+            )
+        frontends.append(record)
+    return tuple(frontends)
 
 
 # Frontend-framework slugs we know how to dispatch in update phases.
@@ -556,11 +610,12 @@ def write_forge_toml(
     frontend: ForgeFrontendData | None = None,
     platform_template: str | None = None,
     schema_version: int = CURRENT_SCHEMA_VERSION,
+    frontends: tuple[ForgeFrontendData, ...] | list[ForgeFrontendData] | None = None,
 ) -> None:
-    """Emit ``forge.toml`` with all v4 sub-tables.
+    """Emit ``forge.toml`` with all v5 sub-tables.
 
     ``schema_version`` defaults to the current version; existing callers
-    that omit it produce a v4 manifest. ``template_versions`` may be
+    that omit it produce a v5 manifest. ``template_versions`` may be
     None or empty when the caller doesn't know per-template versions
     (legacy migration paths) — the table is omitted in that case.
 
@@ -587,11 +642,28 @@ def write_forge_toml(
 
     ``frontend`` is the v4 ``[forge.frontend]`` table — framework name
     + on-disk app dir. ``None`` or a record with empty fields omits
-    the table entirely; existing call sites (``--reapply-baseline``,
-    ``--accept-harvested``, ``--remove-fragment``) that don't track
-    the frontend separately pass ``None`` and the read path
-    re-infers from disk on the next load.
+    the table entirely; the read path then re-infers it from disk on the
+    next load.
+
+    ``frontends`` (v5) carries every frontend, the primary first: the
+    primary becomes ``[forge.frontend]`` and, with more than one, all of
+    them the ``[[forge.frontends]]`` array. ``frontend=x`` is shorthand for
+    ``frontends=[x]``; passing both is an error, so no re-stamp can keep the
+    primary and drop the rest.
     """
+    if frontend is not None and frontends is not None:
+        raise ValueError("Pass either 'frontend' or 'frontends' to write_forge_toml, not both.")
+    recorded = [
+        fe
+        for fe in (frontends if frontends is not None else [frontend] if frontend else [])
+        if fe.framework
+    ]
+    if len(recorded) > 1 and schema_version < 5:
+        # Readers of an older version ignore the array and would keep the primary only.
+        raise ValueError(
+            f"A forge.toml of schema version {schema_version} records one frontend; "
+            f"{len(recorded)} need version 5 or later."
+        )
     doc = tomlkit.document()
     doc.add(tomlkit.comment("Generated by forge — do not edit by hand."))
     doc.add(
@@ -620,24 +692,19 @@ def write_forge_toml(
             tv_tbl.add(key, template_versions[key])
         forge_tbl.add("template_versions", tv_tbl)
 
-    # v4: [forge.frontend] table. Emit only when the caller passed
-    # explicit frontend metadata with a non-empty framework — projects
-    # without a frontend (backend-only) omit the table entirely. The
-    # read path treats both "table absent" and "framework == none" as
-    # "no frontend present", so existing v3-writing call sites
-    # (--reapply-baseline, --accept-harvested, --remove-fragment) that
-    # pass ``frontend=None`` still produce a manifest the read path
-    # can reconstruct from disk on the next load.
-    if frontend is not None and frontend.framework:
-        fe_tbl = tomlkit.table()
-        fe_tbl.add("framework", frontend.framework)
-        if frontend.app_dir:
-            fe_tbl.add("app_dir", frontend.app_dir)
-        if frontend.layout:
-            fe_tbl.add("layout", frontend.layout)
-        if frontend.ui_kit:
-            fe_tbl.add("ui_kit", frontend.ui_kit)
-        forge_tbl.add("frontend", fe_tbl)
+    # v4: [forge.frontend] table, the primary. Emitted only when the caller
+    # passed frontend metadata with a non-empty framework — projects without
+    # a frontend (backend-only) omit the table entirely. The read path
+    # treats both "table absent" and "framework == none" as "no frontend
+    # present", and reconstructs it from disk on the next load.
+    if recorded:
+        forge_tbl.add("frontend", _frontend_table(recorded[0]))
+    # v5: every frontend, the primary first, when there is more than one.
+    if len(recorded) > 1:
+        array = tomlkit.aot()
+        for fe in recorded:
+            array.append(_frontend_table(fe))
+        forge_tbl.add("frontends", array)
 
     options_tbl = tomlkit.table()
     for key in sorted(options):
@@ -686,3 +753,16 @@ def write_forge_toml(
 
     doc.add("forge", forge_tbl)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8", newline="\n")
+
+
+def _frontend_table(frontend: ForgeFrontendData) -> Any:
+    """One frontend as ``[forge.frontend]`` and ``[[forge.frontends]]`` write it."""
+    table = tomlkit.table()
+    table.add("framework", frontend.framework)
+    if frontend.app_dir:
+        table.add("app_dir", frontend.app_dir)
+    if frontend.layout:
+        table.add("layout", frontend.layout)
+    if frontend.ui_kit:
+        table.add("ui_kit", frontend.ui_kit)
+    return table

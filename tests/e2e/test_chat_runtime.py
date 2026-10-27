@@ -121,7 +121,7 @@ def _agent_project() -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         # agent.llm enables the canonical AG-UI SSE endpoint at POST
         # /api/v1/agent (it requires agent.streaming + agent.tools).
         options={"agent.streaming": True, "agent.tools": True, "agent.llm": True},
@@ -136,7 +136,7 @@ def test_python_agui_chat_turn_runs_at_runtime(
         project_name=config.project_name,
         output_dir=str(tmp_path),
         backends=list(config.backends),
-        frontend=config.frontend,
+        frontends=([config.frontend] if config.frontend is not None else []),
         options=dict(config.options),
     )
     project_root = generate(config, quiet=True)

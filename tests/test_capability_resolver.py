@@ -26,7 +26,7 @@ def _project(
     return ProjectConfig(
         project_name="P",
         backends=backends,
-        frontend=None,
+        frontends=[],
         options=options or {},
         option_origins=option_origins or {},
     )
@@ -507,7 +507,7 @@ class TestAuthKeycloakCoercion:
         return ProjectConfig(
             project_name="P",
             backends=[BackendConfig(name="svc", project_name="P", language=BackendLanguage.PYTHON)],
-            frontend=None,
+            frontends=[],
             include_keycloak=include_keycloak,
             keycloak_port=18080,
             options=options or {},
@@ -696,3 +696,208 @@ class TestQueueObjectStoreFailFast:
             option_origins={"queue.backend": "default"},
         )
         resolve(cfg)  # no raise
+
+
+class TestSeveralFrontends:
+    """With several frontends, a frontend fragment or component is kept when at
+    least one app can take it, and refused only when none can."""
+
+    def _setup(self, fragments, comp_reg, nodes):
+        from forge.components import component_fragments
+
+        for node in nodes:
+            comp_reg[node.name] = node
+            frag = component_fragments(node)[0]
+            fragments[frag.name] = frag
+
+    @staticmethod
+    def _frontends(*specs):
+        from forge.config import FrontendConfig, FrontendFramework
+
+        return [
+            FrontendConfig(
+                framework=FrontendFramework(framework),
+                project_name="P",
+                ui_kit=kit,
+                name=name,
+                server_port=5173 + i,
+            )
+            for i, (name, framework, kit) in enumerate(specs)
+        ]
+
+    def test_vue_component_kept_when_only_a_secondary_is_vue(self, isolated_registries) -> None:
+        from forge.components import ComponentNode
+
+        options, fragments = isolated_registries
+        comp_reg: dict = {}
+        self._setup(fragments, comp_reg, [ComponentNode(name="Card", layer=1)])
+        cfg = _project([BackendLanguage.NODE])
+        cfg.frontends = self._frontends(
+            ("frontend", "svelte", "shadcn"), ("admin", "vue", "shadcn")
+        )
+        cfg.components = ["Card"]
+        with patch("forge.components.COMPONENT_REGISTRY", comp_reg):
+            plan = resolve(cfg)
+        assert [rf.fragment.name for rf in plan.ordered] == ["component_Card"]
+
+    def test_vue_component_dropped_without_a_vue_frontend(self, isolated_registries) -> None:
+        from forge.components import ComponentNode
+
+        options, fragments = isolated_registries
+        comp_reg: dict = {}
+        self._setup(fragments, comp_reg, [ComponentNode(name="Card", layer=1)])
+        cfg = _project([BackendLanguage.NODE])
+        cfg.frontends = self._frontends(("frontend", "svelte", "shadcn"))
+        cfg.components = ["Card"]
+        with patch("forge.components.COMPONENT_REGISTRY", comp_reg):
+            plan = resolve(cfg)
+        assert plan.ordered == ()
+
+    def test_kit_limited_fragment_kept_when_one_app_has_the_kit(self, isolated_registries) -> None:
+        from forge.capability_resolver import _check_fragment_ui_kits
+        from forge.config import FrontendFramework
+
+        options, fragments = isolated_registries
+        fragments["nuxt_only"] = _mk_fragment(
+            "nuxt_only", target_frontends=(FrontendFramework.VUE,), ui_kits=("nuxt-ui",)
+        )
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "shadcn"), ("admin", "vue", "nuxt-ui"))
+        _check_fragment_ui_kits(cfg, {"nuxt_only"})  # no app-wide refusal
+
+        cfg.frontends = self._frontends(("frontend", "vue", "shadcn"), ("admin", "vue", "shadcn"))
+        with pytest.raises(
+            OptionsError, match="renders only with UI kit nuxt-ui; the project uses 'shadcn'"
+        ):
+            _check_fragment_ui_kits(cfg, {"nuxt_only"})
+
+    def test_kits_are_the_vue_frontends_primary_first_without_repeats(self) -> None:
+        from forge.capability_resolver import _project_ui_kits
+
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(
+            ("frontend", "vue", "nuxt-ui"),
+            ("portal", "svelte", "shadcn"),
+            ("admin", "vue", "shadcn"),
+            ("ops", "vue", "nuxt-ui"),
+        )
+        assert _project_ui_kits(cfg) == ("nuxt-ui", "shadcn")
+        cfg.frontends = []
+        assert _project_ui_kits(cfg) == ()
+
+    def _console_registry(self):
+        from forge.components import ComponentNode
+
+        return {
+            "Stat": ComponentNode(name="Stat", layer=1, ui_kits=("shadcn",)),
+            "Panel": ComponentNode(
+                name="Panel", layer=3, children={"Stat": "*"}, ui_kits=("shadcn", "nuxt-ui")
+            ),
+        }
+
+    def test_component_kept_when_one_kit_renders_its_whole_closure(self) -> None:
+        from forge.capability_resolver import _check_component_ui_kits
+
+        registry = self._console_registry()
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "nuxt-ui"), ("admin", "vue", "shadcn"))
+        _check_component_ui_kits(cfg, ["Panel"], ("Stat", "Panel"), registry)
+
+    def test_component_refused_when_no_kit_renders_its_closure(self) -> None:
+        from forge.capability_resolver import _check_component_ui_kits
+
+        registry = self._console_registry()
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "nuxt-ui"), ("admin", "vue", "nuxt-ui"))
+        with pytest.raises(OptionsError, match="Component 'Panel' needs 'Stat'"):
+            _check_component_ui_kits(cfg, ["Panel"], ("Stat", "Panel"), registry)
+
+    def test_component_fragments_follow_each_kit(self) -> None:
+        from forge.capability_resolver import (
+            component_fragments_for_kit,
+            selected_component_fragments,
+        )
+
+        registry = self._console_registry()
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.components = ["Panel"]
+        with patch("forge.components.COMPONENT_REGISTRY", registry):
+            assert selected_component_fragments(cfg) == {"component_Panel", "component_Stat"}
+            assert component_fragments_for_kit(cfg, "shadcn") == {
+                "component_Panel",
+                "component_Stat",
+            }
+            assert component_fragments_for_kit(cfg, "nuxt-ui") == frozenset()
+        cfg.components = []
+        assert selected_component_fragments(cfg) == frozenset()
+        assert component_fragments_for_kit(cfg, "shadcn") == frozenset()
+
+    def test_fragment_refusal_names_every_kit(self, isolated_registries) -> None:
+        from forge.capability_resolver import _check_fragment_ui_kits
+        from forge.config import FrontendFramework
+
+        options, fragments = isolated_registries
+        fragments["other_kit"] = _mk_fragment(
+            "other_kit", target_frontends=(FrontendFramework.VUE,), ui_kits=("other",)
+        )
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "nuxt-ui"), ("admin", "vue", "shadcn"))
+        with pytest.raises(OptionsError, match="the project uses 'nuxt-ui, shadcn'"):
+            _check_fragment_ui_kits(cfg, {"other_kit"})
+
+    def test_refusal_names_only_what_no_frontend_can_take(self) -> None:
+        from forge.capability_resolver import _check_component_ui_kits
+        from forge.components import ComponentNode
+
+        registry = {
+            **self._console_registry(),
+            "Odd": ComponentNode(name="Odd", layer=1, ui_kits=("other",)),
+        }
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "nuxt-ui"), ("admin", "vue", "shadcn"))
+        with pytest.raises(OptionsError) as raised:
+            _check_component_ui_kits(cfg, ["Panel", "Odd"], ("Stat", "Panel", "Odd"), registry)
+        assert "Component 'Odd'" in str(raised.value)
+        assert "Panel" not in str(raised.value) and "Stat" not in str(raised.value)
+
+    def test_every_selected_component_brings_its_closure(self) -> None:
+        from forge.capability_resolver import (
+            component_fragments_for_kit,
+            selected_component_fragments,
+        )
+        from forge.components import ComponentNode
+
+        registry = {
+            **self._console_registry(),
+            "Chart": ComponentNode(name="Chart", layer=1, ui_kits=("shadcn", "nuxt-ui")),
+        }
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.components = ["Panel", "Chart"]
+        with patch("forge.components.COMPONENT_REGISTRY", registry):
+            assert selected_component_fragments(cfg) == {
+                "component_Panel",
+                "component_Stat",
+                "component_Chart",
+            }
+            assert component_fragments_for_kit(cfg, "shadcn") == {
+                "component_Panel",
+                "component_Stat",
+                "component_Chart",
+            }
+            assert component_fragments_for_kit(cfg, "nuxt-ui") == {"component_Chart"}
+
+    def test_refusal_reports_every_unplaced_component_against_the_primary_kit(self) -> None:
+        from forge.capability_resolver import _check_component_ui_kits
+        from forge.components import ComponentNode
+
+        registry = {
+            "Odd": ComponentNode(name="Odd", layer=1, ui_kits=("other",)),
+            "Odd2": ComponentNode(name="Odd2", layer=1, ui_kits=("other",)),
+        }
+        cfg = _project([BackendLanguage.PYTHON])
+        cfg.frontends = self._frontends(("frontend", "vue", "nuxt-ui"), ("admin", "vue", "shadcn"))
+        with pytest.raises(OptionsError) as raised:
+            _check_component_ui_kits(cfg, ["Odd", "Odd2"], ("Odd", "Odd2"), registry)
+        message = str(raised.value)
+        assert "Component 'Odd' " in message and "Component 'Odd2' " in message
+        assert message.count("the project uses 'nuxt-ui'") == 2 and "shadcn" not in message

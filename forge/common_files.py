@@ -94,36 +94,31 @@ def apply_common_files(
     _copy_if_absent(
         COMMON_DIR / "claude-settings.json", project_root / ".claude/settings.json", collector
     )
-    if config.frontend and config.frontend.framework.value in {"vue", "svelte"}:
-        _copy_if_absent(
-            COMMON_DIR / "browser-coverage.ts",
-            project_root / "apps" / config.frontend_slug / "scripts/browser-coverage.ts",
-            collector,
-        )
-        _copy_if_absent(
-            COMMON_DIR / "remap-browser.mjs",
-            project_root / "apps" / config.frontend_slug / "scripts/remap-browser.mjs",
-            collector,
-        )
-    if (
-        config.frontend
-        and config.frontend.framework.value == "vue"
-        and config.frontend.ui_kit == "nuxt-ui"
-    ):
-        _copy_nuxt_ui_agent_tooling(project_root, collector)
-
     from forge.frontend_csp import csp_enabled  # noqa: PLC0415
 
-    if csp_enabled(config):
-        # The browser suites against the production build under the policy
-        # nginx.conf sends (security.csp); the rendered lane runs them.
-        frontend = project_root / "apps" / config.frontend_slug
-        _copy_if_absent(COMMON_DIR / "serve-csp.mjs", frontend / "scripts/serve-csp.mjs", collector)
-        _copy_if_absent(
-            COMMON_DIR / "playwright.csp.config.ts",
-            frontend / "playwright.csp.config.ts",
-            collector,
-        )
+    for fc in config.active_frontends:
+        app = project_root / "apps" / fc.name
+        if fc.framework.value in {"vue", "svelte"}:
+            _copy_if_absent(
+                COMMON_DIR / "browser-coverage.ts", app / "scripts/browser-coverage.ts", collector
+            )
+            _copy_if_absent(
+                COMMON_DIR / "remap-browser.mjs", app / "scripts/remap-browser.mjs", collector
+            )
+        if csp_enabled(config, fc):
+            # The browser suites against the production build under the policy
+            # nginx.conf sends (security.csp); the rendered lane runs them.
+            _copy_if_absent(COMMON_DIR / "serve-csp.mjs", app / "scripts/serve-csp.mjs", collector)
+            _copy_if_absent(
+                COMMON_DIR / "playwright.csp.config.ts",
+                app / "playwright.csp.config.ts",
+                collector,
+            )
+    # Project-wide, once: any Vue app on Nuxt UI brings the kit's agent tooling.
+    if any(
+        fc.framework.value == "vue" and fc.ui_kit == "nuxt-ui" for fc in config.active_frontends
+    ):
+        _copy_nuxt_ui_agent_tooling(project_root, collector)
 
 
 def _copy_nuxt_ui_agent_tooling(project_root: Path, collector: ProvenanceCollector | None) -> None:

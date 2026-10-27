@@ -319,6 +319,17 @@ spec:
               value: file
             - name: SERVICE_REGISTRY_PATH
               value: /run/secrets/gatekeeper-service-registry/service_registry.yaml
+            {{- /* The first label of every further frontend's host (frontends.yaml),
+                   which the gatekeeper resolves to the project's realm. */}}
+            {{- $labels := list }}
+            {{- range $name, $fe := .Values.frontends }}
+            {{- $host := $fe.host | default (printf "%s.%s" $name $.Values.ingress.host) }}
+            {{- $labels = append $labels (first (splitList "." $host)) }}
+            {{- end }}
+            {{- with $labels }}
+            - name: GATEKEEPER_FRONTEND_HOST_LABELS
+              value: {{ join "," . | quote }}
+            {{- end }}
           volumeMounts:
             - name: signing-keys
               mountPath: /run/secrets/gatekeeper-signing

@@ -32,7 +32,7 @@ def _node_cfg(tmp_path: Path, *, include_keycloak: bool) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=include_keycloak,
     )
 

@@ -39,10 +39,11 @@ from forge.sync.forge_to_project.uninstaller import disabled_fragments
 from forge.sync.forge_to_project.updater import (
     _frontend_framework_from_manifest,
     _infer_backends,
-    frontend_app_dir,
+    _recorded_frontends,
 )
 from forge.sync.forge_to_project.updater._merge_driver import (
-    project_fragment_root,
+    frontend_targets,
+    project_fragment_roots,
     project_proxy_name,
 )
 from forge.sync.manifest import read_forge_toml
@@ -142,9 +143,14 @@ def plan_update(
             context={"project_root": str(project_root)},
         )
 
+    # Attach the recorded frontends before resolving, exactly as the update does.
+    # cast: a plugin frontend's sentinel behaves like a member (see the updater).
+    frontend_framework = cast("FrontendFramework", _frontend_framework_from_manifest(data.frontend))
+    recorded = _recorded_frontends(project_root, data)
     config = ProjectConfig(
         project_name=data.project_name or project_root.name,
         backends=list(backends),
+        frontends=[fc for fc, _ in recorded],
         options=dict(data.options),
     )
     plan = resolve(config)
@@ -154,55 +160,61 @@ def plan_update(
     uninstalls = sorted(disabled_fragments(data.provenance, current_plan_fragments))
 
     # Place project-scoped fragments exactly as the update does: a
-    # frontend-targeted one inside the recorded frontend app, or not at all.
-    # cast: a plugin frontend's sentinel behaves like a member (see the updater).
-    frontend_framework = cast("FrontendFramework", _frontend_framework_from_manifest(data.frontend))
-    frontend_dir = frontend_app_dir(project_root, data.frontend, frontend_framework)
+    # frontend-targeted one inside every recorded frontend app that can take
+    # it, or not at all.
+    targets = frontend_targets(
+        config,
+        project_root,
+        app_dirs={fc.name: app_dir for fc, app_dir in recorded},
+    )
     # The recorded Vue UI kit selects fragments' files-<kit>/ trees, as on update.
     ui_kit = (
         (data.frontend.ui_kit or DEFAULT_UI_KIT)
         if frontend_framework == FrontendFramework.VUE
         else None
     )
+    labels = {
+        target.app_dir: "<frontend>" if i == 0 else f"<frontend:{target.name}>"
+        for i, target in enumerate(targets)
+    }
 
     decisions: list[FilePlanEntry] = []
     for rf in plan.ordered:
-        project_dir, _skip_reason = project_fragment_root(
-            rf.fragment,
-            project_root,
-            frontend_framework=frontend_framework,
-            frontend_dir=frontend_dir,
-        )
+        roots, _skip_reason = project_fragment_roots(rf.fragment, project_root, targets)
         for backend in rf.target_backends:
             impl = rf.fragment.implementations.get(backend)
             if impl is None:
                 continue
             if impl.scope == "project":
-                if project_dir is None:
-                    continue
-                backend_dir: Path | None = project_dir
-                backend_label = "<project>" if project_dir == project_root else "<frontend>"
+                places: list[tuple[Path, str, str | None]] = [
+                    (
+                        root,
+                        "<project>" if root == project_root else labels[root],
+                        ui_kit if root == project_root else root_kit,
+                    )
+                    for root, root_kit in roots
+                ]
             else:
                 backend_dir, backend_label = _backend_dir_and_label(
                     project_root, backend, config.backends, impl.scope
                 )
-            if backend_dir is None:
-                continue
-            decisions.extend(
-                _decide_for_fragment(
-                    rf.fragment.name,
-                    backend_label,
-                    impl,
-                    project_root,
-                    backend_dir,
-                    plan.option_values,
-                    file_baselines,
-                    update_mode,
-                    config,
-                    backend,
-                    ui_kit=ui_kit,
+                places = [] if backend_dir is None else [(backend_dir, backend_label, ui_kit)]
+            for backend_dir, backend_label, place_kit in places:
+                decisions.extend(
+                    _decide_for_fragment(
+                        rf.fragment.name,
+                        backend_label,
+                        impl,
+                        project_root,
+                        backend_dir,
+                        plan.option_values,
+                        file_baselines,
+                        update_mode,
+                        config,
+                        backend,
+                        ui_kit=place_kit,
+                    )
                 )
-            )
 
     return UpdatePlanReport(
         update_mode=update_mode,

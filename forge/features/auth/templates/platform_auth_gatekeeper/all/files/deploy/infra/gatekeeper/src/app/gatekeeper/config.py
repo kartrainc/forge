@@ -31,6 +31,7 @@ class GatekeeperSettings(BaseSettings):
     | DEFAULT_TENANT_ID         | Tenant UUID assigned to self-registered users|
     | TENANT_ID_CLAIM           | JWT claim name carrying the tenant_id        |
     | KEYCLOAK_ADMIN_REALM      | Realm users sign in to (no TMS route)        |
+    | GATEKEEPER_FRONTEND_HOST_LABELS | Further frontends' host labels         |
     | TENANT_SOURCE             | organization or user_attribute               |
     | ORGANIZATION_CLAIM        | Claim mapping org alias to {id}              |
     | SELF_REGISTRATION         | off or own_organization                      |
@@ -88,6 +89,13 @@ class GatekeeperSettings(BaseSettings):
     default_tenant_id: str = "00000000-0000-0000-0000-000000000001"
     tenant_id_claim: str = "https://forge/tenant_id"
     keycloak_admin_realm: str = "app"
+    # A project with several frontends serves each on its own host
+    # (``admin.localhost`` beside ``app.localhost``). Without a
+    # ``tenant-route:<host>`` record, the first label of those hosts resolves
+    # to the admin realm and the default tenant, exactly as ``app`` does —
+    # not to a realm of the same name. Comma-separated; empty for a project
+    # with one frontend.
+    gatekeeper_frontend_host_labels: str = ""
 
     # ── Where a user's tenant comes from (auth.keycloak_tenant_source) ──
     # ``user_attribute``: the ``tenant_id`` user attribute, emitted as

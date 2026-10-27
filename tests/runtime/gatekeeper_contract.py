@@ -1104,3 +1104,28 @@ async def test_resilient_redis_honors_nx_and_xx(live):
     assert await store.set("k", "2", nx=True) is None
     assert await store.set("k", "3", xx=True, ex=5)
     assert await store.get("k") == "3"
+
+
+@pytest.mark.parametrize(
+    ("host", "realm", "tenant"),
+    [
+        ("app", "app", TENANT),  # the primary frontend's host, as before
+        ("admin", "app", TENANT),  # a frontend beside it resolves the same way
+        ("portal", "app", TENANT),
+        ("acme", "acme", "acme"),  # any other label is still a realm of its own
+    ],
+)
+def test_frontend_host_labels_resolve_to_the_project_realm(monkeypatch, host, realm, tenant):
+    cfg = config.GatekeeperSettings(
+        gatekeeper_client_secret="contract-only-secret",
+        keycloak_base_url="https://issuer.test/realms",
+        gatekeeper_frontend_host_labels="admin, portal",
+        # Realm per host label (REALM_PER_HOST); without it every label
+        # resolves to the project's realm.
+        realm_per_host=True,
+        cookie_secure=False,
+    )
+    monkeypatch.setattr(config, "_instance", cfg)
+    resolved = tenant_config.get_fallback_config(host)
+    assert (resolved.realm_name, resolved.tenant_id) == (realm, tenant)
+    assert resolved.issuer_url == f"https://issuer.test/realms/{realm}"

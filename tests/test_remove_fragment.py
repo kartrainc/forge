@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from forge.cli.commands.remove_fragment import _options_that_enable
 from forge.options import OPTION_REGISTRY
 
@@ -48,3 +50,41 @@ class TestOptionsThatEnable:
             "pinecone",
             "postgresql",
         )
+
+
+def test_the_option_flip_keeps_every_frontend(tmp_path, monkeypatch) -> None:
+    """``--remove-fragment`` rewrites forge.toml before updating; every app stays recorded."""
+    import argparse
+
+    import forge.sync.forge_to_project.updater as updater
+    from forge.cli.commands.remove_fragment import _run_remove_fragment
+    from forge.sync.manifest import ForgeFrontendData, read_forge_toml, write_forge_toml
+
+    frontends = (
+        ForgeFrontendData(framework="vue", app_dir="apps/frontend"),
+        ForgeFrontendData(framework="vue", app_dir="apps/admin", ui_kit="nuxt-ui"),
+    )
+    write_forge_toml(
+        tmp_path / "forge.toml",
+        version="1.3.0",
+        project_name="demo",
+        templates={},
+        # Not the default, so the command rewrites the manifest.
+        options={"middleware.rate_limit": False},
+        frontends=frontends,
+    )
+    monkeypatch.setattr(updater, "update_project", lambda *a, **k: {"uninstalled": []})
+    with pytest.raises(SystemExit) as exit_info:
+        _run_remove_fragment(
+            argparse.Namespace(
+                remove_fragment="rate_limit",
+                project_path=str(tmp_path),
+                quiet=True,
+                json_output=False,
+                update_mode="merge",
+            )
+        )
+    assert exit_info.value.code == 0
+    data = read_forge_toml(tmp_path / "forge.toml")
+    assert data.options["middleware.rate_limit"] is True
+    assert data.frontends == frontends

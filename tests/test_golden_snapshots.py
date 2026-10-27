@@ -178,7 +178,7 @@ PRESETS = {
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
     ),
     "node_minimal": ProjectConfig(
         project_name="snap_node",
@@ -190,7 +190,7 @@ PRESETS = {
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
     ),
     "rust_minimal": ProjectConfig(
         project_name="snap_rust",
@@ -202,7 +202,7 @@ PRESETS = {
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
     ),
     "multi_backend": ProjectConfig(
         project_name="snap_multi",
@@ -222,7 +222,7 @@ PRESETS = {
                 server_port=5002,
             ),
         ],
-        frontend=None,
+        frontends=[],
     ),
     # Epic AA (1.1.0-alpha.1) — "kitchen sink" snapshot exercising the
     # conversational AI + RAG + observability + platform surfaces the 4
@@ -242,13 +242,15 @@ PRESETS = {
                 features=["items", "orders"],
             )
         ],
-        frontend=FrontendConfig(
-            project_name="snap_full",
-            framework=FrontendFramework.VUE,
-            include_auth=True,
-            include_chat=True,
-            include_openapi=True,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="snap_full",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=True,
+                include_openapi=True,
+            )
+        ],
         # A calibrated "rich" set — bigger than minimal, exercises the
         # conversational AI + reliability + observability + platform
         # surfaces. Options that require cross-fragment wiring (agent.llm
@@ -286,13 +288,15 @@ PRESETS = {
                 features=["items", "orders"],
             )
         ],
-        frontend=FrontendConfig(
-            project_name="snap_max",
-            framework=FrontendFramework.VUE,
-            include_auth=True,
-            include_chat=True,
-            include_openapi=True,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="snap_max",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=True,
+                include_openapi=True,
+            )
+        ],
         # Keycloak ON so this kitchen-sink preset keeps exercising the full
         # platform-auth/gatekeeper stack in its VALID form (gatekeeper now
         # requires keycloak+redis; without keycloak auth.mode coerces to none).
@@ -316,6 +320,40 @@ PRESETS = {
             "platform.agents_md": True,
         },
     ),
+    # Several frontends: a shadcn primary and a Nuxt UI app without CRUD
+    # pages beside it, with Keycloak so the gatekeeper's host labels and the
+    # sign-in wiring of both apps are in the snapshot. The byte-level
+    # inventory of a two-frontend project.
+    "multi_frontend": ProjectConfig(
+        project_name="snap_mf",
+        backends=[
+            BackendConfig(
+                name="api",
+                project_name="snap_mf",
+                language=BackendLanguage.PYTHON,
+                features=["items", "orders"],
+            )
+        ],
+        frontends=[
+            FrontendConfig(
+                project_name="snap_mf",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+            ),
+            FrontendConfig(
+                project_name="snap_mf",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                name="admin",
+                server_port=5174,
+                ui_kit="nuxt-ui",
+                features=[],
+            ),
+        ],
+        include_keycloak=True,
+    ),
 }
 
 
@@ -336,7 +374,7 @@ def test_golden_snapshot(preset_name: str, tmp_path: Path) -> None:
         project_name=config.project_name,
         output_dir=str(tmp_path),
         backends=list(config.backends),
-        frontend=config.frontend,
+        frontends=list(config.frontends),
         options=dict(config.options),
         include_keycloak=config.include_keycloak,
         keycloak_port=config.keycloak_port,

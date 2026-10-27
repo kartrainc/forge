@@ -25,9 +25,11 @@ def _build_template_update_tasks(
     up the current template version from the registry (preferring
     ``_forge_template.toml`` under ``forge/templates/<dir>``). If the
     recorded version differs from the current, build a
-    :class:`TemplateUpdateTask` for the corresponding target directory
-    on disk. Frontends use ``apps/<framework>/`` (or the conventional
-    ``apps/<framework_slug>/``); backends use ``services/<backend>/``.
+    :class:`TemplateUpdateTask` for every target directory on disk that the
+    template rendered: each backend of that language under
+    ``services/<backend>/``, and each recorded frontend of that framework at
+    its ``app_dir`` (falling back to ``apps/<framework>/`` or the first
+    ``apps/<dir>/`` with Copier answers when the manifest records none).
 
     Returns the (possibly empty) list of tasks. The list is empty when
     every recorded version matches the live one — no Copier work is
@@ -98,76 +100,71 @@ def _build_template_update_tasks(
         if current_version == recorded_version:
             continue
 
-        # Resolve the target directory on disk.
-        target_dir: Path | None = None
-        matched_backend: BackendConfig | None = None
+        # Resolve every target directory on disk: (dir, backend, frontend record).
+        targets: list[tuple[Path, BackendConfig | None, Any]] = []
         if backend_lang is not None:
-            # Find the matching backend by language.
             for bc in backends:
                 if bc.language.value == lang:
-                    matched_backend = bc
-                    candidate = project_root / "services" / bc.name
-                    if candidate.is_dir():
-                        target_dir = candidate
-                        break
+                    targets.append((project_root / "services" / bc.name, bc, None))
         else:
-            # Frontend: prefer the manifest's recorded ``app_dir`` if it
-            # exists (Initiative #3, v4 manifest). Falls back to the
-            # conventional ``apps/<framework_slug>/`` slot, then to
-            # scanning ``apps/`` for any directory with a
-            # ``.copier-answers.yml`` — the pre-Init-#3 behavior.
-            recorded_app_dir = data.frontend.app_dir
-            if recorded_app_dir:
-                candidate = project_root / recorded_app_dir
+            # Frontend: each recorded app of this framework at its ``app_dir``
+            # (Initiative #3, v4; every app from v5); a recorded app without
+            # Copier answers is skipped. Only when the manifest records no app
+            # of this framework (or none with an ``app_dir``), the
+            # conventional ``apps/<framework_slug>/`` slot, then the first
+            # ``apps/<dir>/`` with a ``.copier-answers.yml`` — the
+            # pre-Init-#3 behavior.
+            recorded = [fe for fe in data.frontends if fe.framework == lang and fe.app_dir]
+            for entry in recorded:
+                candidate = project_root / entry.app_dir
                 if (candidate / ".copier-answers.yml").is_file():
-                    target_dir = candidate
+                    targets.append((candidate, None, entry))
             apps = project_root / "apps"
-            if target_dir is None and apps.is_dir():
-                # Try the direct framework subdir first, then fall back
-                # to scanning for the first apps/<dir>/.copier-answers.yml.
+            if not recorded and apps.is_dir():
                 framework_dir = apps / lang
                 if (framework_dir / ".copier-answers.yml").is_file():
-                    target_dir = framework_dir
+                    targets.append((framework_dir, None, data.frontend))
                 else:
                     for sub in sorted(apps.iterdir()):
-                        if not sub.is_dir():
-                            continue
-                        if (sub / ".copier-answers.yml").is_file():
-                            target_dir = sub
+                        if sub.is_dir() and (sub / ".copier-answers.yml").is_file():
+                            targets.append((sub, None, data.frontend))
                             break
 
-        if target_dir is None or not target_dir.is_dir():
-            continue
-        if not (target_dir / ".copier-answers.yml").is_file():
-            # Without answers, ``copier update`` has no input. Skip
-            # silently — the project predates answer-file emission, or
-            # the user removed it.
-            continue
+        seen: set[Path] = set()
+        for target_dir, matched_backend, frontend in targets:
+            if target_dir in seen or not target_dir.is_dir():
+                continue
+            seen.add(target_dir)
+            if not (target_dir / ".copier-answers.yml").is_file():
+                # Without answers, ``copier update`` has no input. Skip
+                # silently — the project predates answer-file emission, or
+                # the user removed it.
+                continue
 
-        # Two-stage (overlay) layouts: the project's ``.copier-answers.yml``
-        # records only the overlay ``_src_path``, so the default
-        # ``copier.run_update`` re-renders the overlay alone and silently
-        # skips the shared base. Resolve the base template (if this
-        # backend/frontend was generated from a two-stage variant) so
-        # ``run_template_update`` re-renders it first.
-        base_template_src = _resolve_base_template_src(
-            templates_root=templates_root,
-            lang=lang,
-            backend_lang=backend_lang,
-            matched_backend=matched_backend,
-            frontend=data.frontend,
-        )
-
-        tasks.append(
-            TemplateUpdateTask(
-                language=lang,
-                project_version=recorded_version,
-                current_version=current_version,
-                target_dir=target_dir,
-                template_src=template_path,
-                base_template_src=base_template_src,
+            # Two-stage (overlay) layouts: the project's ``.copier-answers.yml``
+            # records only the overlay ``_src_path``, so the default
+            # ``copier.run_update`` re-renders the overlay alone and silently
+            # skips the shared base. Resolve the base template (if this
+            # backend/frontend was generated from a two-stage variant) so
+            # ``run_template_update`` re-renders it first.
+            base_template_src = _resolve_base_template_src(
+                templates_root=templates_root,
+                lang=lang,
+                backend_lang=backend_lang,
+                matched_backend=matched_backend,
+                frontend=frontend,
             )
-        )
+
+            tasks.append(
+                TemplateUpdateTask(
+                    language=lang,
+                    project_version=recorded_version,
+                    current_version=current_version,
+                    target_dir=target_dir,
+                    template_src=template_path,
+                    base_template_src=base_template_src,
+                )
+            )
     return tasks
 
 

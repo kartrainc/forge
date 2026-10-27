@@ -35,7 +35,7 @@ def _make_python_project(tmp_path: Path, frontend: FrontendFramework | None = No
                 features=["items"],
             )
         ],
-        frontend=fe,
+        frontends=([fe] if fe is not None else []),
     )
     return config, project_root
 
@@ -145,7 +145,7 @@ class TestCanvasPropsPydantic:
                     features=["items"],
                 )
             ],
-            frontend=None,
+            frontends=[],
         )
         run_codegen(config, project_root)
         assert not any(project_root.rglob("canvas_props.py"))

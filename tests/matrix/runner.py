@@ -528,15 +528,21 @@ def run_lane_verify(scenario: Scenario) -> LaneResult:
         # C). ``frontend_mode`` is the project-level option discriminator
         # (``options["frontend.mode"]``); ``_validate_frontend_mode_coherence``
         # already keeps it in lock-step with ``FrontendConfig.framework``.
-        if project_config.frontend is not None and project_config.frontend_mode != "none":
-            fe_dir = project_root / "apps" / "frontend"
-            fe_outcome = _verify_frontend(project_config.frontend, fe_dir)
-            if fe_outcome.status == "fail":
-                failures.append(f"frontend:{fe_outcome.error}")
-            elif fe_outcome.status == "skip":
-                # Initiative #9: surface the skip so a "green" lane B
-                # doesn't quietly mean "frontend build was never run".
-                skipped_subchecks.append(f"frontend: {fe_outcome.skip_reason}")
+        # Every app of the project, each in its own apps/<name>.
+        if project_config.frontend_mode != "none":
+            for fe_cfg in project_config.active_frontends:
+                label = (
+                    "frontend"
+                    if project_config.is_primary_frontend(fe_cfg)
+                    else f"frontend[{fe_cfg.name}]"
+                )
+                fe_outcome = _verify_frontend(fe_cfg, project_root / "apps" / fe_cfg.name)
+                if fe_outcome.status == "fail":
+                    failures.append(f"{label}:{fe_outcome.error}")
+                elif fe_outcome.status == "skip":
+                    # Initiative #9: surface the skip so a "green" lane B
+                    # doesn't quietly mean "frontend build was never run".
+                    skipped_subchecks.append(f"{label}: {fe_outcome.skip_reason}")
 
         if failures:
             return LaneResult(

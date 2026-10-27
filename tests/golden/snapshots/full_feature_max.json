@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 1726,
-      "sha256": "2e977e21a2d61115"
+      "size": 2317,
+      "sha256": "06ad49a4a3216c31"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -53,7 +53,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 1362,
+      "size": 1355,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -1233,12 +1233,12 @@
       "sha256": "e309286e33878d5e"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 2058,
-      "sha256": "c1eb97a76e473daf"
+      "size": 2128,
+      "sha256": "07edb98af8299473"
     },
     "apps/frontend/tests/e2e/crud.ts": {
-      "size": 4566,
-      "sha256": "c3516784c8a63a53"
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1251,6 +1251,10 @@
     "apps/frontend/tests/e2e/orders.spec.ts": {
       "size": 71,
       "sha256": "cc281f01080a837f"
+    },
+    "apps/frontend/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
     },
     "apps/frontend/tests/integration/button.test.ts": {
       "size": 504,
@@ -1469,8 +1473,8 @@
       "sha256": "0d031823b3226dd2"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/config.py": {
-      "size": 19533,
-      "sha256": "da54fb5a8bc85ce9"
+      "size": 20047,
+      "sha256": "407074386f5b71a2"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/delegation_grant.py": {
       "size": 7041,
@@ -1565,8 +1569,8 @@
       "sha256": "57ac8f8bd6d5c3fe"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/tenant_config.py": {
-      "size": 5933,
-      "sha256": "40c5da51b102f639"
+      "size": 6323,
+      "sha256": "4c355667e56ebabf"
     },
     "deploy/infra/gatekeeper/src/app/main.py": {
       "size": 4090,
@@ -1629,15 +1633,15 @@
       "sha256": "b0d710cd06b5c9d2"
     },
     "deploy/infra/keycloak-realm.json": {
-      "size": 6530,
-      "sha256": "373398665478a90c"
+      "size": 6577,
+      "sha256": "16a42db1dec555d7"
     },
     "docker-compose.yml": {
       "size": 13362,
       "sha256": "27ab0d81aa29dbb1"
     },
     "forge.toml": {
-      "size": 183752,
+      "size": 184179,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -1761,7 +1765,7 @@
       "sha256": "459f95079ae5c647"
     },
     "services/api/.copier-answers.yml": {
-      "size": 550,
+      "size": 543,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -2581,7 +2585,7 @@
       "sha256": "d3c7f25811409282"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 598,
+      "size": 591,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {

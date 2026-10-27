@@ -14,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader
 from forge.config import (
     TRAEFIK_DASHBOARD_PORT,
     BackendLanguage,
+    FrontendConfig,
     FrontendFramework,
     ProjectConfig,
 )
@@ -21,6 +22,8 @@ from forge.config._topology import (
     backend_topology_entry,
     compute_render_postgres,
     compute_rendered_infra,
+    frontend_host_rule,
+    frontend_topology_entry,
     option_value,
     project_keycloak_realm,
 )
@@ -57,11 +60,15 @@ def keycloak_self_registration(options: Mapping[str, object]) -> str:
 
 
 def app_origins(config: ProjectConfig) -> list[str]:
-    """Origins the app is served from: Traefik's ``app.localhost`` in Compose,
-    plus the chart's ingress host for ``deploy.target=kubernetes``."""
-    origins = ["http://app.localhost"]
+    """Origins the apps are served from: the primary on Traefik's
+    ``app.localhost`` in Compose and every further frontend on
+    ``<label>.localhost``, plus the chart's ingress hosts (``<label>.<host>``
+    for further frontends) for ``deploy.target=kubernetes``."""
+    labels = config.frontend_host_labels
+    origins = ["http://app.localhost", *(f"http://{label}.localhost" for label in labels)]
     if option_value(config.options, "deploy.target") == "kubernetes":
-        origins.append(f"https://{config.project_slug}.example.com")
+        host = f"{config.project_slug}.example.com"
+        origins += [f"https://{host}", *(f"https://{label}.{host}" for label in labels)]
     return origins
 
 
@@ -116,6 +123,12 @@ def render_compose(
                 )
                 env["TENANT_SOURCE"] = keycloak_tenant_source(plan.option_values)
                 env["SELF_REGISTRATION"] = keycloak_self_registration(plan.option_values)
+                if config.frontend_host_labels:
+                    # Hosts of the frontends beside the primary, which the
+                    # gatekeeper resolves to the project's realm and tenant.
+                    block["environment"]["GATEKEEPER_FRONTEND_HOST_LABELS"] = ",".join(
+                        config.frontend_host_labels
+                    )
             if svc.name in {"gatekeeper", "keycloak-realm-sync"}:
                 # One realm name everywhere: the realm JSON, the gatekeeper and
                 # the realm sync all read it from the project config.
@@ -213,6 +226,14 @@ def render_compose(
         ),
         "extra_services": extra_services,
         "extra_volumes": extra_volumes,
+        # Frontends beside the primary, and the host rule backend routers
+        # match (every frontend's host; app.localhost alone for one frontend).
+        "extra_frontends": [
+            frontend_topology_entry(config, fc)
+            for fc in config.active_frontends
+            if not config.is_primary_frontend(fc)
+        ],
+        "frontend_host_rule": frontend_host_rule(config),
     }
 
     output = template.render(context)
@@ -243,17 +264,14 @@ def render_compose(
 def _project_has_node(config: ProjectConfig, active_fragments: set[str]) -> bool:
     if any(b.language == BackendLanguage.NODE for b in config.backends):
         return True
-    if config.frontend is not None and config.frontend.framework in (
-        FrontendFramework.VUE,
-        FrontendFramework.SVELTE,
-    ):
-        return True
-    # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
-    # workspace root — its FrontendSpec declares node_based.
-    if config.frontend is not None:
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
 
-        spec = FRONTEND_SPECS.get(config.frontend.framework.value)
+    for fc in config.active_frontends:
+        if fc.framework in (FrontendFramework.VUE, FrontendFramework.SVELTE):
+            return True
+        # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
+        # workspace root — its FrontendSpec declares node_based.
+        spec = FRONTEND_SPECS.get(fc.framework.value)
         if spec is not None and spec.node_based:
             return True
     return "platform_auth_sdk_node" in active_fragments
@@ -339,10 +357,15 @@ def render_workspace_cargo_toml(
     return cargo_path
 
 
-def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render a two-stage production Dockerfile into the frontend directory."""
+def render_frontend_dockerfile(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render a two-stage production Dockerfile into the frontend directory.
+
+    ``frontend`` defaults to the primary.
+    """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerfile called without a frontend configured")
 
@@ -368,17 +391,19 @@ def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Pat
     return dockerfile_path
 
 
-def render_frontend_dockerignore(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render the ``.dockerignore`` of the frontend image's build context.
+def render_frontend_dockerignore(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render the ``.dockerignore`` of a frontend image's build context.
 
     The build context is the whole application directory, and ``COPY . .``
     merges a directory file by file over what the image already holds. The
     Dockerfile installs from the lockfile and builds from source, so a host
     install, build output and ``.env.*.local`` files (which ``vite build``
-    reads) stay out of the context.
+    reads) stay out of the context. ``frontend`` defaults to the primary.
     """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerignore called without a frontend configured")
 
@@ -641,11 +666,14 @@ def render_service_registry(
     return registry_path
 
 
-def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
+def render_nginx_conf(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
     """Render nginx.conf into the frontend directory.
 
     It serves the static build with an SPA fallback and, under ``security.csp``,
-    the headers and nonce policy of :mod:`forge.frontend_csp`.
+    the headers and nonce policy of :mod:`forge.frontend_csp` for ``frontend``
+    (default: the primary).
     """
     from forge import frontend_csp  # noqa: PLC0415
 
@@ -653,8 +681,8 @@ def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
     template = env.get_template("deploy/nginx.conf.j2")
     output = template.render(
         {
-            "security_headers": frontend_csp.security_headers(config),
-            "content_security_policy": frontend_csp.content_security_policy(config),
+            "security_headers": frontend_csp.security_headers(config, frontend),
+            "content_security_policy": frontend_csp.content_security_policy(config, frontend),
             "nonce_placeholder": frontend_csp.NONCE_PLACEHOLDER,
             "nonce_variable": frontend_csp.NONCE_VARIABLE,
         }

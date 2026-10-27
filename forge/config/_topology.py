@@ -25,12 +25,13 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from forge.config._backend import BackendLanguage
-from forge.config._frontend import FrontendFramework
+from forge.config._frontend import PRIMARY_LOCAL_HOST, FrontendFramework
 from forge.config._validators import DEFAULT_REALM
 
 if TYPE_CHECKING:
     from forge.capability_resolver import ResolvedPlan
     from forge.config._backend import BackendConfig
+    from forge.config._frontend import FrontendConfig
     from forge.config._project import ProjectConfig
     from forge.synthesis.platform import PlatformSynthesis
 
@@ -174,6 +175,35 @@ def compute_rendered_infra(
     return rendered
 
 
+def frontend_topology_entry(config: ProjectConfig, fc: FrontendConfig) -> dict[str, Any]:
+    """One non-primary frontend as compose and Helm render it.
+
+    ``name`` is its ``apps/<name>`` folder; ``dns_name`` names its compose
+    service, Traefik router and Helm resources; ``host`` is its compose host.
+    """
+    from forge import frontend_csp  # noqa: PLC0415 — imports forge.config
+
+    return {
+        "name": fc.name,
+        "dns_name": fc.dns_name,
+        "host": config.frontend_host(fc),
+        "port": fc.server_port,
+        "security_headers": frontend_csp.security_headers(config, fc),
+        "csp": frontend_csp.content_security_policy(config, fc),
+    }
+
+
+def frontend_host_rule(config: ProjectConfig) -> str:
+    """The Traefik host rule backend routers match: every frontend's host.
+
+    One frontend (or none) keeps the rule every project has always had.
+    """
+    hosts = [config.frontend_host(fc) for fc in config.active_frontends]
+    if len(hosts) <= 1:
+        return f"Host(`{PRIMARY_LOCAL_HOST}`)"
+    return "(" + " || ".join(f"Host(`{host}`)" for host in hosts) + ")"
+
+
 def compute_topology(
     config: ProjectConfig,
     plan: ResolvedPlan | None = None,
@@ -204,6 +234,12 @@ def compute_topology(
             bc, synthesis, rendered_infra, options=options, database_mode=database_mode
         )
         for bc in config.backends
+    )
+    # Frontends beside the primary; the primary keeps the scalar keys below.
+    extra_frontends = tuple(
+        frontend_topology_entry(config, fc)
+        for fc in config.active_frontends
+        if not config.is_primary_frontend(fc)
     )
     has_frontend = (
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
@@ -237,4 +273,5 @@ def compute_topology(
         # empty when the option is off or the frontend is not the Vue template.
         "frontend_security_headers": frontend_csp.security_headers(config),
         "frontend_csp": frontend_csp.content_security_policy(config),
+        "extra_frontends": extra_frontends,
     }

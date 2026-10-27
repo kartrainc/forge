@@ -38,7 +38,9 @@ def test_option_defaults_to_organizations() -> None:
     assert option.default == "organization"
 
 
-def _generate(tmp_path: Path, *, realm: str = "", **options: object) -> Path:
+def _generate(
+    tmp_path: Path, *, realm: str = "", extra_frontends: int = 0, **options: object
+) -> Path:
     config = ProjectConfig(
         project_name="kc",
         output_dir=str(tmp_path),
@@ -51,9 +53,20 @@ def _generate(tmp_path: Path, *, realm: str = "", **options: object) -> Path:
                 server_port=8300,
             )
         ],
-        frontend=FrontendConfig(
-            framework=FrontendFramework.VUE, project_name="kc", keycloak_realm=realm
-        ),
+        frontends=[
+            FrontendConfig(
+                framework=FrontendFramework.VUE, project_name="kc", keycloak_realm=realm
+            ),
+            *(
+                FrontendConfig(
+                    framework=FrontendFramework.SVELTE,
+                    project_name="kc",
+                    name=f"admin{i}",
+                    server_port=5174 + i,
+                )
+                for i in range(extra_frontends)
+            ),
+        ],
         include_keycloak=True,
         options=dict(options),
     )
@@ -118,6 +131,22 @@ def test_logout_returns_to_the_apps_origin_only(tmp_path: Path, target: str, exp
     assert gatekeeper["attributes"]["post.logout.redirect.uris"] == expected
 
 
+def test_logout_returns_to_every_frontends_origin(tmp_path: Path) -> None:
+    root = _generate(tmp_path, extra_frontends=1, **{"deploy.target": "kubernetes"})
+    gatekeeper = _client(_realm(root), "gatekeeper")
+    origins = [
+        "http://app.localhost",
+        "http://admin0.localhost",
+        "https://kc.example.com",
+        "https://admin0.kc.example.com",
+    ]
+    uris = gatekeeper["attributes"]["post.logout.redirect.uris"]
+    assert uris.split("##") == [f"{origin}/*" for origin in origins]
+    # Sign-in returns only to /callback on an app's own origin.
+    assert gatekeeper["redirectUris"] == [f"{origin}/callback" for origin in origins]
+    assert gatekeeper["webOrigins"] == origins
+
+
 def _gatekeeper_roles(realm: dict) -> list[str]:
     account = next(u for u in realm["users"] if u["username"] == "service-account-gatekeeper")
     return account["clientRoles"]["realm-management"]
@@ -161,7 +190,7 @@ def test_own_organization_needs_organizations() -> None:
                 name="api", project_name="kc", language=BackendLanguage.PYTHON, server_port=8300
             )
         ],
-        frontend=None,
+        frontends=[],
         include_keycloak=True,
         options={
             "auth.keycloak_tenant_source": "user_attribute",
@@ -234,7 +263,7 @@ def test_database_mode_none_accepts_the_tenancy_defaults() -> None:
     config = ProjectConfig(
         project_name="nodb",
         backends=[BackendConfig(name="api", project_name="nodb", language=BackendLanguage.PYTHON)],
-        frontend=None,
+        frontends=[],
         options={"database.mode": "none"},
     )
     config.validate()

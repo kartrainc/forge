@@ -109,8 +109,8 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": true,
-      "redirectUris": ["*"],
-      "webOrigins": ["*"],
+      "redirectUris": [{% for origin in app_origins %}"{{ origin }}/callback"{{ ", " if not loop.last }}{% endfor %}],
+      "webOrigins": [{% for origin in app_origins %}"{{ origin }}"{{ ", " if not loop.last }}{% endfor %}],
       "protocol": "openid-connect",
       "attributes": {
         "post.logout.redirect.uris": "{% for origin in app_origins %}{{ origin }}/*{{ '##' if not loop.last }}{% endfor %}"
