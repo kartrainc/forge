@@ -51,9 +51,6 @@ IGNORED = {
     ".next",
     "playwright-report",
     "test-results",
-    # Finder metadata: macOS writes it into any folder a person opens, the built package
-    # excludes it (pyproject), and it would otherwise change the generator's fingerprint.
-    ".DS_Store",
 }
 
 

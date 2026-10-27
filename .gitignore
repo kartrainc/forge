@@ -28,6 +28,3 @@ tmp-forge-debug-py/
 .claude/worktrees/
 
 .artifacts/
-
-# macOS Finder metadata
-.DS_Store
