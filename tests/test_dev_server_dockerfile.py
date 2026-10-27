@@ -139,3 +139,21 @@ class TestPnpmVersion:
     @pytest.mark.parametrize("manager", ["npm", "yarn"])
     def test_other_managers_are_untouched(self, tmp_path: Path, manager: str) -> None:
         assert "pnpm" not in _render(tmp_path, dev_server=False, package_manager=manager)
+
+
+class TestCorepackHome:
+    """The dev stage runs as `node`, so pnpm and yarn must be installed where it can read them."""
+
+    @pytest.mark.parametrize("manager", ["pnpm", "yarn"])
+    def test_the_dev_stage_reads_the_package_manager_from_a_shared_home(
+        self, tmp_path: Path, manager: str
+    ) -> None:
+        deps = _stage_body(_render(tmp_path, dev_server=True, package_manager=manager), "deps")
+        assert deps.index("COREPACK_HOME=/usr/local/share/corepack") < deps.index(
+            "corepack prepare"
+        )
+        assert f"corepack prepare {'yarn@1' if manager == 'yarn' else 'pnpm@10'} --activate" in deps
+
+    def test_yarn_without_the_option_is_untouched(self, tmp_path: Path) -> None:
+        content = _render(tmp_path, dev_server=False, package_manager="yarn")
+        assert "COREPACK_HOME" not in content and "corepack prepare" not in content

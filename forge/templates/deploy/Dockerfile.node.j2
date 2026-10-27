@@ -7,18 +7,24 @@ FROM node:22-slim AS builder
 {% endif %}
 WORKDIR /app
 
-{% if package_manager == "pnpm" %}
-{% if dev_server %}
-# The dev stage runs as an unprivileged user, which cannot read root's corepack
-# cache: keep pnpm where every user can.
+{% if package_manager in ("pnpm", "yarn") and dev_server %}
+# The dev stage runs as an unprivileged user, which cannot read root's corepack cache and
+# would download the package manager again at every container start: keep it where every
+# user can.
 ENV COREPACK_HOME=/usr/local/share/corepack
 {% endif %}
+{% if package_manager == "pnpm" %}
 # pnpm 10, not `latest`: the lockfile is written on the host by the pnpm that is installed
 # there, and newer majors refuse a lockfile that names versions younger than their
 # minimumReleaseAge, so the frozen install below failed for a freshly generated project.
+# A `packageManager` field in package.json wins over this default (corepack reads it).
 RUN corepack enable && corepack prepare pnpm@10 --activate
 {% elif package_manager == "yarn" %}
+{% if dev_server %}
+RUN corepack enable && corepack prepare yarn@1 --activate
+{% else %}
 RUN corepack enable
+{% endif %}
 {% elif package_manager == "bun" %}
 RUN npm install -g bun
 {% endif %}
