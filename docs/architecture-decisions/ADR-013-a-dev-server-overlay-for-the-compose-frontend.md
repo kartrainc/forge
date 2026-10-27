@@ -24,7 +24,7 @@ image, which takes minutes per edit. A developer who wants hot reload runs
 `npm run dev` on the host, which is a second origin: it has no Traefik, so no
 `/api/<backend>` routes, and none of the stack's hostnames.
 
-A downstream project (Kartra) built a dev overlay by hand and ran it on Linux.
+A downstream project built a dev overlay by hand and ran it on Linux.
 What it learned shapes this decision:
 
 - Dependencies must be installed for the container's platform. A host
@@ -66,7 +66,7 @@ What it learned shapes this decision:
    production images cannot diverge in what the generated Dockerfile copies.
    `COPY . .` does not copy a named external build context: a project that
    adds `COPY --from=<context>` instructions to its scaffold-owned Dockerfile
-   (Kartra copies shared libraries this way) must place them in `source` for
+   (a project that copies shared libraries this way) must place them in `source` for
    the dev image to have them, which the sidecar merge on enabling the field
    makes explicit. The overlay sets only `build.target`, so the base file's
    `context`, `dockerfile` and `additional_contexts` are inherited. With the field off the rendered Dockerfile is
@@ -77,17 +77,24 @@ What it learned shapes this decision:
    tree, including Vite's cache directories, is writable by that user; the
    files arrive with `COPY --chown`.
 3. **A generated `docker-compose.dev.yaml` overrides each enabled frontend's service.**
-   It sets the build target to `dev`, a Node-based health check, and the one
-   Traefik label that differs. The `dev` stage's `CMD` runs the project's own
-   `dev` script with `--host 0.0.0.0` and `--config vite.dev.config.ts`, per
-   package manager, so the image runs without Compose too. The overlay replaces
+   It sets the build target to `dev`, the dev image's own name (the base file
+   builds the nginx image under the service's default name, and one tag for both
+   would let a later `up` without `--build` start the wrong one),
+   `VITE_API_BASE_URL` to empty (the project's `.env.development` points the
+   browser at the dev server's own port, which nothing publishes here, so the
+   page calls the API on its own origin through the router), a Node-based
+   health check, and the one Traefik label that differs. The `dev` stage's
+   `CMD` runs the `vite` binary with `--host 0.0.0.0` and
+   `--config vite.dev.config.ts`, not the project's `dev` script, because a flag
+   in that script (`--port 3000`) would win over the wrapper's settings. The
+   image runs without Compose too. The overlay replaces
    what nginx needed: `volumes: !reset []` and `healthcheck: !override`. It does
    not replace the labels. Labels merge key by key, so the overlay sets only
    `traefik.http.services.frontend.loadbalancer.server.port` to the frontend's
    `server_port`, and the router's rule, entrypoint and any host another overlay
    added stay as they are. (The first version overrode all labels and wrote
-   forge's own back; applied to Kartra it narrowed the router's
-   `Host(app.localtest.me) || Host(app.localhost)` to `Host(app.localhost)`.)
+   forge's own back; applied to a project whose router rule named two hosts it
+   narrowed the rule to `Host(app.localhost)`.)
    A test merges a downstream overlay's extra host and expects it to survive.
    The minimum is **Docker Compose 2.39.4**: `develop.watch.initial_sync` is
    listed in that release's notes (docker/compose#13232), and it is later than
@@ -113,9 +120,10 @@ What it learned shapes this decision:
 5. **A wrapper Vite config, never an edit of the project's own.**
    `apps/<frontend_slug>/vite.dev.config.ts` resolves the base `vite.config.ts` whether
    it exports an object, a function of `ConfigEnv`, or a promise, spreads it, and
-   then sets `server.host` to `0.0.0.0`, `strictPort`, and `allowedHosts` to the frontend's generated Traefik hostname,
+   then sets `server.host` to `0.0.0.0`, `port` to the frontend's `server_port`, `strictPort`,
+   and `allowedHosts` to the frontend's generated Traefik hostname,
    `app.localhost`, read from the same place the Compose template reads it. It
-   never sets `allowedHosts: true`. The three keys are set after the project's
+   never sets `allowedHosts: true`. The four keys are set after the project's
    config and not merged into it: `mergeConfig` concatenates host lists and keeps
    `true`, so a project's own `allowedHosts` would otherwise widen the list (the
    e2e test sets `allowedHosts: true` in the project and expects `evil.example`
@@ -126,11 +134,11 @@ What it learned shapes this decision:
    `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable. That is
    enough here because Traefik routes only `app.localhost` to this service and
    the Vite port is not published. A project that routes more hosts to the
-   frontend (Kartra adds `app.localtest.me`) names them in
+   frontend (an overlay that adds `app.localtest.me`, say) names them in
    `FORGE_DEV_ALLOWED_HOSTS` on the frontend service, a comma-separated list of
    plain host names that the wrapper checks and appends after `app.localhost`;
-   without it Vite answers 403 for those hosts, which is how Kartra's adoption
-   found the need. File polling is off: Compose writes the
+   without it Vite answers 403 for those hosts, which a trial in an existing
+   project showed. File polling is off: Compose writes the
    synced files inside the container, where Vite's watcher sees them (measured:
    an edit reaches the browser in under a second). It imports the project's
    config with its `.ts` extension, which Vite 8's native config loader asks for.
@@ -148,7 +156,7 @@ What it learned shapes this decision:
    not override that variable: `VITE_AUTH_DISABLED=true` would only swap in the
    development user, and every API call would still be refused at the gate.
    What keeps Keycloak working for a project that routes the gatekeeper itself
-   (Kartra's overlay does) is that the dev server stays on the **same origin**:
+   (a project's own overlay may) is that the dev server stays on the **same origin**:
    the same host and port behind Traefik, no published Vite port, so the
    session cookie, the realm's redirect URIs (`http://*.localhost/*`,
    `http://localhost:*`) and `webOrigins` need no change. The Vite dev proxy
@@ -179,7 +187,7 @@ What it learned shapes this decision:
    (whether from `--yes` or the interactive prompt) and prints the Watch
    command, so no run claims a hot-reload stack it did not start.
 10. **Dev is not the production proof.** No CSP applies, nginx is absent, and
-   auth is off. Production Compose and Helm tests, and the CSP lane against the
+   the sign-in paths are not routed. Production Compose and Helm tests, and the CSP lane against the
    production build, remain the gates for those behaviours; the docs say so.
 
 ## Alternatives considered
@@ -238,16 +246,15 @@ Rejected. It is the second-origin setup the Context describes.
   the router name `frontend`; stop the other stack, or constrain this Traefik
   to its own Compose project (`TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS`). The same
   holds for the built stack.
-- Kartra's adoption must move its `COPY --from=<context>` lines into `source`
-  and decide which of its additional build contexts (shared pricing and
-  geographic data) are watched; an unwatched one needs a rebuild, as today.
-  Its Vite aliases point outside the frontend root (`../../libs/...`,
-  `../../services/...`, which resolve to `/libs/...` and `/services/...` in the
-  container), and Vite refuses to serve files outside `server.fs.allow`. The
-  wrapper merges the project's own `vite.config.ts`, so Kartra widens
-  `server.fs.allow` there; forge's wrapper knows no project paths and adds
-  none. Its Compose stack is assembled through `COMPOSE_FILE`, so
-  the two-file command above would drop its other overlays; the dev overlay
+- A project that adopts the option has its own follow-ups. It moves its
+  `COPY --from=<context>` lines into `source` and decides which of its
+  additional build contexts are watched; an unwatched one needs a rebuild, as
+  today. Vite aliases that point outside the frontend root resolve to paths
+  outside `/app` in the container, and Vite refuses to serve files outside
+  `server.fs.allow`. The wrapper merges the project's own `vite.config.ts`, so
+  the project widens `server.fs.allow` there; forge's wrapper knows no project
+  paths and adds none. A Compose stack assembled through `COMPOSE_FILE` would
+  lose its other overlays under the two-file command above; the dev overlay
   goes last in that list.
 - Svelte keeps the nginx flow until its parity change lands.
 - With several frontends the overlay is one file with a service per app that has

@@ -249,3 +249,32 @@ def test_a_project_owned_file_with_a_dev_server_name_is_never_taken_back(project
         assert report["passed"] and OVERLAY not in report["left_in_place"]
         assert overlay.read_text(encoding="utf-8") == "services: {}\n"
         assert read_forge_toml(manifest_path).provenance[OVERLAY]["origin"] == "user"
+
+
+def test_the_text_output_names_a_file_left_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A kept overlay still names a `dev` stage the regenerated Dockerfile no longer has, so
+    # the update must say so rather than finish with "Update complete." alone.
+    from argparse import Namespace
+
+    from forge.cli.commands.update import _build_update_report, _run_update
+
+    summary = {
+        "passed": True,
+        "backends": ["api"],
+        "fragments_applied": [],
+        "forge_version_before": "1",
+        "forge_version_after": "1",
+        "file_conflicts": 0,
+        "left_in_place": [OVERLAY],
+    }
+    monkeypatch.setattr(
+        "forge.sync.forge_to_project.updater.update_project", lambda *a, **k: summary
+    )
+    with pytest.raises(SystemExit):
+        _run_update(Namespace(project_path=str(tmp_path), quiet=False, json_output=False))
+    assert f"left in place: {OVERLAY}" in capsys.readouterr().out
+
+    report = _build_update_report(tmp_path, summary, "merge")
+    assert any(OVERLAY in warning for warning in report.warnings)

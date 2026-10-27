@@ -77,6 +77,9 @@ def _run_update(args: argparse.Namespace) -> None:
                 status = tu.get("status", "?")
                 print(f"  template {lang}: {pv} -> {cv} ({status})")
         print(f"  fragments: {frags}")
+        left_in_place = cast("list[str]", summary.get("left_in_place") or [])
+        for rel in left_in_place:
+            print(f"  left in place: {rel} (forge no longer writes it; delete it or merge by hand)")
         if file_conflicts:
             print(f"  file conflicts: {file_conflicts} — resolve .forge-merge sidecar(s) by hand.")
         print("Update complete.")
@@ -172,6 +175,8 @@ def _build_update_report(
     file_conflicts = int(cast("int", summary.get("file_conflicts", 0) or 0))
     if file_conflicts:
         report.add_warning(f"{file_conflicts} merge conflict(s) — resolve .forge-merge sidecars.")
+    for rel in cast("list[str]", summary.get("left_in_place") or []):
+        report.add_warning(f"{rel} is no longer generated; it was edited, so it was left in place.")
     template_updates = cast("list", summary.get("template_updates") or [])
     for tu in template_updates:
         if not isinstance(tu, dict):

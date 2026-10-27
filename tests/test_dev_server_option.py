@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from forge.cli.builder import _build_frontend_from_cfg, _Resolver
+from forge.cli.builder import _build_frontend_from_cfg, _build_frontends_from_cfg, _Resolver
 from forge.cli.parser import _build_parser
 from forge.config import (
     BackendConfig,
@@ -82,6 +82,22 @@ class TestEntryPoints:
             _Resolver(Namespace(), {"frontend": {"framework": "vue"}}), "P", "d"
         )
         assert fe is not None and fe.dev_server is False
+
+
+class TestBesideAFrontendsList:
+    """A ``frontends:`` list gives every value itself; the flag must not vanish silently."""
+
+    def test_the_flag_beside_a_list_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
+        cfg = {"frontends": [{"framework": "vue"}]}
+        frontends, _ = _build_frontends_from_cfg(_Resolver(Namespace(dev_server=True), cfg), "P", "d")
+        assert frontends[0].dev_server is False
+        assert "--dev-server has no effect beside a frontends: list" in capsys.readouterr().err
+
+    def test_the_key_on_an_entry_does_not_warn(self, capsys: pytest.CaptureFixture[str]) -> None:
+        cfg = {"frontends": [{"framework": "vue", "dev_server": True}]}
+        frontends, _ = _build_frontends_from_cfg(_Resolver(Namespace(), cfg), "P", "d")
+        assert frontends[0].dev_server is True
+        assert capsys.readouterr().err == ""
 
 
 class TestWithoutAFramework:

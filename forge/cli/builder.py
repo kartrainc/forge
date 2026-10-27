@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import sys
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -342,6 +343,12 @@ def _build_frontends_from_cfg(
     """
     frontends_raw = r.cfg.get("frontends")
     if isinstance(frontends_raw, list):
+        if getattr(r.args, "dev_server", None):
+            print(
+                "warning: --dev-server has no effect beside a frontends: list; "
+                "set dev_server: true on the entries that want it.",
+                file=sys.stderr,
+            )
         frontends: list[FrontendConfig] = []
         for i, raw in enumerate(frontends_raw):
             # Unlike a backend entry, a frontend's position matters (index 0 is

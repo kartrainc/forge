@@ -11,7 +11,15 @@ services:
   {{ app.service }}:
     build:
       target: dev
+    # Its own image name: the base file builds the nginx image under the service's default
+    # name, and one tag for both would let a later `up` without --build start the wrong one.
+    image: {{ image_prefix }}-{{ app.service }}-dev
     volumes: !reset []
+    # The browser calls the API on the page's own origin, through the router. The project's
+    # .env.development points at the dev server's port, which nothing publishes here, and
+    # the process environment wins over .env files.
+    environment:
+      VITE_API_BASE_URL: ""
     # A host another overlay adds to the router's rule must also go in
     # FORGE_DEV_ALLOWED_HOSTS (comma-separated) on this service, or Vite answers 403.
     # Only the port the router targets changes. Labels merge key by key, so the rule,

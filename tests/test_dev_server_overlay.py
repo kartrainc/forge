@@ -7,6 +7,7 @@ end needs the Docker CLI and carries the ``e2e`` marker.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -98,6 +99,13 @@ class TestOverlay:
         assert list(overlay["services"]) == ["frontend"]
         assert set(overlay) == {"services"}
 
+    def test_the_dev_image_has_its_own_name_apart_from_the_nginx_image(self, on: Path) -> None:
+        # The base file builds the nginx image under the service's default name
+        # (<project>-frontend); one tag for both lets `up` without --build start the wrong one.
+        base = _frontend(_load(on / "docker-compose.yml"))
+        assert "image" not in base
+        assert _frontend(_load(on / "docker-compose.dev.yaml"))["image"] == "dev-frontend-dev"
+
     def test_it_builds_the_dev_stage_and_replaces_what_nginx_needed(self, on: Path) -> None:
         frontend = _frontend(_load(on / "docker-compose.dev.yaml"))
         assert frontend["build"] == {"target": "dev"}
@@ -164,9 +172,16 @@ class TestOverlay:
         finally:
             shutil.rmtree(root.parent, ignore_errors=True)
 
-    def test_it_sets_no_environment_so_the_projects_own_env_reaches_vite(self, on: Path) -> None:
+    def test_it_empties_only_the_api_base_url_so_the_page_calls_its_own_origin(
+        self, on: Path
+    ) -> None:
+        # .env.development points the browser at the dev server's own port, which nothing
+        # publishes behind the router; the process environment wins over .env files.
+        env_development = (on / "apps/frontend/.env.development").read_text(encoding="utf-8")
+        assert re.search(r"^VITE_API_BASE_URL=http://localhost:\d+$", env_development, re.M)
         frontend = _frontend(_load(on / "docker-compose.dev.yaml"))
-        assert "environment" not in frontend and "env_file" not in frontend
+        assert frontend["environment"] == {"VITE_API_BASE_URL": ""}
+        assert "env_file" not in frontend
         dockerignore = (on / "apps/frontend/.dockerignore").read_text(encoding="utf-8")
         assert ".env.local" in dockerignore
         assert not any(line.strip() in (".env", ".env*") for line in dockerignore.splitlines())
@@ -329,6 +344,13 @@ class TestSeveralFrontends:
         assert "127.0.0.1:5174" in services["console"]["healthcheck"]["value"]["test"][3]
         assert services["console"]["develop"]["watch"][0]["path"] == "./apps/console"
         assert services["frontend"]["develop"]["watch"][0]["path"] == "./apps/frontend"
+
+    def test_each_app_has_its_own_image_name(self, both: Path) -> None:
+        services = _load(both / "docker-compose.dev.yaml")["services"]
+        assert services["frontend"]["image"] == "two-frontend-dev"
+        assert services["console"]["image"] == "two-console-dev"
+        for service in services.values():
+            assert service["environment"] == {"VITE_API_BASE_URL": ""}
 
     def test_each_wrapper_admits_its_own_host(self, both: Path) -> None:
         primary = (both / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")

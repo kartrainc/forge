@@ -65,11 +65,9 @@ COPY --chown=node:node . .
 FROM source AS dev
 USER node
 EXPOSE {{ server_port }}
-{% if package_manager == "npm" %}
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
-{% else %}
-CMD ["{{ package_manager }}", "run", "dev", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
-{% endif %}
+# The vite binary, not the project's `dev` script: a flag in that script (--port, --host)
+# would win over the wrapper's settings and leave the router with nothing to reach.
+CMD ["node_modules/.bin/vite", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
 
 # -- Build stage --
 FROM source AS builder

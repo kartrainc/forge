@@ -96,16 +96,15 @@ class TestOn:
         assert cmd, "dev has no CMD"
         for part in ('"--host"', '"0.0.0.0"', '"--config"', '"vite.dev.config.ts"'):
             assert part in cmd.group(1)
-        assert f'"{manager}"' in cmd.group(1)
+        assert '"node_modules/.bin/vite"' in cmd.group(1)
 
-    def test_npm_passes_the_arguments_after_a_separator(self, tmp_path: Path) -> None:
-        dev = _stage_body(_render(tmp_path, dev_server=True, package_manager="npm"), "dev")
-        assert '"npm", "run", "dev", "--",' in dev
-
-    @pytest.mark.parametrize("manager", ("pnpm", "yarn"))
-    def test_pnpm_and_yarn_take_the_arguments_directly(self, tmp_path: Path, manager: str) -> None:
+    @pytest.mark.parametrize("manager", MANAGERS)
+    def test_it_runs_the_vite_binary_not_the_projects_dev_script(
+        self, tmp_path: Path, manager: str
+    ) -> None:
+        # A flag in the script (`vite --port 3000`) would win over the wrapper's settings.
         dev = _stage_body(_render(tmp_path, dev_server=True, package_manager=manager), "dev")
-        assert f'"{manager}", "run", "dev", "--host"' in dev
+        assert '"run", "dev"' not in dev
 
     @pytest.mark.parametrize("manager", MANAGERS)
     def test_the_app_and_vites_cache_are_writable_without_a_recursive_chown(

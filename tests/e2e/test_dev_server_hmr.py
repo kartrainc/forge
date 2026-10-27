@@ -139,6 +139,39 @@ def _http_status(compose: list[str], root: Path, host_header: str) -> str:
     return _http_status_in(compose, root, "frontend", host_header)
 
 
+def _require_compose_that_can_watch() -> None:
+    version = subprocess.run(
+        ["docker", "compose", "version", "--short"], capture_output=True, text=True, timeout=30
+    ).stdout
+    have = parse_compose_version(version)
+    assert have is not None and have >= MIN_COMPOSE_FOR_DEV_SERVER, (
+        f"Docker Compose {version.strip()!r} cannot run the dev overlay (needs 2.39.4+)"
+    )
+
+
+def _served_api_base_url(
+    compose: list[str], root: Path, service: str, port: int = 5173
+) -> str:
+    """The ``VITE_API_BASE_URL`` the dev server hands the HTTP client module, asked from inside.
+
+    The generated ``.env.development`` points it at the dev server's own port, which nothing
+    publishes behind the router, so the page would send every ``/api`` call there and fail.
+    Empty makes the client fall back to the page's own origin.
+    """
+    script = (
+        "require('http').get({host:'127.0.0.1',port:"
+        + str(port)
+        + ",path:'/src/shared/api/client.ts',headers:{Host:'app.localhost'}},r=>{"
+        + "let b='';r.on('data',c=>b+=c);r.on('end',()=>{"
+        + "const m=b.match(/\"VITE_API_BASE_URL\":\\s*(\"[^\"]*\")/);console.log(m?m[1]:'missing')})})"
+    )
+    out = subprocess.run(
+        [*compose, "exec", "-T", service, "node", "-e", script],
+        cwd=root, capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    return out.stdout.strip()
+
+
 def _http_status_in(
     compose: list[str], root: Path, service: str, host_header: str, port: int = 5173
 ) -> str:
@@ -177,13 +210,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         pytest.skip("needs Docker and npm")
     if shutil.which(manager) is None:
         pytest.skip(f"needs {manager} on PATH")
-    version = subprocess.run(
-        ["docker", "compose", "version", "--short"], capture_output=True, text=True, timeout=30
-    ).stdout
-    have = parse_compose_version(version)
-    assert have is not None and have >= MIN_COMPOSE_FOR_DEV_SERVER, (
-        f"Docker Compose {version.strip()!r} cannot run the dev overlay (needs 2.39.4+)"
-    )
+    _require_compose_that_can_watch()
 
     stack = tmp_path / "stack.yaml"
     stack.write_text(_STACK.replace("__PM__", manager).replace("__KIT__", ui_kit), encoding="utf-8")
@@ -274,6 +301,8 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         # External names are refused whatever the project's own config says (Vite itself
         # always admits localhost, *.localhost and IP addresses).
         assert _http_status(compose, root, "app.localhost") == "200"
+        # The page calls the API on its own origin, through the router.
+        assert _served_api_base_url(compose, root, "frontend") == '""'
         assert _http_status(compose, root, "evil.example") == "403"
         # A host another overlay routes here is admitted once it is named.
         assert _http_status(compose, root, "dev.example.test") == "200"
@@ -374,6 +403,7 @@ def test_dev_server_hot_reloads_every_app_that_has_it(
     """Two Vue apps, each its own service, port and host: an edit to either reaches its own page."""
     if not (has_docker and has_npm):
         pytest.skip("needs Docker and npm")
+    _require_compose_that_can_watch()
     stack = tmp_path / "stack.yaml"
     stack.write_text(_TWO_APPS, encoding="utf-8")
     _run(
@@ -439,7 +469,10 @@ def test_dev_server_hot_reloads_every_app_that_has_it(
             assert "error" not in result, (name, result)
             assert result["markerKept"] is True, f"{name}: the page reloaded instead of updating"
             assert result["navigations"] == 0 and result["errors"] == [], (name, result)
-        # Each app answers only its own host: the other app's name is not one of its hosts.
+        assert _served_api_base_url(compose, root, "frontend") == '""'
+        assert _served_api_base_url(compose, root, "console", 5174) == '""'
+        # Vite always admits *.localhost, so the other app's name is not refused; only
+        # external names are (the wrapper keeps the project's config from widening that).
         assert (
             _http_status_in(compose, root, "frontend", "console.localhost") == "200"
         )  # *.localhost

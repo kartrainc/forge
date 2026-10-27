@@ -4,13 +4,12 @@ Base: 53fd321a (`kartrainc/forge` main, PR #8).
 
 Date: 2026-10-26. Status: implemented on `feat/frontend-dev-server` (Vue); in review. Decision record:
 [ADR-013](../docs/architecture-decisions/ADR-013-a-dev-server-overlay-for-the-compose-frontend.md).
-First consumer: kartra-ai, which plans its own adoption in its repository.
 
 Requested scope: let the generated Vue frontend run as a Vite dev server behind
 the same Traefik router in the Compose stack, so an edit under `src/` shows in
 the browser without an image build or a page reload. Opt-in; Svelte follows
 with the same tests; the off state's Dockerfile and Compose output do not
-change. Tracked as KR-59.
+change.
 
 ## Decisions
 
@@ -48,7 +47,7 @@ One pull request for the Vue implementation, on one branch. Its first commit is
 this plan, ADR-013 and the index row, based on `main`; the number 013 leaves
 012 to the list-of-frontends ADR. The commits after it
 carry the tests of the behaviour they add. Svelte is a second pull request, and
-the Kartra adoption is a change in kartra-ai.
+adopting it in an existing project is a change in that project.
 
 ### Vue implementation
 
@@ -85,13 +84,13 @@ The same, for the Svelte template: `static/` rather than `public/`,
 its own dev command and Vite wrapper facts, which that change verifies first, and
 the same tests.
 
-### Kartra adoption (in kartra-ai, separate)
+### Adopting it in an existing project (separate)
 
 Move the generator pin; merge scaffold sidecars; append the overlay last in
-`COMPOSE_FILE` through an env file; decide whether `libs/kartra-pricing` and
-the geographic data are watched or need a rebuild; widen `server.fs.allow` in its
-`vite.config.ts` for the aliases that resolve outside the frontend root; keep its own auth routes and
-gatekeeper overlay as its own concern.
+`COMPOSE_FILE` when the stack is assembled through an env file; decide which
+shared build contexts are watched and which need a rebuild; widen
+`server.fs.allow` in its `vite.config.ts` for aliases that resolve outside the
+frontend root; keep its own auth routes and gatekeeper overlay as its own concern.
 
 ## Tests
 

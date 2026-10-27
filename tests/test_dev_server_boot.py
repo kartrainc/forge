@@ -148,10 +148,10 @@ class TestDoctorCheck:
             result = doctor.check_compose_for_dev_server(_project(tmp_path, dev_server=True))
         assert result is not None and result.status == "fail"
 
-    def test_a_missing_docker_cli_fails(self, tmp_path: Path) -> None:
+    def test_a_missing_docker_cli_is_left_to_the_daemon_check(self, tmp_path: Path) -> None:
         with patch("forge.doctor.shutil.which", return_value=None):
             result = doctor.check_compose_for_dev_server(_project(tmp_path, dev_server=True))
-        assert result is not None and result.status == "fail"
+        assert result is None
 
     def test_run_adds_the_check_only_for_a_dev_server_project(self, tmp_path: Path) -> None:
         on, off = tmp_path / "on", tmp_path / "off"

@@ -375,6 +375,10 @@ _LOCKFILES = {
 _LOCKFILE_ALIASES = {"bun": ("bun.lock", "bun.lockb")}
 
 
+def _lockfile(fc: FrontendConfig) -> str:
+    return _LOCKFILES.get(fc.package_manager, "package-lock.json")
+
+
 _DEV_SERVER_README = """
 ## Hot reload in Docker Compose
 
@@ -444,11 +448,9 @@ def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
             "service": "frontend" if config.is_primary_frontend(fc) else fc.dns_name,
             "name": fc.name,
             "port": fc.server_port,
-            "lockfile": _LOCKFILES.get(fc.package_manager, "package-lock.json"),
+            "lockfile": _lockfile(fc),
             # Every name the package manager has used for its lockfile stays out of the sync.
-            "ignore_lockfiles": _LOCKFILE_ALIASES.get(
-                fc.package_manager, (_LOCKFILES.get(fc.package_manager, "package-lock.json"),)
-            ),
+            "ignore_lockfiles": _LOCKFILE_ALIASES.get(fc.package_manager, (_lockfile(fc),)),
         }
         for fc in config.active_frontends
         if fc.dev_server
@@ -456,7 +458,7 @@ def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
     if not apps:
         raise ValueError("render_dev_overlay called without a frontend that has dev_server")
     template = _jinja_env().get_template("deploy/docker-compose.dev.yaml.j2")
-    output = template.render({"apps": apps})
+    output = template.render({"apps": apps, "image_prefix": config.project_slug.lower()})
     overlay_path = project_root / DEV_OVERLAY
     overlay_path.write_text(output, encoding="utf-8")
     return overlay_path

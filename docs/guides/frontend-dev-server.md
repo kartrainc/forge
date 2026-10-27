@@ -17,14 +17,15 @@ In the stack file:
 frontend: { framework: vue, dev_server: true }
 ```
 
-or `forge --dev-server ...`. Vue only; forge refuses it for Svelte and Flutter.
-The option is off by default, and an existing project turns it on with the same
-`forge --update` as any other option (see
-[UPGRADING](../../UPGRADING.md#frontend-dev-server-unreleased)).
+or `forge --dev-server ...` when generating a project. Vue only; forge refuses it
+for Svelte and Flutter. The option is off by default. An existing project sets
+`"dev_server": true` in `config.frontend` of `.forge/quality.json`, the one place an
+update reads, and runs `forge --update`; `forge --update --dev-server` has no effect
+(see [UPGRADING](../../UPGRADING.md#frontend-dev-server-unreleased)).
 
 With several frontends (ADR-012) set it on each app that wants it; the overlay then has a service per app, on that app's port and host.
 
-It adds three things:
+It adds these:
 
 - a `dev` stage in `apps/<frontend>/Dockerfile`, which runs as the unprivileged
   `node` user;
@@ -35,7 +36,16 @@ It adds three things:
   The wrapper prevents your own `allowedHosts` from widening the list; Vite's
   built-in allowances (`localhost`, `*.localhost`, IP addresses) and any host in the
   `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable still apply. The
-  router sends only `app.localhost` here and the port is not published.
+  router sends only `app.localhost` here and the port is not published;
+- an `environment` entry on the overlay service that empties `VITE_API_BASE_URL`: the
+  generated `.env.development` points the browser at the dev server's own port, which
+  nothing publishes here, so the page calls the API on its own origin, through the
+  router, as in the built stack;
+- its own image name for the dev image (`<project>-frontend-dev`), so a later `up`
+  without `--build` cannot start the dev image in the nginx service or the reverse.
+
+The container runs the `vite` binary with the wrapper, not your `dev` script, so a
+flag in that script (`--port`, `--host`) does not apply here.
 
 ## Run it
 
@@ -52,7 +62,10 @@ What `--watch` does:
 - the project directory is copied into the container as it changes, new and
   deleted files included, except `node_modules`, `dist`, `coverage`,
   `package.json`, the lockfile and the declaration files Vite generates
-  (`src/auto-imports.d.ts`, `src/components.d.ts`);
+  (`src/auto-imports.d.ts`, `src/components.d.ts`). The `.dockerignore` applies to
+  the sync as it does to the image build: `.env.local`, `.env.*.local` (so
+  `.env.development.local`, the usual local Vite override), `build/`, `test-results/`
+  and `playwright-report/` never reach the container;
 - a change to `package.json` or the lockfile rebuilds the image;
 - Vite restarts itself when `vite.config.ts`, what it imports, or an `.env` file
   changes.
@@ -83,19 +96,18 @@ come from a host install or build, not from the running container.
 
 ## What has been run
 
-The end-to-end test (`tests/e2e/test_dev_server_hmr.py`) runs npm with the shadcn kit
-and sign-in off: it hot-reloads a component through Traefik, refuses an external
+The end-to-end test (`tests/e2e/test_dev_server_hmr.py`) runs npm, pnpm and yarn with the
+shadcn kit, and npm with Nuxt UI, all with sign-in off: it hot-reloads a component through Traefik, refuses an external
 Host header, checks that Vite's cache is writable, and that a `package.json` change
 replaces the container. It ran on Linux (WSL2 with Docker Desktop), and a project on
 a Windows drive was driven by hand with the Windows `docker.exe` (edits, CRLF files,
 new and deleted files, a `package.json` rebuild). macOS and a native Windows install
 of forge itself are unverified.
 
-The same test runs with pnpm and yarn. pnpm needed one fix, which the production build
-shares: the image installed `pnpm@latest`, and the newest major refused a lockfile the
+pnpm needed one fix, which the production build shares: the image installed `pnpm@latest`, and the newest major refused a lockfile the
 host's pnpm had just written (its `minimumReleaseAge` policy), so the Dockerfile now
 installs pnpm 10. Yarn needs a host Node that satisfies the project's engines.
-Nuxt UI and sign-in on have not been run at run time.
+Sign-in on has not been run at run time.
 
 ## Hosts other overlays add
 

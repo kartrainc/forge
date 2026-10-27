@@ -176,7 +176,8 @@ def parse_compose_version(output: str) -> tuple[int, ...] | None:
 def check_compose_for_dev_server(project_path: Path) -> CheckResult | None:
     """For a project that enables ``frontend.dev_server``, require a Compose that can watch.
 
-    Returns ``None`` when the project does not use the overlay.
+    Returns ``None`` when the project does not use the overlay, and when there is no docker
+    CLI (``check_docker_reachable`` reports that).
     """
     manifest = project_path / "forge.toml"
     if not manifest.is_file():
@@ -193,12 +194,7 @@ def check_compose_for_dev_server(project_path: Path) -> CheckResult | None:
     fix = f"Update Docker Desktop or the compose plugin to {need} or newer."
     exe = shutil.which("docker")
     if not exe:
-        return CheckResult(
-            name="docker:compose-dev-server",
-            status="fail",
-            detail="docker CLI not on PATH; docker-compose.dev.yaml needs Compose " + need,
-            fix=fix,
-        )
+        return None  # check_docker_reachable already reports the missing CLI
     try:
         proc = subprocess.run(
             [exe, "compose", "version", "--short"],
