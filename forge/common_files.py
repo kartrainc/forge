@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from forge.config import BackendConfig, ProjectConfig
     from forge.sync.provenance import ProvenanceCollector
 
@@ -38,6 +40,9 @@ def apply_common_files(
         COMMON_DIR / "pre-commit-config.yaml",
         project_root / ".pre-commit-config.yaml",
         collector,
+        transform=_allow_compose_tags
+        if any(fc.dev_server for fc in config.active_frontends)
+        else None,
     )
     # CI workflows: emit one per distinct backend language. The first
     # language keeps the canonical ``ci.yml`` name (back-compat + golden
@@ -184,13 +189,35 @@ def _ci_source_for(bc: BackendConfig) -> Path | None:
     return mapping.get(bc.language)
 
 
-def _copy_if_absent(src: Path, dst: Path, collector: ProvenanceCollector | None) -> None:
+def _allow_compose_tags(text: str) -> str:
+    """Let ``check-yaml`` read the dev overlay's ``!reset`` and ``!override`` tags.
+
+    The hook refuses a tag it has no constructor for unless it runs with ``--unsafe``, which
+    only parses the file (it still reports a syntax error) and builds nothing from it.
+    """
+    return text.replace(
+        "      - id: check-yaml\n",
+        "      - id: check-yaml\n        args: [--unsafe]  # docker-compose.dev.yaml uses !reset/!override\n",
+        1,
+    )
+
+
+def _copy_if_absent(
+    src: Path,
+    dst: Path,
+    collector: ProvenanceCollector | None,
+    *,
+    transform: Callable[[str], str] | None = None,
+) -> None:
     if dst.exists():
         return
     if not src.is_file():
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
+    if transform is None:
+        shutil.copy2(src, dst)
+    else:
+        dst.write_text(transform(src.read_text(encoding="utf-8")), encoding="utf-8")
     if collector is not None:
         # template_name points at the shared "_common" tree under
         # forge/templates/_common/, which isn't a Copier template (no

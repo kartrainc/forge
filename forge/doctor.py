@@ -8,6 +8,7 @@ failed. ``--json`` output is usable by CI.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -159,6 +160,86 @@ def check_docker_reachable() -> CheckResult:
         name="docker:daemon",
         status="ok",
         detail="docker info succeeded",
+    )
+
+
+# ``develop.watch.initial_sync`` is first listed in the Docker Compose 2.39.4 release notes (ADR-013).
+MIN_COMPOSE_FOR_DEV_SERVER = (2, 39, 4)
+
+
+def parse_compose_version(output: str) -> tuple[int, ...] | None:
+    """The numbers of ``docker compose version --short`` (``v2.40.3``, ``5.3.0``)."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", output)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _load_manifest(project_path: Path) -> tuple[Any, Exception | None]:
+    """``(data, error)`` for ``project_path/forge.toml``; ``(None, None)`` when there is none."""
+    manifest = project_path / "forge.toml"
+    if not manifest.is_file():
+        return None, None
+    try:
+        from forge.sync.manifest import read_forge_toml  # noqa: PLC0415
+
+        return read_forge_toml(manifest), None
+    except Exception as e:  # noqa: BLE001
+        return None, e
+
+
+def check_compose_for_dev_server(
+    project_path: Path, loaded: tuple[Any, Exception | None] | None = None
+) -> CheckResult | None:
+    """For a project that enables ``frontend.dev_server``, require a Compose that can watch.
+
+    Returns ``None`` when the project does not use the overlay, and when there is no docker
+    CLI (``check_docker_reachable`` reports that).
+    """
+    data, error = loaded if loaded is not None else _load_manifest(project_path)
+    if data is None or error is not None:
+        return None  # no manifest, or check_forge_toml reports the unreadable one
+    if not any(fe.dev_server for fe in data.frontends):
+        return None
+    need = ".".join(str(n) for n in MIN_COMPOSE_FOR_DEV_SERVER)
+    fix = f"Update Docker Desktop or the compose plugin to {need} or newer."
+    exe = shutil.which("docker")
+    if not exe:
+        return None  # check_docker_reachable already reports the missing CLI
+    try:
+        proc = subprocess.run(
+            [exe, "compose", "version", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail=f"`docker compose version` raised: {e}",
+            fix=fix,
+        )
+    have = parse_compose_version(proc.stdout) if proc.returncode == 0 else None
+    if have is None:
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail="could not read the Docker Compose version",
+            fix=fix,
+        )
+    if have < MIN_COMPOSE_FOR_DEV_SERVER:
+        return CheckResult(
+            name="docker:compose-dev-server",
+            status="fail",
+            detail=(
+                f"Docker Compose {'.'.join(map(str, have))}; docker-compose.dev.yaml needs {need}"
+            ),
+            fix=fix,
+        )
+    return CheckResult(
+        name="docker:compose-dev-server",
+        status="ok",
+        detail=f"Docker Compose {'.'.join(map(str, have))} can watch (needs {need}+)",
     )
 
 
@@ -356,24 +437,23 @@ def check_ts_morph_toolchain() -> CheckResult:
     )
 
 
-def check_forge_toml(project_path: Path) -> CheckResult:
+def check_forge_toml(
+    project_path: Path, loaded: tuple[Any, Exception | None] | None = None
+) -> CheckResult:
     """If ``project_path/forge.toml`` exists, parse it and verify integrity."""
     manifest = project_path / "forge.toml"
-    if not manifest.is_file():
+    data, error = loaded if loaded is not None else _load_manifest(project_path)
+    if data is None and error is None:
         return CheckResult(
             name="forge.toml:presence",
             status="ok",
             detail=f"no forge.toml at {project_path} (not a forge-generated project)",
         )
-    try:
-        from forge.sync.manifest import read_forge_toml  # noqa: PLC0415
-
-        data = read_forge_toml(manifest)
-    except Exception as e:  # noqa: BLE001
+    if error is not None:
         return CheckResult(
             name="forge.toml:integrity",
             status="fail",
-            detail=f"cannot parse {manifest}: {e}",
+            detail=f"cannot parse {manifest}: {error}",
             fix="Inspect forge.toml for syntax errors or restore from git.",
         )
     parts = [f"version={data.version}", f"project={data.project_name}"]
@@ -415,7 +495,11 @@ def run(project_path: Path | None = None) -> DoctorReport:
     for port in (5000, 5173, 18080):
         report.results.append(check_port_free(port))
 
-    report.results.append(check_forge_toml(project_path))
+    loaded = _load_manifest(project_path)
+    report.results.append(check_forge_toml(project_path, loaded))
+    dev_server = check_compose_for_dev_server(project_path, loaded)
+    if dev_server is not None:
+        report.results.append(dev_server)
     return report
 
 

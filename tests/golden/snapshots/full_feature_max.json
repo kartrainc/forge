@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 2317,
-      "sha256": "06ad49a4a3216c31"
+      "size": 2359,
+      "sha256": "a0ac33a8e8a11c7f"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -125,8 +125,8 @@
       "sha256": "0f61424bd6ad73f8"
     },
     "apps/frontend/scripts/post_generate.py": {
-      "size": 19111,
-      "sha256": "717c3f6f81bd661d"
+      "size": 20331,
+      "sha256": "de82565770eb4e5e"
     },
     "apps/frontend/scripts/remap-browser.mjs": {
       "size": 778,

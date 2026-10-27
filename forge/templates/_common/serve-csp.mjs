@@ -18,7 +18,9 @@
 // The policy's own report directives are replaced by one naming /__csp-report:
 // a browser that knows report-to ignores report-uri beside it. Each violation
 // the browser reports is appended to the file FORGE_CSP_REPORT names, one JSON
-// object per line, or printed when it is unset.
+// object per line, or printed when it is unset. A body that is no report is
+// answered 400 and recorded as {"unreadable-report": <its first 1000
+// characters>}, which the check counts as a violation; the server keeps serving.
 //
 // With FORGE_CSP_REPORT set (forge.quality.csp sets it), the script first
 // proves that reports reach that file: it opens /__csp-canary once in the
@@ -85,7 +87,7 @@ const types = {
 let canaryReported = false;
 
 function asset(pathname) {
-  const candidate = path.join(root, decodeURIComponent(pathname));
+  const candidate = path.join(root, pathname);
   if (!candidate.startsWith(root + path.sep)) return null;
   try {
     return statSync(candidate).isFile() ? candidate : null;
@@ -94,17 +96,46 @@ function asset(pathname) {
   }
 }
 
+function record(report) {
+  if (reports) appendFileSync(reports, JSON.stringify(report) + '\n');
+  else process.stderr.write(`Content-Security-Policy violation: ${JSON.stringify(report)}\n`);
+}
+
+// The report's object, or null for a body that is no report: not JSON, or JSON
+// that is no object.
+function readReport(body) {
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const report = parsed?.['csp-report'] ?? parsed;
+  return report !== null && typeof report === 'object' && !Array.isArray(report) ? report : null;
+}
+
 const server = createServer((request, response) => {
-  const { pathname } = new URL(request.url, 'http://localhost');
+  // A malformed escape is a bad request, as nginx answers it, not the end of the run.
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+  } catch {
+    response.writeHead(400).end();
+    return;
+  }
   if (pathname === '/__csp-report') {
     let body = '';
     request.on('data', chunk => (body += chunk));
     request.on('end', () => {
-      const parsed = JSON.parse(body);
-      const report = parsed['csp-report'] ?? parsed;
+      const report = readReport(body);
+      if (!report) {
+        // Neither dropped nor fatal: the check counts it as a violation.
+        record({ 'unreadable-report': body.slice(0, 1000) });
+        response.writeHead(400).end();
+        return;
+      }
       if (String(report['blocked-uri'] ?? '').endsWith(CANARY_SCRIPT)) canaryReported = true;
-      if (reports) appendFileSync(reports, JSON.stringify(report) + '\n');
-      else process.stderr.write(`Content-Security-Policy violation: ${JSON.stringify(report)}\n`);
+      record(report);
       response.writeHead(204).end();
     });
     return;

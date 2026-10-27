@@ -1,0 +1,44 @@
+// The Vite config docker-compose.dev.yaml runs the dev server with (ADR-013).
+// It resolves the project's own vite.config.ts, whatever it exports, and sets
+// only what a dev server behind Traefik needs; change vite.config.ts, not this.
+import type { ConfigEnv, UserConfig, UserConfigExport } from 'vite'
+import base from './vite.config.ts'
+
+// An object, a promise or a function of ConfigEnv: all three are valid exports.
+const resolve = async (exported: UserConfigExport, env: ConfigEnv): Promise<UserConfig> =>
+  typeof exported === 'function' ? exported(env) : exported
+
+// Hosts another Compose overlay routes to this service (it adds them to the router's
+// rule), as a comma-separated list in FORGE_DEV_ALLOWED_HOSTS on the frontend service.
+// A name only: no scheme, port, path or wildcard, so a typo fails here, not silently.
+const extraHosts = (process.env.FORGE_DEV_ALLOWED_HOSTS ?? '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean)
+for (const host of extraHosts) {
+  if (!/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)) {
+    throw new Error(`FORGE_DEV_ALLOWED_HOSTS: "${host}" is not a host name`)
+  }
+}
+
+export default async (env: ConfigEnv): Promise<UserConfig> => {
+  const resolved = await resolve(base, env)
+  return {
+    ...resolved,
+    server: {
+      ...resolved.server,
+      // Reachable from the Traefik container, not only from loopback.
+      host: '0.0.0.0',
+      // The port the router and the health check target, whatever the project's own
+      // config says; and fail rather than move off it.
+      port: {{ server_port }},
+      strictPort: true,
+      // The host Traefik routes to this app, plus any named above; other
+      // external names are refused (Vite also always admits localhost, *.localhost
+      // and IP addresses). Set after the project's config, not merged into it: a
+      // merge concatenates host lists and keeps `true`, so the project could widen
+      // the list.
+      allowedHosts: ['{{ dev_server_host }}', ...extraHosts],
+    },
+  }
+}
