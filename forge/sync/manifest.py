@@ -166,6 +166,9 @@ class ForgeFrontendData:
     # reason as ``layout``. Empty ⇒ a manifest from before the option, or a
     # framework without kits: the default kit at the consume site.
     ui_kit: str = ""
+    # Vite dev-server overlay (``--dev-server`` / FrontendConfig.dev_server), written
+    # only when on so a project without it keeps the manifest it had.
+    dev_server: bool = False
 
 
 @dataclass
@@ -355,6 +358,7 @@ def read_forge_toml(path: Path) -> ForgeTomlData:
             app_dir=str(_unwrap(frontend_tbl.get("app_dir", ""))),
             layout=str(_unwrap(frontend_tbl.get("layout", ""))),
             ui_kit=str(_unwrap(frontend_tbl.get("ui_kit", ""))),
+            dev_server=_dev_server_flag(path, frontend_tbl.get("dev_server", False)),
         )
     else:
         frontend = _infer_frontend_from_v3(path.parent, templates)
@@ -394,6 +398,7 @@ def _read_frontends(path: Path, forge: dict[str, Any]) -> tuple[ForgeFrontendDat
             app_dir=str(_unwrap(entry.get("app_dir", ""))),
             layout=str(_unwrap(entry.get("layout", ""))),
             ui_kit=str(_unwrap(entry.get("ui_kit", ""))),
+            dev_server=_dev_server_flag(path, entry.get("dev_server", False)),
         )
         if not record.framework or not record.app_dir:
             raise ValueError(
@@ -755,6 +760,14 @@ def write_forge_toml(
     path.write_text(tomlkit.dumps(doc), encoding="utf-8", newline="\n")
 
 
+def _dev_server_flag(path: Path, raw: Any) -> bool:
+    """A hand-edited ``dev_server`` must be a TOML boolean: ``"false"`` is not ``false``."""
+    value = _unwrap(raw)
+    if not isinstance(value, bool):
+        raise ValueError(f"{path}: dev_server must be true or false, got {value!r}")
+    return value
+
+
 def _frontend_table(frontend: ForgeFrontendData) -> Any:
     """One frontend as ``[forge.frontend]`` and ``[[forge.frontends]]`` write it."""
     table = tomlkit.table()
@@ -765,4 +778,6 @@ def _frontend_table(frontend: ForgeFrontendData) -> Any:
         table.add("layout", frontend.layout)
     if frontend.ui_kit:
         table.add("ui_kit", frontend.ui_kit)
+    if frontend.dev_server:
+        table.add("dev_server", True)
     return table

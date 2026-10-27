@@ -42,7 +42,10 @@ from forge.config import (
     validate_slug,
 )
 from forge.docker_manager import (
+    DEV_STACK_COMMAND,
+    append_dev_server_readme,
     render_compose,
+    render_dev_overlay,
     render_frontend_dockerfile,
     render_frontend_dockerignore,
     render_init_db,
@@ -794,6 +797,11 @@ def _generate_frontend_extras(
             render_frontend_dockerfile(config, frontend_dir, fc)
             render_frontend_dockerignore(config, frontend_dir, fc)
             render_nginx_conf(config, frontend_dir, fc)
+            if fc.dev_server:
+                append_dev_server_readme(config, frontend_dir, fc)
+    if any(fc.dev_server for fc in config.active_frontends):
+        _log("  Rendering docker-compose.dev.yaml ...")
+        render_dev_overlay(config, project_root)
 
 
 def _vue_ui_kit(config: ProjectConfig) -> str | None:
@@ -1279,6 +1287,7 @@ def _frontend_manifest_data(config: ProjectConfig):
             layout=fc.layout,
             # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
             ui_kit=fc.ui_kit if applies_to(fc.framework) else "",
+            dev_server=fc.dev_server,
         )
         for fc in config.active_frontends
     )
@@ -1838,13 +1847,25 @@ def _populate_report(
     if config.backends or (
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
     ):
-        report.add_next_action(
-            NextAction(
-                command="docker compose up",
-                description="Start the generated stack (Postgres, services, frontend).",
-                cwd=".",
+        if any(fc.dev_server for fc in config.active_frontends):
+            report.add_next_action(
+                NextAction(
+                    command=DEV_STACK_COMMAND,
+                    description=(
+                        "Start the generated stack with the frontend as a Vite dev server "
+                        "(hot reload; needs Docker Compose 2.39.4+)."
+                    ),
+                    cwd=".",
+                )
             )
-        )
+        else:
+            report.add_next_action(
+                NextAction(
+                    command="docker compose up",
+                    description="Start the generated stack (Postgres, services, frontend).",
+                    cwd=".",
+                )
+            )
     report.add_next_action(
         NextAction(
             command="forge --update",

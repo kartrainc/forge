@@ -328,6 +328,52 @@ up` created only `POSTGRES_DB`.
   delete the Postgres volume once after updating, for example with
   `docker compose down -v`, which also deletes the other volumes.
 
+### Frontend dev server (unreleased)
+
+`frontend.dev_server` (Vue only, off by default) runs the Compose frontend as a
+Vite dev server with hot reload; see the
+[guide](docs/guides/frontend-dev-server.md). With the option off, an existing
+project changes only by recording `"dev_server": false` in `.forge/quality.json`
+(and, for pnpm, the Dockerfile change below); the Compose file and `forge.toml`
+stay as they were.
+
+An update reads the recipe, `.forge/quality.json`, and nothing else: `forge --update
+--dev-server` has no effect. Set `"dev_server": true` in the recipe's `config.frontend`
+(the primary app; `config.frontends[0]` is a mirror that forge rewrites) and run
+`forge --update`. It:
+
+- adds `docker-compose.dev.yaml` and `apps/<frontend>/vite.dev.config.ts`, and
+  a `dev` stage in `apps/<frontend>/Dockerfile` (`deps`, `source`, `dev`, then
+  `builder` and the nginx stage from `source`);
+- stops with `New generator output collides with user file` if your project
+  already has a `docker-compose.dev.yaml` or `vite.dev.config.ts`: move yours
+  aside, update, then fold your changes in;
+- proposes the Dockerfile change as `apps/<frontend>/Dockerfile.forge-merge` if
+  you edited the Dockerfile. Put any `COPY --from=<named context>` lines of your
+  own in the `source` stage, so the dev image holds them too, and resolve with
+  `forge --quality resolve`;
+- adds a section to `apps/<frontend>/README.md`, includes the wrapper in
+  `apps/<frontend>/tsconfig.node.json`, and lets the pre-commit `check-yaml` hook read
+  the overlay's `!reset` and `!override` tags (`args: [--unsafe]` in
+  `.pre-commit-config.yaml`). A file of these you edited gets a `.forge-merge` sidecar.
+  While any sidecar is pending the update writes only sidecars: nothing else lands, no
+  overlay, wrapper or `dev` stage, until you resolve them and run the update again.
+
+Turning it off removes the two new files when you have not changed them. A file you
+changed stays on disk, is printed by the update as `left in place` (and listed as
+`left_in_place` in the JSON report), and stays recorded as forge's, so turning the option
+on again does not collide with it. Delete such an overlay yourself: the Dockerfile no
+longer has the `dev` stage it builds, so `up` with it fails with
+`target stage "dev" could not be found`.
+
+A pnpm project's Dockerfile now installs pnpm 10 instead of `latest`, with or without this option: the newest major refused a lockfile the host's pnpm had just written, so the frozen install failed. An unedited Dockerfile updates on its own; an edited one gets a `.forge-merge` sidecar.
+
+A newly generated pnpm project also records the host's pnpm in `package.json` (`"packageManager": "pnpm@<version>"`), and corepack installs exactly that version in the image, so the image and the lockfile agree whichever major the host has. The Dockerfile's `pnpm@10` is only the default for a project without the field. An existing project is not changed: add the field yourself (`corepack use pnpm@<your version>`) to take the same protection.
+
+Needs Docker Compose 2.39.4 or newer; `forge doctor` checks it. `forge` no longer
+runs `docker compose up` for a project with the option on, because that would
+start nginx: it prints the command that starts the dev stack.
+
 ### Frontend image build context (unreleased)
 
 The frontend image is built from the whole `apps/<frontend>` directory, and
