@@ -350,7 +350,8 @@ Turning it on with `forge --update`:
   `forge --quality resolve`.
 
 Turning it off removes the two new files when you have not changed them. A file you
-changed stays on disk and is listed as `left_in_place` in the update report.
+changed stays on disk, is listed as `left_in_place` in the update report, and stays
+recorded as forge's, so turning the option on again does not collide with it.
 
 A pnpm project's Dockerfile now installs pnpm 10 instead of `latest`, with or without this option: the newest major refused a lockfile the host's pnpm had just written, so the frozen install failed. An unedited Dockerfile updates on its own; an edited one gets a `.forge-merge` sidecar.
 

@@ -146,6 +146,7 @@ container: set `server.watch.usePolling` in your `vite.config.ts`. A change to
 
 Set `dev_server: false` and run `forge --update`. Forge removes
 `docker-compose.dev.yaml` and `vite.dev.config.ts` if you have not changed them
-(a changed file stays, and the update lists it under `left_in_place`), and the
+(a changed file stays, the update lists it under `left_in_place`, and it stays
+recorded, so turning the option on again does not collide with it), and the
 Dockerfile loses its `dev` stage, as a `.forge-merge` sidecar if you edited the
 Dockerfile.
