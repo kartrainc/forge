@@ -1,6 +1,6 @@
 # Forge: a dev-server overlay for the Compose frontend
 
-Base: c2e41854 (`kartrainc/forge` main, PR #4).
+Base: 53fd321a (`kartrainc/forge` main, PR #8).
 
 Date: 2026-10-26. Status: implemented on `feat/frontend-dev-server` (Vue); in review. Decision record:
 [ADR-013](../docs/architecture-decisions/ADR-013-a-dev-server-overlay-for-the-compose-frontend.md).
