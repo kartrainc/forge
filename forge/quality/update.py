@@ -9,7 +9,7 @@ from pathlib import Path
 import tomlkit
 
 from forge.config import BackendLanguage
-from forge.docker_manager import dev_server_files
+from forge.docker_manager import is_dev_server_file
 from forge.errors import ForgeError
 from forge.quality.model import RECIPE, digest, ownership, project_path, read_recipe
 from forge.sync.manifest import read_forge_toml
@@ -115,13 +115,15 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             if record.get("ownership") == "generated" and rel not in new.provenance:
                 writes[rel] = None
         left_in_place: list[str] = []
-        for rel in dev_server_files(fe.app_dir for fe in old.frontends if fe.dev_server):
-            record = old.provenance.get(rel)
-            if record is None or rel in new.provenance:
+        for rel, record in old.provenance.items():
+            if not is_dev_server_file(rel) or rel in new.provenance:
                 continue
-            # frontend.dev_server went off: the overlay and the wrapper are forge's, and
-            # an overlay left behind would name a Dockerfile target that is gone. Take back
-            # what is unchanged; a file the project edited stays, and the report says so.
+            # Forge no longer writes this overlay or wrapper (the option is off, for this app
+            # or for all). One left behind would name a Dockerfile target that is gone, so
+            # take back what is unchanged; a file the project edited stays and is reported.
+            # This runs on every update, not only the one that turned the option off: a kept
+            # file is recorded again each time, so turning the option on later never meets
+            # it as an unknown file.
             path = project_path(root, rel)
             if path.is_file() and digest(path) == record["sha256"]:
                 writes[rel] = None

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -419,14 +418,16 @@ def append_dev_server_readme(
     return readme
 
 
-def dev_server_files(app_dirs: Iterable[str]) -> tuple[str, ...]:
-    """The files ``frontend.dev_server`` makes forge write for these app directories.
+def is_dev_server_file(relative: str) -> bool:
+    """Whether a project path is one ``frontend.dev_server`` makes forge write.
 
-    The overlay is one file for every frontend that has the option; the wrapper is one
-    per app. Relative to the project root.
+    The overlay is one file at the project root; each app has a wrapper next to its
+    ``vite.config.ts``. Judged by name, not by which apps currently have the option, so a
+    file an earlier update left behind is still recognised once the option is off.
     """
-    wrappers = tuple(f"{app_dir.strip('/')}/vite.dev.config.ts" for app_dir in app_dirs)
-    return (DEV_OVERLAY, *wrappers) if wrappers else ()
+    return relative == DEV_OVERLAY or (
+        relative.startswith("apps/") and relative.endswith("/vite.dev.config.ts")
+    )
 
 
 def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:

@@ -200,3 +200,31 @@ def test_an_edited_file_left_in_place_survives_the_option_returning(
     assert again["passed"] and again["conflicts"] == []
     assert overlay.read_text(encoding="utf-8") == mine
     assert OVERLAY in _recorded(project)
+
+
+def test_a_kept_file_stays_recorded_through_updates_while_the_option_is_off(project: Path) -> None:
+    """Edit -> disable -> an unrelated update with the option still off -> enable."""
+    _switch(project, True)
+    overlay = project / OVERLAY
+    mine = overlay.read_text(encoding="utf-8") + "# mine\n"
+    overlay.write_text(mine, encoding="utf-8")
+    assert _switch(project, False)["left_in_place"] == [OVERLAY]
+    for _ in range(2):
+        report = _switch(project, False)
+        assert report["passed"] and report["left_in_place"] == [OVERLAY]
+        assert OVERLAY in _recorded(project)
+    again = _switch(project, True)
+    assert again["passed"] and again["conflicts"] == []
+    assert overlay.read_text(encoding="utf-8") == mine
+
+
+def test_a_kept_file_that_is_changed_back_is_taken_back_on_the_next_update(project: Path) -> None:
+    _switch(project, True)
+    overlay = project / OVERLAY
+    original = overlay.read_text(encoding="utf-8")
+    overlay.write_text(original + "# mine\n", encoding="utf-8")
+    assert _switch(project, False)["left_in_place"] == [OVERLAY]
+    overlay.write_text(original, encoding="utf-8")
+    report = _switch(project, False)
+    assert report["left_in_place"] == []
+    assert not overlay.exists() and OVERLAY not in _recorded(project)
