@@ -24,6 +24,7 @@ from forge.config import (
     ProjectConfig,
 )
 from forge.generator import generate
+from forge.quality.model import digest
 from forge.quality.update import update_owned_project
 from forge.sync.manifest import read_forge_toml
 
@@ -228,3 +229,23 @@ def test_a_kept_file_that_is_changed_back_is_taken_back_on_the_next_update(proje
     report = _switch(project, False)
     assert report["left_in_place"] == []
     assert not overlay.exists() and OVERLAY not in _recorded(project)
+
+
+def test_a_project_owned_file_with_a_dev_server_name_is_never_taken_back(project: Path) -> None:
+    """A hand-written overlay recorded as the project's own survives updates with the option off."""
+    import tomlkit
+
+    overlay = project / OVERLAY
+    overlay.write_text("services: {}\n", encoding="utf-8")
+    manifest_path = project / "forge.toml"
+    manifest = tomlkit.parse(manifest_path.read_text(encoding="utf-8"))
+    manifest["forge"]["provenance"][OVERLAY] = {
+        "origin": "user",
+        "sha256": digest(overlay),
+    }
+    manifest_path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
+    for _ in range(2):
+        report = _switch(project, False)
+        assert report["passed"] and OVERLAY not in report["left_in_place"]
+        assert overlay.read_text(encoding="utf-8") == "services: {}\n"
+        assert read_forge_toml(manifest_path).provenance[OVERLAY]["origin"] == "user"
