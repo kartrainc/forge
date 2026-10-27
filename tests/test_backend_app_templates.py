@@ -476,6 +476,14 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert (svc / "tests" / "e2e" / "entrypoint.test.ts").is_file()
     assert '"/api/v1/"' in (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
 
+    # forge --update rebuilds each backend as the template that rendered it.
+    from forge.sync.forge_to_project.updater import _infer_backends
+
+    assert {b.name: b.app_template for b in _infer_backends(root)} == {
+        "capture": "http-service",
+        "store": "crud-service",
+    }
+
 
 def test_a_backend_without_a_database_defaults_to_no_features():
     http = BackendConfig(name="capture", language=BackendLanguage.NODE, app_template="http-service")

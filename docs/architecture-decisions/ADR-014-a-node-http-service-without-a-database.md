@@ -8,8 +8,9 @@
   (`forge/templates/services/node/http-service/template.toml`), the Node
   template's `use_database` switch (`copier.yml`, `forge/variable_mapper.py`),
   `BackendConfig.features` defaults and validation (`forge/config/_backend.py`,
-  `forge/cli/builder.py`), the database-owning backends in the topology,
-  Compose, `init-db.sh` and Helm (`forge/config/_topology.py`,
+  `forge/cli/builder.py`), the app template's recovery on update
+  (`forge/sync/forge_to_project/updater`), the database-owning backends in
+  the topology, Compose, `init-db.sh` and Helm (`forge/config/_topology.py`,
   `forge/docker_manager.py`), shared enums and entities
   (`forge/codegen/pipeline.py`), the fragments that skip it, and the
   generated-quality lanes
@@ -68,6 +69,12 @@ service beside database-backed ones cannot use it.
 7. **It is tested as a generated project.** The generated-quality workflow
    gains a Node `http-service` lane, and `scripts/check_generated_quality.py`
    takes `--app-template`.
+8. **`forge --update` keeps it.** The updater reads each backend's app
+   template back from its `.copier-answers.yml`: the template recorded as
+   `_src_path`, and `use_database: false` for a template without a database,
+   as it already reads the port. A service that matches no single template
+   stays a `crud-service`. The same recovery keeps a Python `worker` and
+   `tenant-management-service` what they are.
 
 ## Alternatives considered
 
@@ -86,6 +93,9 @@ service beside database-backed ones cannot use it.
 - **Keep the `items` default and ignore it.** Rejected: the frontend's
   generated pages and the end-to-end suite would target routes that do not
   exist.
+- **Record the app template in `forge.toml`.** Rejected: it changes the
+  manifest's format for a value each service's answers file already carries,
+  and projects generated before the change would still need the recovery.
 
 ## Consequences
 

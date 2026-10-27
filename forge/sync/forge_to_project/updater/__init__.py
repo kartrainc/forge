@@ -45,6 +45,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from forge.backend_app_templates import BACKEND_APPLICATION_TEMPLATES, DEFAULT_BACKEND_TEMPLATE
 from forge.capability_resolver import ResolvedPlan, resolve
 from forge.config import (
     BACKEND_REGISTRY,
@@ -949,6 +950,7 @@ def _infer_backends(
                     name=backend_dir.name,
                     project_name=project_root.name,
                     language=lang,
+                    app_template=_recovered_app_template(backend_dir, lang),
                 )
                 if recovered_port is not None:
                     bc.server_port = recovered_port
@@ -960,10 +962,12 @@ def _infer_backends(
         # Plugin-backend fallback: match the service's ``.copier-answers.yml``
         # ``_src_path`` against a registered backend's ``template_dir``.
         if plugin_lang is not None:
+            language = cast("BackendLanguage", plugin_lang)
             bc = BackendConfig(
                 name=backend_dir.name,
                 project_name=project_root.name,
-                language=cast("BackendLanguage", plugin_lang),
+                language=language,
+                app_template=_recovered_app_template(backend_dir, language),
             )
             if recovered_port is not None:
                 bc.server_port = recovered_port
@@ -1030,6 +1034,38 @@ def _recovered_server_port(backend_dir: Path) -> int | None:
     if isinstance(port, str) and port.isdigit():
         return int(port)
     return None
+
+
+def _recovered_app_template(backend_dir: Path, language: BackendLanguage) -> str:
+    """Recover a backend's ``app_template`` from its ``.copier-answers.yml``.
+
+    The answers record the template that rendered the service (``_src_path``)
+    and, for a template without a database, ``use_database: false``. Rebuilt as
+    the default ``crud-service``, an ``http-service`` would get the database
+    fragments and the ``items`` feature back on ``forge --update``, and a
+    ``worker`` the HTTP middleware. A service that matches no single
+    registered template keeps the default.
+    """
+    data = _copier_answers(backend_dir) or {}
+    src = data.get("_src_path")
+    if not isinstance(src, str) or not src:
+        return DEFAULT_BACKEND_TEMPLATE
+
+    uses_database = data.get("use_database") is not False
+    matches = [
+        template.variant
+        for (lang, _), template in BACKEND_APPLICATION_TEMPLATES.items()
+        if lang == language
+        and template.uses_database == uses_database
+        and _names_template_dir(src, template.template_dir)
+    ]
+    return matches[0] if len(matches) == 1 else DEFAULT_BACKEND_TEMPLATE
+
+
+def _names_template_dir(src: str, template_dir: str) -> bool:
+    """Whether a recorded ``_src_path`` is ``template_dir`` (relative to the templates root, or absolute)."""
+    parts = Path(template_dir).parts
+    return Path(src).parts[-len(parts) :] == parts
 
 
 def _resolve_language_from_src_path(src: str | None):

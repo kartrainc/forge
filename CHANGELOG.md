@@ -272,6 +272,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   integration suite (`tests/integration/setup-env.ts`), so a service with
   platform auth no longer fails at `buildApp()` outside the stack. Values the
   environment sets still win.
+- `forge --update` rebuilds each backend with the app template that rendered
+  it, read back from its `.copier-answers.yml`. It rebuilt every backend as
+  `crud-service`, so fragments that skip a `worker` or an `http-service` were
+  planned for it.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth
