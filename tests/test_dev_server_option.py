@@ -194,3 +194,27 @@ class TestWizard:
         config, asked = self._run(monkeypatch, selects, [False, True, False, True])
         assert self._QUESTION not in asked
         assert config.frontend is not None and config.frontend.dev_server is False
+
+
+class TestManifestTypes:
+    """A hand-edited forge.toml is read strictly: `"false"` must not become true."""
+
+    @pytest.mark.parametrize("raw", ['"false"', "1", '"yes"'])
+    def test_a_non_boolean_is_refused(self, tmp_path: Path, raw: str) -> None:
+        manifest = tmp_path / "forge.toml"
+        write_forge_toml(
+            manifest,
+            version="1.3.0",
+            project_name="acme",
+            templates={},
+            options={},
+            frontend=ForgeFrontendData(framework="vue", app_dir="apps/frontend", dev_server=True),
+        )
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "dev_server = true", f"dev_server = {raw}"
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="dev_server must be true or false"):
+            read_forge_toml(manifest)
