@@ -14,9 +14,15 @@ To switch an existing project:
    stay on disk, no longer recorded. Delete them once nothing installs them.
 2. Move environment values: what was under `workloads.<service>` goes to the top level of that service's chart, the
    primary `frontend` and each `frontends.<name>` to their chart, `ingress` and `infra` to the platform's.
-3. Install `platform` first, then every service as a release named after it (`make helm-install`). The objects are
-   renamed (`<release>-<service>` becomes `<service>`), so uninstall the umbrella release after the services serve.
-   A Service now listens on the service's port, not 80: update anything that called `<release>-<service>:80`.
+3. Install every service as a release named after it (`helm upgrade --install <service> deploy/helm/<service>`),
+   beside the umbrella: its objects are `<release>-<service>`, the new ones `<service>`, and the services use its
+   in-cluster infrastructure meanwhile. A Service now listens on the service's port, not 80: update anything that
+   called `<release>-<service>:80`.
+4. Uninstall the umbrella, then install `platform`. The two claim the same Ingress hosts and paths and, with
+   `infra.inCluster`, the same `postgres`, `redis`, `keycloak` and `gatekeeper`, so they cannot run together: the
+   routes are down until `platform` is ready. In-cluster Postgres keeps its data, since the `data-postgres-0` volume
+   outlives the umbrella and the platform's `postgres` mounts it again. From then on `make helm-install` installs
+   `platform`, then every service.
 
 ### Coordinated dependency refresh (unreleased)
 

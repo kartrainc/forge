@@ -164,10 +164,18 @@ def test_placeholder_directories_expand_per_topology_entry(tmp_path: Path) -> No
     "backends,extra",
     [
         ([("platform", 8001)], None),
+        ([("postgres", 8001)], None),
+        ([("gatekeeper", 8001)], None),
         ([("admin", 8001)], "admin"),
         ([("Bad_Name", 8001)], None),
     ],
-    ids=["reserved-platform", "backend-and-frontend-share-a-name", "not-a-release-name"],
+    ids=[
+        "reserved-platform",
+        "platform-postgres",
+        "platform-gatekeeper",
+        "backend-and-frontend-share-a-name",
+        "not-a-release-name",
+    ],
 )
 def test_service_chart_names_are_distinct_release_names(backends: list, extra: str | None) -> None:
     from forge.errors import OptionsError

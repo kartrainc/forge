@@ -837,18 +837,27 @@ def _check_fragment_ui_kits(config: ProjectConfig, fragment_set: set[str]) -> No
 
 # A Helm release name: a DNS-1123 label of at most 53 characters.
 _RELEASE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
+# Names the platform chart takes: its release, and the Services of its in-cluster infrastructure.
+_PLATFORM_NAMES = {
+    "platform": "the platform chart",
+    "postgres": "the platform's in-cluster Postgres",
+    "redis": "the platform's in-cluster Redis",
+    "keycloak": "the platform's in-cluster Keycloak",
+    "gatekeeper": "the platform's gatekeeper",
+}
 
 
 def _check_service_chart_names(config: ProjectConfig) -> None:
     """deploy.helm_layout=per_service writes deploy/helm/<name>/ per backend and frontend, installed as release <name>
-    beside the release ``platform``: every name must be a release name, distinct from the others and from it."""
+    beside the release ``platform``: every name must be a release name, distinct from the others, from ``platform``
+    and from the in-cluster infrastructure the platform names its Services after."""
     from forge.config._topology import compute_topology  # noqa: PLC0415
 
     topology = compute_topology(config)
     names = [be["name"] for be in topology["backends"]] + [
         fe["name"] for fe in topology["frontends"]
     ]
-    seen: set[str] = {"platform"}
+    seen: set[str] = set(_PLATFORM_NAMES)
     for name in names:
         if not _RELEASE_NAME.match(name):
             raise OptionsError(
@@ -857,8 +866,8 @@ def _check_service_chart_names(config: ProjectConfig) -> None:
             )
         if name in seen:
             raise OptionsError(
-                f"deploy.helm_layout=per_service: two charts would be deploy/helm/{name}/ "
-                f"({'the platform chart' if name == 'platform' else 'two services share the name'}); rename one"
+                f"deploy.helm_layout=per_service: {name!r} is already taken by "
+                f"{_PLATFORM_NAMES.get(name, 'another service')}; rename the service"
             )
         seen.add(name)
 
