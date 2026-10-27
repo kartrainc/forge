@@ -99,7 +99,8 @@ service beside database-backed ones cannot use it.
   platform auth passes its own suites outside the stack; UPGRADING lists the
   sidecars this produces.
 - Running Node services from source in the stack is not part of this
-  decision. It follows ADR-013's opt-in overlay in a change of its own.
+  decision and is not planned. If a project needs it, it extends ADR-013's
+  opt-in overlay to Node backends, in a change of its own.
 
 ## References
 
