@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from forge.quality import model
 
 
@@ -21,9 +23,15 @@ def _package(tmp_path: Path) -> Path:
     return module
 
 
-def test_fingerprint_ignores_finder_metadata(tmp_path: Path, monkeypatch) -> None:
+def test_fingerprint_ignores_finder_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed = model.source_fingerprint()
     monkeypatch.setattr(model, "__file__", str(_package(tmp_path)))
     before = model.source_fingerprint()
+    # The fingerprint follows model.__file__ to the stub tree: a cached or relocated lookup
+    # would hash the installed package instead, and the assertion below would pass vacuously.
+    assert before != installed
 
     (tmp_path / "forge" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
     (tmp_path / "forge" / "quality" / ".DS_Store").write_bytes(b"\x00")
@@ -31,7 +39,9 @@ def test_fingerprint_ignores_finder_metadata(tmp_path: Path, monkeypatch) -> Non
     assert model.source_fingerprint() == before
 
 
-def test_fingerprint_still_sees_a_changed_file(tmp_path: Path, monkeypatch) -> None:
+def test_fingerprint_still_sees_a_changed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(model, "__file__", str(_package(tmp_path)))
     before = model.source_fingerprint()
 
