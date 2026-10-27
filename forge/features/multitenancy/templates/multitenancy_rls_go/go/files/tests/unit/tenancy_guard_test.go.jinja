@@ -1,0 +1,67 @@
+package unit_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"{{ project_name }}/internal/tenancy"
+)
+
+type roleRow struct {
+	status tenancy.RoleStatus
+	err    error
+}
+
+func (r roleRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*dest[0].(*string) = r.status.Name
+	*dest[1].(*bool) = r.status.Superuser
+	*dest[2].(*bool) = r.status.BypassRLS
+	*dest[3].(*int64) = r.status.OwnedTables
+	return nil
+}
+
+type roleQuerier struct{ row roleRow }
+
+func (q roleQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return q.row }
+
+func TestRoleStatusAcceptsARoleRLSAppliesTo(t *testing.T) {
+	if err := (tenancy.RoleStatus{Name: "svc_app"}).Check(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRoleStatusRefusesRolesThatBypassRLS(t *testing.T) {
+	cases := map[string]tenancy.RoleStatus{
+		"is or belongs to a superuser":               {Name: "postgres", Superuser: true},
+		"has or belongs to a role with BYPASSRLS":    {Name: "svc", BypassRLS: true},
+		"owns or belongs to the owner of 2 table(s)": {Name: "svc", OwnedTables: 2},
+	}
+	for want, status := range cases {
+		err := status.Check()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%+v: got %v, want an error containing %q", status, err, want)
+		}
+	}
+}
+
+func TestAssertRLSEnforced(t *testing.T) {
+	ctx := context.Background()
+	if err := tenancy.AssertRLSEnforced(ctx, roleQuerier{roleRow{status: tenancy.RoleStatus{Name: "svc_app"}}}); err != nil {
+		t.Fatal(err)
+	}
+	superuser := roleQuerier{roleRow{status: tenancy.RoleStatus{Name: "postgres", Superuser: true}}}
+	if err := tenancy.AssertRLSEnforced(ctx, superuser); err == nil {
+		t.Fatal("a superuser must stop startup")
+	}
+	failing := roleQuerier{roleRow{err: errors.New("connection refused")}}
+	if err := tenancy.AssertRLSEnforced(ctx, failing); err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("got %v, want the query error", err)
+	}
+}

@@ -417,8 +417,8 @@
       "sha256": "213012e7ba45724c"
     },
     "services/api-py/entrypoint.sh": {
-      "size": 509,
-      "sha256": "5d0771035123f851"
+      "size": 883,
+      "sha256": "7f7da3717b198c51"
     },
     "services/api-py/pyproject.toml": {
       "size": 4785,

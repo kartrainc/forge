@@ -1114,6 +1114,60 @@ verified scopes. Services must enforce those scopes and resource ownership.
 Generated Compose sets API_KEYS_ENABLED; other deployments must set it explicitly.
 Keys are disabled by default, including their management routes.
 
+### `auth.keycloak_self_registration`
+
+**Type:** `enum` · **Default:** `off` · **Stability:** `stable` · **Backends:** —
+
+**Allowed values:** `off`, `own_organization`
+
+_Whether users can sign themselves up when tenants are Keycloak organizations._
+
+Self-registration with ``auth.keycloak_tenant_source=organization``, where a
+user's tenant is the organization they belong to.
+
+- ``off`` (default): the realm does not offer registration. Users are created
+  and added to organizations by an administrator (or an organization's
+  identity provider). A user in no organization is refused at sign-in and
+  their Keycloak session is ended.
+- ``own_organization``: the realm offers registration. On the first sign-in
+  of a user in no organization the Gatekeeper creates an organization with
+  that user as its only member, through the Keycloak Admin API, and signs
+  them in to it, so every sign-up starts its own tenant. The Gatekeeper's
+  service account is granted ``manage-realm`` for this.
+
+With ``user_attribute`` the realm keeps offering registration (new users get
+the default tenant) and only ``off`` is accepted. Sets the Gatekeeper's
+``SELF_REGISTRATION`` and the realm's ``registrationAllowed``.
+
+### `auth.keycloak_tenant_source`
+
+**Type:** `enum` · **Default:** `organization` · **Stability:** `stable` · **Backends:** —
+
+**Allowed values:** `organization`, `user_attribute`
+
+_Where the Gatekeeper takes each user's tenant from in Keycloak._
+
+How the Gatekeeper decides which tenant a signed-in user belongs to. The
+tenant becomes the ``https://forge/tenant_id`` claim of the internal token,
+which the services isolate data by.
+
+- ``organization`` (default): Keycloak Organizations (Keycloak 26+). The realm
+  enables organizations and seeds one for the dev user; sign-in requests the
+  ``organization`` scope, and the active organization's id is the tenant. A
+  member of several organizations picks one at sign-in and switches with a
+  form ``POST /auth/organization`` (``alias``); ``/auth/login?idp=<alias>``
+  passes ``kc_idp_hint`` to go straight to an organization's identity
+  provider. A user in no organization cannot sign in unless
+  ``auth.keycloak_self_registration=own_organization``.
+- ``user_attribute``: the ``tenant_id`` user attribute. A self-registered
+  user without one gets the default tenant, so every such user shares it.
+
+A host with a TMS ``tenant-route`` keeps the TMS model in both modes: TMS
+pins the host to one tenant and its realm's ``tenant_id`` claim is used.
+
+Only for ``auth.provider=gatekeeper``. Sets the Gatekeeper's ``TENANT_SOURCE``
+and the realm's organization settings.
+
 ### `auth.provider`
 
 **Type:** `enum` · **Default:** `gatekeeper` · **Stability:** `stable` · **Backends:** go, node, python, rust
@@ -1165,6 +1219,24 @@ output is byte-identical.
 
 BACKENDS: python (tier-1); node/rust S2S callers follow.
 REQUIRES: >1 backend; the gatekeeper auth provider for S2S credentials.
+
+### `database.allow_unverified_tenant`
+
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** —
+
+_Allow a header or subdomain tenant without a verified identity._
+
+With ``auth.mode=none`` nothing verifies who sends a request, so a tenant taken
+from a header or the Host subdomain is whatever the client sends: anyone can
+read any tenant's data, and in Go a new tenant per request also escapes the
+rate limit. forge therefore refuses ``database.multitenancy`` ``shared_rls`` or
+``schema_per_tenant`` with ``database.tenant_resolution`` ``header`` or
+``subdomain`` and ``auth.mode=none``.
+
+Set this to ``true`` only when a trusted gateway in front of the services
+authenticates the caller and sets or strips the tenant header itself.
+
+BACKENDS: python, go. Checked at generation.
 
 ### `database.multitenancy`
 
@@ -1219,6 +1291,50 @@ dialects.
 **Enables fragments:**
 - on `shared_rls` → `multitenancy_rls_python`, `multitenancy_rls_go`
 - on `schema_per_tenant` → `multitenancy_schema_per_tenant_python`
+
+### `database.rls_app_role`
+
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** —
+
+_Run shared_rls services as a dedicated role that cannot bypass RLS._
+
+Postgres skips Row-Level Security for superusers and ``BYPASSRLS`` roles, even
+with ``FORCE ROW LEVEL SECURITY``. When on, each ``shared_rls`` backend keeps
+the owner role for its migrations only and serves requests as
+``<db_name>_app``: ``LOGIN NOSUPERUSER NOBYPASSRLS``, owning no tables, with
+SELECT/INSERT/UPDATE/DELETE on the tables and USAGE on the sequences of
+``public``. Migrations run as the owner, and ``deploy/compose/db-app-role.sh``
+then creates the role and refreshes its grants: the ``<backend>-db-role``
+one-shot in Compose; in Helm the pre-install migrate Job, or with
+``infra.inCluster`` the Deployment's init containers, so the role exists before
+the service starts. The service no longer migrates on start
+(``MIGRATE_ON_START=false``). The generated CI gets a ``tenant-isolation`` job
+that migrates a Postgres service container, runs the script and runs the
+isolation tests as the role.
+
+Turn it off when the deployment already provides such a role; the service's
+database URL must then point at it, or ``database.rls_startup_guard`` stops the
+service.
+
+BACKENDS: python, go. Inert unless ``database.multitenancy=shared_rls``.
+
+### `database.rls_startup_guard`
+
+**Type:** `bool` · **Default:** `true` · **Stability:** `stable` · **Backends:** —
+
+_Refuse to start a shared_rls service whose role would bypass RLS._
+
+When on, a ``shared_rls`` service checks its database role at startup and
+exits when the role is a superuser, has ``BYPASSRLS``, or owns tables in the
+database, itself or through a role it belongs to: in each case RLS is not
+enforced, and isolation would be off without any sign. The generated isolation
+tests run as a role RLS applies to and, under ``CI``, fail instead of skipping
+when they get no Postgres or no such role (with ``database.rls_app_role`` the
+CI ``tenant-isolation`` job provides both).
+
+Turn it off only for a deployment that isolates tenants some other way.
+
+BACKENDS: python, go. Inert unless ``database.multitenancy=shared_rls``.
 
 ### `database.tenant_claim_path`
 

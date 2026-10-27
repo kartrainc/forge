@@ -5,6 +5,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Tenant isolation and Keycloak strategies
+
+Each safeguard below is an option, so a project can choose another strategy.
+
+- `database.rls_app_role` (default `true`): `shared_rls` Python and Go services
+  run as `<db_name>_app` (`NOSUPERUSER NOBYPASSRLS`, owns no tables). Migrations
+  keep the owner; `deploy/compose/db-app-role.sh` creates the role and refreshes
+  its grants after every migration: in Compose, in the Helm pre-install migrate
+  Job, or with `infra.inCluster` in each pod's init containers, so the role exists
+  before the service starts. The service skips its own migration
+  (`MIGRATE_ON_START=false`). The script reads the role's password from the
+  environment, and the generated CI gets a `tenant-isolation` job that migrates
+  a Postgres service container, runs the script and runs the isolation tests as
+  that role.
+- `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
+  startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
+  through a role it belongs to. The isolation tests run as a role RLS applies to
+  and, under CI, fail instead of skipping.
+- `database.allow_unverified_tenant` (default `false`): generation refuses
+  `shared_rls`/`schema_per_tenant` with a header or subdomain tenant and
+  `auth.mode=none`, which let any caller choose the tenant. With authentication,
+  a header or subdomain tenant must be the verified token's (403 otherwise), in
+  Python and Go, and Go rate-limits by tenant only when the token is verified.
+- `auth.keycloak_tenant_source` (default `organization`): the gatekeeper takes
+  the tenant from the active Keycloak organization, requests the `organization`
+  scope, adds a form `POST /auth/organization` (`alias`, same-origin only) to
+  switch, and passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
+  `tenant-route` keeps the TMS tenant. `user_attribute` keeps the `tenant_id`
+  attribute. Keycloak moves to 26.6, which Organizations require.
+- `auth.keycloak_self_registration` (default `off`): with organizations, `off`
+  closes the realm's registration, and a user in no organization is refused
+  with their Keycloak session ended. `own_organization` keeps registration and
+  gives each new user an organization of their own through the Admin API.
+
 ### Dependency compatibility
 
 - Require DOMPurify 3.4.17 in the canvas packages, their workspace lockfile and
@@ -198,6 +232,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- One realm name (the project's) in the realm JSON, the gatekeeper, realm sync,
+  service auth env and Helm, which used `app`, `forge` and the host label. The
+  in-cluster Keycloak now imports the realm. `REALM_PER_HOST=true` restores
+  realm-per-subdomain without a TMS route.
+- Logout ends the Keycloak session: a back-channel call with the refresh token,
+  then the end-session redirect with `id_token_hint`, `client_id` and
+  `post_logout_redirect_uri`, which the realm accepts only for the app's origin.
+- `POST /auth/session` no longer revives a session that expired from inactivity,
+  even when it expires during the call (`SET … XX`).
+- The gatekeeper rate-limits by the session's (or API key's) tenant, not the
+  host label, so `tenant_tier:<tenant id>` applies.
+- Vue `useSessionTimeout` no longer attaches listeners after unmount, cancels the
+  pending debounce on a manual extend, and starts listening when `reload()`
+  finds a live session.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

@@ -643,3 +643,464 @@ async def test_refresh_cannot_switch_subject_or_tenant(runtime, monkeypatch, pat
     monkeypatch.setattr(routes, "refresh_tokens", refresh)
     assert (await r.client.get(path)).status_code == 403
     assert (await r.sessions.get(sid)).access_token == old_token
+
+
+# ── Keycloak organizations, realm, logout and session expiry ────────────────
+
+
+def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
+    """A Keycloak access token carrying the organization-id mapper claim."""
+    payload = {
+        "sub": subject,
+        "iss": ISSUER,
+        "aud": "gatekeeper",
+        "exp": int(time.time()) + 600,
+        "realm_access": {"roles": ["admin"]},
+        "https://forge/organization": organizations,
+    }
+    if tenant_attribute is not None:
+        payload["https://forge/tenant_id"] = tenant_attribute
+    return jwt.encode(payload, r.rsa_key, algorithm="RS256", headers={"kid": "oidc-test"})
+
+
+async def _callback(r, monkeypatch, access_token):
+    nonce = "org-nonce"
+    id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
+    await routes._store_auth_state(
+        state="org-state", nonce=nonce, code_verifier="v" * 43, login_uri="/"
+    )
+
+    async def exchange(*args, **kwargs):
+        return {"access_token": access_token, "refresh_token": "refresh", "id_token": id_token}
+
+    monkeypatch.setattr(routes, "exchange_code", exchange)
+    return await r.client.get("/callback", params={"code": "code", "state": "org-state"}), id_token
+
+
+@pytest.fixture
+def organizations(runtime, monkeypatch):
+    monkeypatch.setattr(runtime.cfg, "tenant_source", "organization")
+    return runtime
+
+
+async def test_active_organization_becomes_the_tenant(organizations, monkeypatch):
+    r = organizations
+    r.client.cookies.clear()
+    token = _org_token(r, organizations={"acme": {"id": OTHER}}, tenant_attribute=TENANT)
+    response, id_token = await _callback(r, monkeypatch, token)
+    assert response.status_code == 302, response.text
+    session = await r.sessions.get(response.cookies["tenant_session_id"])
+    # The organization wins over a stale tenant_id attribute.
+    assert session.tenant_id == OTHER and session.id_token == id_token
+
+    r.client.cookies.set("tenant_session_id", response.cookies["tenant_session_id"])
+    auth = await r.client.get("/auth", headers={"X-Forwarded-Uri": "/api/orders/v1/items"})
+    assert auth.status_code == 200, auth.text
+    internal = jwt.decode(
+        auth.headers["authorization"].split()[1], options={"verify_signature": False}
+    )
+    assert internal["https://forge/tenant_id"] == OTHER
+    assert internal["https://forge/tenant_slug"] == "acme"
+    info = (await r.client.get("/auth/userinfo")).json()
+    assert info["tenantId"] == OTHER and info["organization"] == "acme"
+
+
+@pytest.mark.parametrize(
+    "orgs",
+    [{}, {"acme": {"id": OTHER}, "beta": {"id": TENANT}}, {"acme": {}}, None],
+)
+async def test_sign_in_without_one_active_organization_is_refused(organizations, monkeypatch, orgs):
+    r = organizations
+    r.client.cookies.clear()
+    assigned, ended = [], []
+
+    async def assign(self, *args):
+        assigned.append(args)
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append(refresh_token)
+
+    monkeypatch.setattr(routes.GatekeeperKeycloakAdmin, "set_user_attribute", assign)
+    monkeypatch.setattr(routes, "end_session", end)
+    token = _org_token(r, organizations=orgs, tenant_attribute=TENANT)
+    response, _ = await _callback(r, monkeypatch, token)
+    assert response.status_code == 403
+    assert "organization" in response.text
+    assert "tenant_session_id" not in response.cookies
+    # Membership is never assigned by the gatekeeper (SELF_REGISTRATION=off)...
+    assert assigned == []
+    # ...and the Keycloak session ends, so the next sign-in asks again.
+    assert ended == ["refresh"]
+
+
+class _FakeOrganizations:
+    """The Keycloak Admin API calls of SELF_REGISTRATION=own_organization."""
+
+    def __init__(self, existing=()):
+        self.existing = list(existing)
+        self.created = []
+        self.members = []
+
+    def install(self, monkeypatch):
+        fake = self
+
+        async def user_organizations(self, user_id):
+            return fake.existing
+
+        async def create_organization(self, *, name, alias):
+            fake.created.append((self._realm, name, alias))
+            return "new-org-id"
+
+        async def add_organization_member(self, organization_id, user_id):
+            fake.members.append((organization_id, user_id))
+
+        for name, fn in (
+            ("user_organizations", user_organizations),
+            ("create_organization", create_organization),
+            ("add_organization_member", add_organization_member),
+        ):
+            monkeypatch.setattr(routes.GatekeeperKeycloakAdmin, name, fn)
+        return self
+
+
+async def test_own_organization_signs_a_new_user_in_to_a_new_organization(
+    organizations, monkeypatch
+):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    orgs = _FakeOrganizations().install(monkeypatch)
+    r.client.cookies.clear()
+    token = _org_token(r, organizations=None, subject="newcomer")
+    response, _ = await _callback(r, monkeypatch, token)
+    # A new organization with the user as its member, then a sign-in to it:
+    # Keycloak reuses the SSO session, so no password is asked again.
+    assert response.status_code == 302, response.text
+    ((realm, name, alias),) = orgs.created
+    assert realm == "app" and alias.startswith("u-") and alias in name
+    assert orgs.members == [("new-org-id", "newcomer")]
+    location = httpx.URL(response.headers["location"])
+    assert str(location).startswith(ISSUER + "/protocol/openid-connect/auth?")
+    assert location.params["scope"] == f"openid email profile organization:{alias}"
+    assert "tenant_session_id" not in response.cookies
+
+    # The second callback carries the new organization and opens the session.
+    second, _ = await _callback(
+        r, monkeypatch, _org_token(r, organizations={alias: {"id": OTHER}}, subject="newcomer")
+    )
+    assert second.status_code == 302
+    session = await r.sessions.get(second.cookies["tenant_session_id"])
+    assert session.tenant_id == OTHER and session.sub == "newcomer"
+    assert len(orgs.created) == 1
+
+
+async def test_own_organization_never_adds_a_member_of_one(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    orgs = _FakeOrganizations(existing=[{"alias": "acme"}, {"alias": "beta"}]).install(monkeypatch)
+    ended = []
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append(refresh_token)
+
+    monkeypatch.setattr(routes, "end_session", end)
+    r.client.cookies.clear()
+    # Several organizations and none chosen: refused, nothing created.
+    response, _ = await _callback(r, monkeypatch, _org_token(r, organizations=None))
+    assert response.status_code == 403
+    assert orgs.created == [] and orgs.members == []
+    assert ended == ["refresh"]
+
+
+async def test_own_organization_admin_failure_fails_closed(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+
+    async def down(self, user_id):
+        raise httpx.ConnectError("keycloak down")
+
+    ended = []
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append(refresh_token)
+
+    monkeypatch.setattr(routes.GatekeeperKeycloakAdmin, "user_organizations", down)
+    monkeypatch.setattr(routes, "end_session", end)
+    r.client.cookies.clear()
+    response, _ = await _callback(r, monkeypatch, _org_token(r, organizations=None))
+    assert response.status_code == 502
+    assert "tenant_session_id" not in response.cookies
+    assert ended == ["refresh"]
+
+
+async def test_tenant_route_still_pins_its_host_with_organizations(organizations):
+    r = organizations
+    await r.redis.set(
+        "tenant-route:pinned.localhost",
+        json.dumps(
+            {
+                "tenant_id": TENANT,
+                "realm_name": "app",
+                "issuer_url": ISSUER,
+                "client_id": "gatekeeper",
+                "client_secret": "fixture",
+            }
+        ),
+    )
+    token = _org_token(r, organizations={"acme": {"id": OTHER}})
+    sid = await r.sessions.issue(
+        access_token=token,
+        refresh_token="refresh",
+        tenant_id=OTHER,
+        sub="admin",
+        idle_timeout_seconds=600,
+        absolute_timeout_seconds=600,
+    )
+    r.client.cookies.set("tenant_session_id", sid)
+    pinned = await r.client.get(
+        "/auth", headers={"Host": "pinned.localhost", "X-Forwarded-Uri": "/api/x"}
+    )
+    assert pinned.status_code == 401
+    assert await r.sessions.get(sid) is None
+    # Without a route the organization decides.
+    sid = await r.sessions.issue(
+        access_token=token,
+        refresh_token="refresh",
+        tenant_id=OTHER,
+        sub="admin",
+        idle_timeout_seconds=600,
+        absolute_timeout_seconds=600,
+    )
+    r.client.cookies.set("tenant_session_id", sid)
+    assert (await r.client.get("/auth", headers={"X-Forwarded-Uri": "/api/x"})).status_code == 200
+
+
+async def _tms_route(r, host="pinned.localhost", tenant=TENANT):
+    await r.redis.set(
+        f"tenant-route:{host}",
+        json.dumps(
+            {
+                "tenant_id": tenant,
+                "realm_name": "app",
+                "issuer_url": ISSUER,
+                "client_id": "gatekeeper",
+                "client_secret": "fixture",
+            }
+        ),
+    )
+
+
+async def test_tms_host_takes_its_tenant_from_tms_with_organizations(organizations, monkeypatch):
+    r = organizations
+    await _tms_route(r)
+    tms = {"Host": "pinned.localhost", "Origin": "http://pinned.localhost"}
+    # A TMS realm has no organizations: no organization scope, no switch.
+    login = await r.client.get("/auth/login", headers=tms)
+    assert "scope=openid+email+profile&" in login.headers["location"]
+    assert (
+        await r.client.get("/auth/login", headers=tms, params={"organization": "acme"})
+    ).status_code == 400
+    assert (
+        await r.client.post("/auth/organization", headers=tms, data={"alias": "acme"})
+    ).status_code == 404
+
+    # Its token carries tenant_id (and no organization): sign-in works.
+    r.client.cookies.clear()
+    token = await r.login(tenant=TENANT)
+    nonce = "tms-nonce"
+    id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
+    await routes._store_auth_state(
+        state="tms-state", nonce=nonce, code_verifier="v" * 43, login_uri="/"
+    )
+
+    async def exchange(*args, **kwargs):
+        return {"access_token": token, "refresh_token": "refresh", "id_token": id_token}
+
+    monkeypatch.setattr(routes, "exchange_code", exchange)
+    r.client.cookies.clear()
+    callback = await r.client.get(
+        "/callback", headers=tms, params={"code": "code", "state": "tms-state"}
+    )
+    assert callback.status_code == 302, callback.text
+    sid = callback.cookies["tenant_session_id"]
+    assert (await r.sessions.get(sid)).tenant_id == TENANT
+    r.client.cookies.set("tenant_session_id", sid)
+    auth = await r.client.get("/auth", headers={**tms, "X-Forwarded-Uri": "/api/x"})
+    assert auth.status_code == 200, auth.text
+    internal = jwt.decode(
+        auth.headers["authorization"].split()[1], options={"verify_signature": False}
+    )
+    assert internal["https://forge/tenant_id"] == TENANT
+    assert (await r.client.get("/auth/userinfo", headers=tms)).json()["organization"] == ""
+
+
+async def test_organization_switch_and_idp_hint(organizations):
+    r = organizations
+    switch = await r.client.post(
+        "/auth/organization",
+        headers={"Origin": "http://app.localhost"},
+        data={"alias": "acme", "redirect_uri": "/x"},
+    )
+    assert switch.status_code == 302
+    location = switch.headers["location"]
+    assert location.startswith(ISSUER + "/protocol/openid-connect/auth?")
+    assert "scope=openid+email+profile+organization%3Aacme" in location
+    assert "code_challenge=" in location
+
+    login = await r.client.get("/auth/login", params={"idp": "acme-saml"})
+    assert "kc_idp_hint=acme-saml" in login.headers["location"]
+    assert "scope=openid+email+profile+organization&" in login.headers["location"]
+
+    origin = {"Origin": "http://app.localhost"}
+    for bad in ("../x", "a b"):
+        switch = await r.client.post("/auth/organization", headers=origin, data={"alias": bad})
+        assert switch.status_code == 400
+    for bad in ("../x", "a b", ""):
+        assert (await r.client.get("/auth/login", params={"idp": bad})).status_code == 400
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Origin": "https://evil.example"}, {"Referer": "https://evil.example/page"}],
+)
+async def test_organization_switch_requires_the_apps_origin(organizations, headers):
+    r = organizations
+    switch = await r.client.post("/auth/organization", headers=headers, data={"alias": "acme"})
+    assert switch.status_code == 403
+    # A GET (a link or an <img> on another site) switches nothing.
+    assert (await r.client.get("/auth/organization", params={"alias": "acme"})).status_code == 405
+
+
+async def test_organization_routes_off_with_user_attribute(runtime):
+    r = runtime
+    switch = await r.client.post(
+        "/auth/organization", headers={"Origin": "http://app.localhost"}, data={"alias": "acme"}
+    )
+    assert switch.status_code == 404
+    assert (await r.client.get("/auth/login", params={"organization": "acme"})).status_code == 400
+    login = await r.client.get("/auth/login")
+    assert "scope=openid+email+profile&" in login.headers["location"]
+
+
+@pytest.mark.parametrize("per_host,realm", [(False, "app"), (True, "acme")])
+async def test_fallback_realm_comes_from_configuration(runtime, monkeypatch, per_host, realm):
+    r = runtime
+    monkeypatch.setattr(r.cfg, "realm_per_host", per_host)
+    response = await r.client.get("/auth/login", headers={"Host": "acme.localhost"})
+    assert response.headers["location"].startswith(
+        f"https://issuer.test/realms/{realm}/protocol/openid-connect/auth?"
+    )
+
+
+async def test_logout_ends_the_keycloak_session(runtime, monkeypatch):
+    r = runtime
+    token = await r.login()
+    sid = await r.sessions.issue(
+        access_token=token,
+        refresh_token="the-refresh",
+        tenant_id=TENANT,
+        sub="admin",
+        idle_timeout_seconds=600,
+        absolute_timeout_seconds=600,
+        id_token="the-id-token",
+    )
+    r.client.cookies.set("tenant_session_id", sid)
+    ended = []
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append((refresh_token, kwargs["client_id"], kwargs["client_secret"]))
+
+    monkeypatch.setattr(routes, "end_session", end)
+    response = await r.client.get("/logout", headers={"X-Forwarded-Proto": "https"})
+    assert response.status_code == 302
+    assert ended == [("the-refresh", "gatekeeper", "contract-only-secret")]
+    location = httpx.URL(response.headers["location"])
+    assert str(location).startswith(ISSUER + "/protocol/openid-connect/logout?")
+    assert location.params["id_token_hint"] == "the-id-token"
+    assert location.params["client_id"] == "gatekeeper"
+    assert location.params["post_logout_redirect_uri"] == "https://app.localhost/"
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert await r.sessions.get(sid) is None
+
+
+async def test_logout_survives_a_failed_back_channel_call(runtime, monkeypatch):
+    r = runtime
+
+    async def end(*args, **kwargs):
+        raise httpx.ConnectError("keycloak down")
+
+    monkeypatch.setattr(routes, "end_session", end)
+    response = await r.client.get("/logout")
+    assert response.status_code == 302
+    assert "Max-Age=0" in response.headers["set-cookie"]
+
+
+async def test_idle_expired_session_stays_expired(runtime):
+    r = runtime
+    sid = r.client.cookies["tenant_session_id"]
+    await r.redis.delete(f"gk:session:{sid}:active")
+    extend = await r.client.post("/auth/session", headers={"Origin": "http://app.localhost"})
+    assert extend.status_code == 401
+    assert await r.redis.exists(f"gk:session:{sid}:active") == 0
+    assert (await r.client.get("/auth/session")).status_code == 401
+    assert not await r.sessions.touch(sid, now=int(time.time()))
+
+
+async def test_touch_never_revives_an_idle_expired_session(runtime):
+    r = runtime
+    sid = r.client.cookies["tenant_session_id"]
+    assert await r.sessions.touch(sid, now=int(time.time()))
+    assert 0 < await r.redis.ttl(f"gk:session:{sid}:active") <= 600
+    # Idle expiry between the body read and the write: SET ... XX writes nothing.
+    original = r.redis.set
+
+    async def expire_first(name, *args, **kwargs):
+        await r.redis.delete(name)
+        return await original(name, *args, **kwargs)
+
+    r.redis.set = expire_first
+    try:
+        assert not await r.sessions.touch(sid, now=int(time.time()))
+    finally:
+        r.redis.set = original
+    assert await r.redis.exists(f"gk:session:{sid}:active") == 0
+
+
+async def test_rate_limit_follows_the_sessions_tenant_not_the_host(runtime, monkeypatch):
+    r = runtime
+    seen = []
+    original = routes.enforce_rate_limit
+
+    async def record(tenant, quota):
+        seen.append(tenant)
+        return await original(tenant, quota)
+
+    monkeypatch.setattr(routes, "enforce_rate_limit", record)
+    for host in ("app.localhost", "other.localhost"):
+        auth = await r.client.get("/auth", headers={"Host": host, "X-Forwarded-Uri": "/api/x"})
+        assert auth.status_code == 200, auth.text
+    assert seen == [TENANT, TENANT]
+    # The tenant's tier applies, whatever host it signs in on.
+    await r.redis.set(f"tenant_tier:{TENANT}", "1")
+    await r.redis.delete(*[k async for k in r.redis.scan_iter("ratelimit:*")])
+    assert (await r.client.get("/auth", headers={"X-Forwarded-Uri": "/api/x"})).status_code == 200
+    limited = await r.client.get(
+        "/auth", headers={"Host": "other.localhost", "X-Forwarded-Uri": "/api/x"}
+    )
+    assert limited.status_code == 429
+
+
+@pytest.mark.parametrize("live", [False, True])
+async def test_resilient_redis_honors_nx_and_xx(live):
+    """The session touch (XX) and the own-organization lock (NX) rely on it."""
+    from app.gatekeeper.redis import ResilientRedis
+
+    store = ResilientRedis("redis://unused")
+    if live:
+        store._redis_client = FakeRedis(decode_responses=True)
+        store._using_redis = True
+    assert await store.set("k", "1", xx=True, ex=5) is None
+    assert await store.get("k") is None
+    assert await store.set("k", "1", nx=True, ex=5)
+    assert await store.set("k", "2", nx=True) is None
+    assert await store.set("k", "3", xx=True, ex=5)
+    assert await store.get("k") == "3"

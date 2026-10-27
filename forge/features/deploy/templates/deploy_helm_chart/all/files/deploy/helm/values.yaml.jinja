@@ -59,6 +59,10 @@ workloads:
       ENV: "production"
       LOG_LEVEL: "info"
       APP__SERVER__PORT: "{{ be.port }}"
+{%- if be.db_app_role %}
+      # The migrate step runs as the owner; {{ be.db_app_role }} cannot create tables.
+      MIGRATE_ON_START: "false"
+{%- endif %}
 {%- elif be.language == "node" %}
       NODE_ENV: "production"
       LOG_LEVEL: "info"
@@ -107,14 +111,34 @@ workloads:
     # Secret env -> Secret (templates/secret.yaml). Placeholders only: forge
     # NEVER bakes a real credential into the chart. Override via values-prod.yaml
     # or wire an ExternalSecret (see templates/secret.yaml).
-    secretEnv:
+{%- if be.db_app_role %}
+    # database.rls_app_role: the Deployment connects as this role, which cannot
+    # bypass RLS. The migrations run with the owner credentials in
+    # migrateSecretEnv, then files/db-app-role.sh creates the role and refreshes
+    # its grants: in the pre-install migrate Job for an external database, in
+    # the pod's init containers with infra.inCluster (the in-cluster Postgres
+    # only exists once the release is installed). APP_DB_PASSWORD must match
+    # the password in the service's DB URL below.
+    dbAppRole: {{ be.db_app_role }}
+    migrateSecretEnv:
 {%- if be.language == "python" %}
       APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ be.db_name }}"
+{%- else %}
+      DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
+{%- endif %}
+      DB_OWNER_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
+      APP_DB_PASSWORD: "CHANGEME"
+{%- else %}
+    dbAppRole: ""
+{%- endif %}
+    secretEnv:
+{%- if be.language == "python" %}
+      APP__DB__URL: "postgresql+asyncpg://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language == "node" %}
       APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
       DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language in ("rust", "go") %}
-      DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
+      DATABASE_URL: "postgresql://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- endif %}
 {%- endfor %}
 
@@ -192,8 +216,10 @@ infra:
   redis:
     image: redis:7-alpine
   keycloak:
-    image: quay.io/keycloak/keycloak:25.0
-    realm: forge
+    image: quay.io/keycloak/keycloak:26.6
+    # The project's realm: the realm JSON, the gatekeeper and the backends'
+    # auth env all use this name.
+    realm: {{ topology.keycloak_realm }}
   # In-cluster Gatekeeper (OIDC ForwardAuth + S2S token authority). OFF by
   # default even with infra.inCluster — production uses an external/managed
   # gatekeeper. Enable for a full in-cluster auth demo AFTER building+pushing
@@ -207,6 +233,10 @@ infra:
       pullPolicy: IfNotPresent
     # S2S client secret — placeholder; override or wire an ExternalSecret.
     clientSecret: "CHANGEME"
+    # auth.keycloak_tenant_source: organization | user_attribute.
+    tenantSource: {{ topology.keycloak_tenant_source }}
+    # auth.keycloak_self_registration: off | own_organization.
+    selfRegistration: {{ topology.keycloak_self_registration }}
 {%- endif %}
 
 # Pod security: non-root by default (matches the raw-k8s + compose posture).

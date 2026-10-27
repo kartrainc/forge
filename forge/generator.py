@@ -42,6 +42,7 @@ from forge.config import (
 )
 from forge.docker_manager import (
     render_compose,
+    render_db_app_role_script,
     render_frontend_dockerfile,
     render_frontend_dockerignore,
     render_init_db,
@@ -729,6 +730,10 @@ def _render_docker_stack(
         if need_multi_backend_init or config.include_keycloak:
             _log("  Rendering init-db.sh ...")
             render_init_db(config, project_root, synthesis=synthesis)
+        from forge.config._topology import db_app_role  # noqa: PLC0415
+
+        if any(db_app_role(bc, plan.option_values, config.database_mode) for bc in config.backends):
+            render_db_app_role_script(config, project_root)
         # Copy auth infrastructure if Keycloak is enabled
         if config.include_keycloak:
             # Render Keycloak realm JSON
@@ -875,6 +880,12 @@ def _apply_project_scope(
             _realm_dst.parent.mkdir(parents=True, exist_ok=True)
             _realm_dst.write_text(_realm.read_text(encoding="utf-8"), encoding="utf-8")
             collector.record(_realm_dst, origin="base-template")
+        _role_script = project_root / "deploy" / "compose" / "db-app-role.sh"
+        if _role_script.is_file():
+            _role_dst = project_root / "deploy" / "helm" / "files" / "db-app-role.sh"
+            _role_dst.parent.mkdir(parents=True, exist_ok=True)
+            _role_dst.write_bytes(_role_script.read_bytes())
+            collector.record(_role_dst, origin="base-template")
 
     # Drop shared quality-signal files (.editorconfig, .gitignore, CI, pre-commit)
     # if the per-template generators haven't already provided them.

@@ -15,7 +15,9 @@
        infra.gatekeeper.enabled (dev/demo — production uses an external,
        managed gatekeeper). */ -}}
 {{- range $name, $w := .Values.workloads }}
-{{- if $w.hasMigrations }}
+{{- /* With dbAppRole and the in-cluster Postgres the Deployment's init
+       containers migrate and create the role (templates/deployments.yaml). */}}
+{{- if and $w.hasMigrations (not (and $w.dbAppRole $.Values.infra.inCluster)) }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -50,8 +52,10 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
-      {{- if $.Values.infra.inCluster }}
+      {{- if or $.Values.infra.inCluster $w.dbAppRole }}
       initContainers:
+      {{- end }}
+      {{- if $.Values.infra.inCluster }}
         # Block until the in-cluster Postgres accepts connections so the migrate
         # never races the StatefulSet (and its per-backend CREATE DATABASE init).
         - name: wait-for-postgres
@@ -59,8 +63,44 @@ spec:
           command:
             - sh
             - -c
-            - until pg_isready -h postgres -p 5432; do echo "waiting for postgres"; sleep 2; done
+            - until pg_isready -h postgres -p 5432 -U postgres; do echo "waiting for postgres"; sleep 2; done
       {{- end }}
+      {{- if $w.dbAppRole }}
+        {{- /* database.rls_app_role: migrate as the owner (the migrate Secret
+               overrides the DB URL), then create the runtime role and grant
+               it the migrated tables. */}}
+        - name: migrate
+          image: "{{ $w.image.repository }}:{{ $w.image.tag }}"
+          imagePullPolicy: {{ $w.image.pullPolicy }}
+          command: {{ toJson $w.migrateCommand }}
+          envFrom:
+            - configMapRef:
+                name: {{ printf "%s-%s-config" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+            - secretRef:
+                name: {{ printf "%s-%s-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+                optional: true
+            - secretRef:
+                name: {{ printf "%s-%s-migrate-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+                optional: true
+      containers:
+        - name: db-role
+          image: {{ $.Values.infra.postgres.image | default "postgres:16-alpine" | quote }}
+          command: ["sh", "/scripts/db-app-role.sh"]
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $w.dbAppRole | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ printf "%s-%s-migrate-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+          volumeMounts:
+            - name: db-app-role
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: db-app-role
+          configMap:
+            name: {{ printf "%s-db-app-role" $.Release.Name | trunc 63 | trimSuffix "-" }}
+      {{- else }}
       containers:
         - name: migrate
           image: "{{ $w.image.repository }}:{{ $w.image.tag }}"
@@ -72,26 +112,37 @@ spec:
             - secretRef:
                 name: {{ printf "%s-%s-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
                 optional: true
+      {{- end }}
 {{- end }}
+{{- end }}
+{{- /* The database.rls_app_role script, shared by every workload's migrate Job.
+       A hook like the Jobs that mount it, created before them. */ -}}
+{{- $roleScript := .Files.Get "files/db-app-role.sh" }}
+{{- if $roleScript }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-db-app-role" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/name: db-app-role
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  db-app-role.sh: |
+{{ $roleScript | indent 4 }}
 {{- end }}
 {{- /* Keycloak realm-sync — in-cluster auth demo only (infra.inCluster +
        infra.gatekeeper). A post-install Job syncs the realm into the running
        Keycloak via its Admin API, reading the realm JSON bundled into the
        chart (deploy/helm/files/keycloak-realm.json) as a ConfigMap. */ -}}
 {{- if and .Values.infra.inCluster .Values.infra.gatekeeper .Values.infra.gatekeeper.enabled }}
-{{- $realm := .Files.Get "files/keycloak-realm.json" }}
-{{- if $realm }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
-  labels:
-    {{- include "app.labels" . | nindent 4 }}
-    app.kubernetes.io/name: realm-sync
-data:
-  keycloak-realm.json: |
-{{ $realm | indent 4 }}
+{{- if .Files.Get "files/keycloak-realm.json" }}
+{{- /* The realm ConfigMap is created with the in-cluster Keycloak
+       (templates/infra.yaml), before this post-install hook runs. */}}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -124,7 +175,7 @@ spec:
             - name: KEYCLOAK_BASE_URL
               value: http://keycloak:8080/realms
             - name: KEYCLOAK_ADMIN_REALM
-              value: {{ .Values.infra.keycloak.realm | default "app" | quote }}
+              value: {{ .Values.infra.keycloak.realm | quote }}
             - name: REALM_JSON_PATH
               value: /realm/keycloak-realm.json
           volumeMounts:

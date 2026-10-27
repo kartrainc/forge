@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 
 	"{{ project_name }}/internal/apperrors"
@@ -9,11 +10,16 @@ import (
 
 // TenantRLS resolves each request's tenant with resolver.Attach, so the
 // request's tenant-scoped transactions bind it (see tenancy.Resolver.Tenant).
-// A tenant Attach rejects answers 400 with the RFC-007 envelope.
+// A tenant other than the verified token's answers 403 PERMISSION_DENIED, any
+// other tenant Attach rejects 400, both with the RFC-007 envelope.
 func TenantRLS(resolver *tenancy.Resolver) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, err := resolver.Attach(r)
+			if errors.Is(err, tenancy.ErrTenantMismatch) {
+				apperrors.Write(w, r, apperrors.New(apperrors.PermissionDenied, err.Error()))
+				return
+			}
 			if err != nil {
 				apperrors.Write(badRequest{w}, r, apperrors.New(apperrors.InvalidInput, err.Error()))
 				return

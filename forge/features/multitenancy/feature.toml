@@ -12,6 +12,9 @@ options = [
     "database.tenant_resolution",
     "database.tenant_claim_path",
     "database.tenant_header_name",
+    "database.rls_app_role",
+    "database.rls_startup_guard",
+    "database.allow_unverified_tenant",
 ]
 fragments = [
     "multitenancy_rls_python",

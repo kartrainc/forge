@@ -4,6 +4,42 @@ This document lists breaking changes per version and the migration steps for eac
 
 ## 1.1 → 1.2
 
+### Tenant isolation and Keycloak strategies (unreleased)
+
+The new safeguards are options with safe defaults. Set them in `forge.toml` to
+keep a different strategy.
+
+- **`shared_rls` projects:** services now connect as `<db_name>_app` and no
+  longer migrate on start (`MIGRATE_ON_START=false`). Compose creates the role
+  on `up`. In Helm, set each workload's `migrateSecretEnv` (`DB_OWNER_URL`, the
+  owner DB URL, `APP_DB_PASSWORD`) and put the same password in `secretEnv`'s DB
+  URL; with `infra.inCluster` the pods' init containers migrate and create the
+  role, otherwise the pre-install migrate Job does. A deployment with its own non-bypassing role
+  sets `database.rls_app_role=false` and points the DB URL at it; the startup
+  guard refuses a superuser either way. Check with
+  `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`.
+- **Header or subdomain tenant without auth:** generation now fails. Enable
+  authentication, use `token_claim`, or set `database.allow_unverified_tenant=true`
+  when a trusted gateway owns the tenant header. With authentication, a request
+  whose header or subdomain names another tenant than its token now gets 403.
+- **Keycloak projects:** Keycloak moves to 26.6 and the admin variables to
+  `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD`. The default
+  `auth.keycloak_tenant_source=organization` takes the tenant from Keycloak
+  Organizations. Keycloak imports the realm only into an empty database, so an
+  existing realm needs organizations enabled, an organization per tenant (its id
+  is the tenant id), the `organization-id` mapper on the `gatekeeper` client
+  (see `deploy/infra/keycloak-realm.json`) and `post.logout.redirect.uris` set
+  to the app's origin (`http://app.localhost/*` in Compose). Registration is
+  closed unless `auth.keycloak_self_registration="own_organization"`, which
+  also needs `manage-realm` for `service-account-gatekeeper`. To keep the
+  `tenant_id` attribute instead, set `auth.keycloak_tenant_source="user_attribute"`.
+- **Organization switch:** `/auth/organization` is now a form `POST` (`alias`,
+  optional `redirect_uri`) from the app's own origin; a `GET` link no longer
+  switches.
+- **Realm per subdomain:** without a TMS `tenant-route`, the gatekeeper now signs
+  users in to the project's realm. Set `REALM_PER_HOST=true` on the gatekeeper to
+  keep deriving the realm from the host.
+
 ### Coordinated dependency refresh (unreleased)
 
 Regenerate a candidate and review its ownership-aware update before adopting

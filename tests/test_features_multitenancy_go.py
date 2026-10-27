@@ -64,6 +64,8 @@ def test_go_fragment_registration() -> None:
         "database.tenant_resolution",
         "database.tenant_claim_path",
         "database.tenant_header_name",
+        "database.rls_startup_guard",
+        "database.rls_app_role",
         "auth.mode",
     }
     assert dict(impl.env_vars) == {"TENANT_RLS_GUC": "app.current_tenant"}
@@ -201,6 +203,9 @@ def test_render_lands_files_and_wiring(tmp_path: Path, auth: bool) -> None:
         "database.tenant_resolution": "header",
         "database.tenant_header_name": "X-Org-ID",
         "auth.mode": "generate" if auth else "none",
+        # Without auth the header tenant is unverified; a trusted gateway
+        # would own it (refused unless allowed).
+        "database.allow_unverified_tenant": not auth,
     }
     root = Path(
         generate(

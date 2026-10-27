@@ -2,6 +2,8 @@ package tenancy
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 {%- if options['auth.mode'] == 'generate' %}
 
 	platformauth "forge.local/platform-auth-go"
@@ -20,6 +22,16 @@ func VerifiedClaims(ctx context.Context) map[string]any {
 	return nil
 }
 
+// verifiedTenant returns the tenant of the identity bound to ctx when the
+// platform-auth middleware verified its token.
+func verifiedTenant(ctx context.Context) (uuid.UUID, bool) {
+	if _, verified := platformauth.IdentityFromContext(ctx); !verified {
+		return uuid.Nil, false
+	}
+	ident, ok := identity.FromContext(ctx)
+	return ident.TenantID, ok && ident.TenantID != uuid.Nil
+}
+
 // unverifiedIdentity returns the identity bound to ctx when no token was
 // verified for it (the platform-auth dev mode).
 func unverifiedIdentity(ctx context.Context) (identity.IdentityContext, bool) {
@@ -34,6 +46,11 @@ func unverifiedIdentity(ctx context.Context) (identity.IdentityContext, bool) {
 // is verified, so token_claim resolution uses the bound identity's tenant.
 func VerifiedClaims(context.Context) map[string]any {
 	return nil
+}
+
+// verifiedTenant reports none: without platform auth no token is verified.
+func verifiedTenant(context.Context) (uuid.UUID, bool) {
+	return uuid.Nil, false
 }
 
 // unverifiedIdentity returns the identity bound to ctx, else identity.Dev(),

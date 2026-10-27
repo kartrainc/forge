@@ -149,6 +149,22 @@ spec:
       targetPort: redis
 {{- end }}
 {{- if .Values.infra.keycloak }}
+{{- $realmJson := .Files.Get "files/keycloak-realm.json" }}
+{{- if $realmJson }}
+---
+# The project's realm, imported by the in-cluster Keycloak and read by the
+# realm-sync Job (templates/jobs.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/name: keycloak
+data:
+  keycloak-realm.json: |
+{{ $realmJson | indent 4 }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -174,15 +190,34 @@ spec:
       containers:
         - name: keycloak
           image: {{ .Values.infra.keycloak.image | quote }}
+          {{- if $realmJson }}
+          # Import the project's realm (files/keycloak-realm.json) on first start.
+          args: ["start-dev", "--import-realm"]
+          {{- else }}
           args: ["start-dev"]
+          {{- end }}
           env:
-            - name: KEYCLOAK_ADMIN
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
               value: admin
-            - name: KEYCLOAK_ADMIN_PASSWORD
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
               value: admin
           ports:
             - name: http
               containerPort: 8080
+          {{- if $realmJson }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
+            # Keycloak imports <realm>-realm.json only.
+            items:
+              - key: keycloak-realm.json
+                path: {{ printf "%s-realm.json" .Values.infra.keycloak.realm }}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -264,6 +299,12 @@ spec:
               value: development
             - name: KEYCLOAK_BASE_URL
               value: http://keycloak:8080/realms
+            - name: KEYCLOAK_ADMIN_REALM
+              value: {{ .Values.infra.keycloak.realm | quote }}
+            - name: TENANT_SOURCE
+              value: {{ .Values.infra.gatekeeper.tenantSource | default "organization" | quote }}
+            - name: SELF_REGISTRATION
+              value: {{ .Values.infra.gatekeeper.selfRegistration | default "off" | quote }}
             - name: GATEKEEPER_CLIENT_ID
               value: gatekeeper
             - name: GATEKEEPER_CLIENT_SECRET

@@ -24,22 +24,87 @@ precedes route dependencies). The resolver therefore falls back to forge_core's
 Either way, the row-isolation backstop is independent: ``AsyncUnitOfWork`` binds
 the account-scoped ``app.current_tenant`` GUC on every transaction, so RLS holds
 even when this middleware resolves ``None``.
+
+Header / subdomain with a verified identity: a client chooses the header (and
+the host), so when the request also carries a bearer token the middleware
+verifies it with the app's auth guard and answers 403 unless the requested
+tenant is the token's. Without a token nothing is verified and the request
+tenant is used as is (``database.allow_unverified_tenant``).
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.core.tenancy.resolver import TenantResolver
 from app.core.tenancy.rls import current_tenant_var
 
 # Where the resolved tenant id is stashed for handlers / diagnostics.
 TENANT_STATE_KEY = "tenant_id"
+
+
+def _bearer(request: Request) -> str | None:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+async def verified_tenant(request: Request) -> str | None:
+    """The tenant of the request's verified bearer token, else ``None``.
+
+    Reuses the identity an outer auth middleware bound; otherwise verifies the
+    token with the app's auth guard (``forge_core.security.auth``). A request
+    without a token, an app without auth, or a token the guard rejects has no
+    verified tenant (the route's auth dependency answers the rejection).
+    """
+    token = _bearer(request)
+    if token is None:
+        return None
+    identity = getattr(request.state, "identity", None)
+    if identity is None:
+        try:
+            from forge_core.security.auth import get_auth_bundle_from_state  # noqa: PLC0415
+
+            bundle = get_auth_bundle_from_state(request)
+        except (ImportError, RuntimeError):
+            return None
+        try:
+            identity = await bundle.guard.verify(token)
+        except Exception:  # noqa: BLE001 — an unverified token verifies nothing
+            return None
+    tenant = getattr(identity, "tenant_id", None)
+    return str(tenant) if tenant else None
+
+
+def same_tenant(requested: str, verified: str) -> bool:
+    """Whether two tenant ids name the same tenant (UUIDs compare by value)."""
+    try:
+        return uuid.UUID(requested) == uuid.UUID(verified)
+    except ValueError:
+        return requested == verified
+
+
+def _tenant_mismatch(request: Request) -> JSONResponse:
+    correlation = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": "PERMISSION_DENIED",
+                "message": "The requested tenant is not the tenant of the verified identity.",
+                "type": "PermissionDeniedError",
+                "context": {},
+                "correlation_id": correlation or getattr(request.state, "correlation_id", "") or "",
+            }
+        },
+    )
 
 
 class TenantRLSMiddleware(BaseHTTPMiddleware):
@@ -60,7 +125,12 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
         return TenantResolver(settings)
 
     async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Response:
-        tenant_id = self._resolver_for(request).resolve(request)
+        resolver = self._resolver_for(request)
+        tenant_id = resolver.resolve(request)
+        if tenant_id is not None and resolver.settings.resolution != "token_claim":
+            verified = await verified_tenant(request)
+            if verified is not None and not same_tenant(tenant_id, verified):
+                return _tenant_mismatch(request)
         setattr(request.state, TENANT_STATE_KEY, tenant_id)
         token = current_tenant_var.set(tenant_id)
         try:
@@ -69,4 +139,4 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
             current_tenant_var.reset(token)
 
 
-__all__ = ["TENANT_STATE_KEY", "TenantRLSMiddleware"]
+__all__ = ["TENANT_STATE_KEY", "TenantRLSMiddleware", "same_tenant", "verified_tenant"]

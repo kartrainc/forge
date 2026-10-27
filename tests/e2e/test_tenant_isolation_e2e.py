@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -61,9 +60,28 @@ def _wait_ready(port: int, timeout: int = 60) -> None:
     raise AssertionError("postgres did not become ready in time")
 
 
-def _run_shipped_tests(frag_src: Path, db_url: str) -> None:
+def _rendered_tests(frag_src: Path, out: Path) -> Path:
+    """The fragment's integration tests, with ``*.jinja`` rendered as forge does.
+
+    ``database.rls_startup_guard`` is on, so a test that cannot run fails.
+    """
+    from jinja2 import Template
+
+    out.mkdir(parents=True, exist_ok=True)
+    for source in (frag_src.parent / "tests" / "integration").iterdir():
+        if source.suffix == ".jinja":
+            body = Template(source.read_text(encoding="utf-8"), keep_trailing_newline=True).render(
+                options={"database.rls_startup_guard": True}
+            )
+            (out / source.stem).write_text(body, encoding="utf-8")
+        elif source.suffix == ".py":
+            (out / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return out
+
+
+def _run_shipped_tests(frag_src: Path, db_url: str, workdir: Path) -> None:
     """Run a fragment's shipped integration tests against ``db_url`` via uv."""
-    test_dir = frag_src.parent / "tests" / "integration"
+    test_dir = _rendered_tests(frag_src, workdir / frag_src.parent.parent.name)
     env_pythonpath = f"{frag_src}:{_CORE}"
     cmd = [
         "uv", "run", "--python", "3.13",
@@ -93,7 +111,7 @@ def _os_environ() -> dict[str, str]:
     return dict(os.environ)
 
 
-def test_tenant_isolation_against_real_postgres(require_docker: None) -> None:
+def test_tenant_isolation_against_real_postgres(require_docker: None, tmp_path: Path) -> None:
     """Boot Postgres; the shipped schema-per-tenant AND shared-RLS isolation
     tests must pass against it (run as a non-superuser app role so RLS applies)."""
     if not _CORE.is_dir():
@@ -116,7 +134,7 @@ def test_tenant_isolation_against_real_postgres(require_docker: None) -> None:
             "-c", "ALTER DATABASE app OWNER TO app_role",
         )
         db_url = f"postgresql+asyncpg://app_role:pw@127.0.0.1:{port}/app"
-        _run_shipped_tests(_SCHEMA_FRAG / "src", db_url)
-        _run_shipped_tests(_RLS_FRAG / "src", db_url)
+        _run_shipped_tests(_SCHEMA_FRAG / "src", db_url, tmp_path)
+        _run_shipped_tests(_RLS_FRAG / "src", db_url, tmp_path)
     finally:
         _docker("rm", "-f", _CONTAINER, check=False, timeout=60)

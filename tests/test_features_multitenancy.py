@@ -346,6 +346,7 @@ def test_render_lands_rls_files_and_injections(tmp_path: Path) -> None:
             "database.multitenancy": "shared_rls",
             "database.tenant_resolution": "header",
             "database.tenant_header_name": "X-Org-ID",
+            "database.allow_unverified_tenant": True,
         },
     )
     root = Path(generate(cfg, quiet=True, dry_run=True))
@@ -551,6 +552,7 @@ def test_render_lands_schema_files_and_injections(tmp_path: Path) -> None:
         options={
             "database.multitenancy": "schema_per_tenant",
             "database.tenant_resolution": "subdomain",
+            "database.allow_unverified_tenant": True,
         },
     )
     root = Path(generate(cfg, quiet=True, dry_run=True))
@@ -608,13 +610,16 @@ def test_fragments_ship_postgres_integration_tests() -> None:
     assert "must NOT see tenant A's row" in schema_it  # the isolation assertion
     assert "TEST_DATABASE_URL" in schema_it and "skipif" in schema_it
 
-    rls_it = (_fragment_root() / "tests/integration/test_tenant_isolation_pg.py").read_text(
-        encoding="utf-8"
-    )
+    rls_it = (
+        _fragment_root() / "tests/integration/test_tenant_isolation_pg.py.jinja"
+    ).read_text(encoding="utf-8")
     assert "current_setting('app.current_tenant'" in rls_it
     assert "RLS leak" in rls_it
-    # RLS can't be validated as a SUPERUSER/BYPASSRLS role — skip in that case.
+    # RLS can't be validated as a SUPERUSER/BYPASSRLS role — the test creates a
+    # role RLS applies to, and fails rather than skips under the startup guard.
     assert "rolsuper OR rolbypassrls" in rls_it
+    assert "NOBYPASSRLS" in rls_it
+    assert "REQUIRE_ISOLATION_TEST" in rls_it and "pytest.fail" in rls_it
 
 
 def test_matrix_covers_schema_per_tenant_token_claim() -> None:

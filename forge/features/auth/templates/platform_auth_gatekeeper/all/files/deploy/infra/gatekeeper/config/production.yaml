@@ -19,12 +19,9 @@ security:
   secret_key: "dev-gatekeeper-secret-override-in-production"
   access_token_expire_minutes: 30
   refresh_token_expire_minutes: 600
-  auth:
-    enabled: true
-    server_url: "http://keycloak:8080"
-    realm: "app"
-    client_id: "gatekeeper"
-    client_secret: "gatekeeper-dev-secret"
+  # Keycloak (URL, realm, client) comes from the environment, not this file:
+  # KEYCLOAK_BASE_URL, KEYCLOAK_ADMIN_REALM, GATEKEEPER_CLIENT_ID and
+  # GATEKEEPER_CLIENT_SECRET (see app/gatekeeper/config.py).
 
 discovery:
   enabled: false

@@ -5,6 +5,7 @@ FastAPI router that exposes the three Gatekeeper endpoints:
 * ``GET /auth``      — Traefik ForwardAuth interceptor
 * ``GET /callback``  — OIDC Authorization Code exchange
 * ``GET /logout``    — Session termination
+* ``POST /auth/organization`` — switch the active Keycloak organization
 """
 
 from __future__ import annotations
@@ -13,19 +14,20 @@ import logging
 
 import httpx
 import jwt
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 import hmac
 import json
+import secrets
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Annotated, Any
 
 from app.gatekeeper.apikeys import cache_subject, validate_api_key
 from app.gatekeeper.config import get_settings
-from app.gatekeeper.internal_token import AuthMethod
+from app.gatekeeper.internal_token import TENANT_SLUG_CLAIM, AuthMethod
 from app.gatekeeper.keycloak_admin import GatekeeperKeycloakAdmin
 from app.gatekeeper.helpers import (
     _delete_session_id_cookie,
@@ -40,7 +42,8 @@ from app.gatekeeper.helpers import (
 )
 from app.gatekeeper.jwks import verify_token
 from app.gatekeeper.metrics import RATE_LIMIT_REJECTIONS, AuthMetricsRecorder
-from app.gatekeeper.oidc import exchange_code, refresh_tokens
+from app.gatekeeper.oidc import end_session, exchange_code, refresh_tokens
+from app.gatekeeper.organizations import login_scope, uses_organizations, valid_alias
 
 # _pop_auth_state logs session_fp(state) on its corrupt/expired-envelope reject
 # branches; without this import those branches raise NameError -> a 500 instead
@@ -139,9 +142,12 @@ def _session_identity_matches(
     session: Any, payload: Mapping[str, Any], tc: TenantConfig
 ) -> bool:
     """Sessions cannot cross tenants or change subject during refresh."""
-    return session.tenant_id == tc.tenant_id == payload.get(
-        get_settings().tenant_id_claim
-    ) and session.sub == payload.get("sub")
+    tenant = payload.get(get_settings().tenant_id_claim)
+    return (
+        session.tenant_id == tenant
+        and tc.admits(tenant)
+        and session.sub == payload.get("sub")
+    )
 
 
 _AUTH_STATE_PREFIX = "gk:auth-state:"
@@ -279,7 +285,7 @@ async def auth_userinfo(request: Request) -> Response:
         session = await server_session.get(session_id)
     if session is None:
         return Response(status_code=401, content="Not authenticated")
-    if session.tenant_id != tc.tenant_id:
+    if not tc.admits(session.tenant_id):
         await server_session.delete(session_id)
         response = Response(status_code=401, content="Session expired")
         _delete_session_id_cookie(response)
@@ -291,6 +297,7 @@ async def auth_userinfo(request: Request) -> Response:
             tenant,
             issuer_url=tc.issuer_url,
             client_id=tc.client_id,
+            managed=tc.managed,
         )
     except jwt.ExpiredSignatureError:
         # Refresh path: rotate Keycloak tokens server-side, update the
@@ -311,6 +318,7 @@ async def auth_userinfo(request: Request) -> Response:
                 tenant,
                 issuer_url=tc.issuer_url,
                 client_id=tc.client_id,
+                managed=tc.managed,
             )
             if not _session_identity_matches(session, payload, tc):
                 return Response(status_code=403, content="Session identity mismatch")
@@ -318,6 +326,7 @@ async def auth_userinfo(request: Request) -> Response:
                 session_id,
                 access_token=new_access,
                 refresh_token=new_refresh,
+                id_token=token_data.get("id_token"),
             )
         except (httpx.HTTPStatusError, jwt.InvalidTokenError, KeyError):
             return Response(status_code=401, content="Token refresh failed")
@@ -342,6 +351,12 @@ async def auth_userinfo(request: Request) -> Response:
             "familyName": payload.get("family_name", ""),
             "roles": roles,
             "tenant": tenant,
+            "tenantId": session.tenant_id,
+            "organization": (
+                payload.get(TENANT_SLUG_CLAIM, "")
+                if uses_organizations(managed=tc.managed)
+                else ""
+            ),
         }
     )
 
@@ -356,6 +371,8 @@ async def _begin_oidc_login(
     return_uri: str,
     *,
     tc: TenantConfig | None = None,
+    organization: str | None = None,
+    idp_hint: str | None = None,
 ) -> Response:
     """Mint + store the bound-state envelope and 302 to Keycloak.
 
@@ -402,12 +419,19 @@ async def _begin_oidc_login(
         nonce=nonce,
         code_challenge=code_challenge,
         code_challenge_method="S256",
+        scope=login_scope(organization, managed=tc.managed if tc else False),
+        idp_hint=idp_hint,
     )
     return RedirectResponse(url=login_url, status_code=302)
 
 
 @router.get("/auth/login")
-async def auth_login(request: Request, redirect_uri: str = "/") -> Response:
+async def auth_login(
+    request: Request,
+    redirect_uri: str = "/",
+    organization: str | None = None,
+    idp: str | None = None,
+) -> Response:
     """
     Login initiation endpoint for the frontend.
 
@@ -415,8 +439,13 @@ async def auth_login(request: Request, redirect_uri: str = "/") -> Response:
     server-side bound-state envelope) and redirects the browser to start the
     OIDC Authorization Code flow. The ``redirect_uri`` query parameter is the
     page to return to after login; it rides inside the envelope, not the raw
-    ``state``.
+    ``state``. ``organization`` (with ``TENANT_SOURCE=organization``) signs in
+    to that organization, and ``idp`` becomes Keycloak's ``kc_idp_hint``.
     """
+    if (organization is not None and not valid_alias(organization)) or (
+        idp is not None and not valid_alias(idp)
+    ):
+        return Response(status_code=400, content="Invalid organization or idp")
     forwarded_host = request.headers.get("x-forwarded-host")
     try:
         tenant = extract_tenant(forwarded_host, request.headers.get("host"))
@@ -427,8 +456,63 @@ async def auth_login(request: Request, redirect_uri: str = "/") -> Response:
     tc = await resolve_tenant_config(hostname)
     if tc is None:
         tc = get_fallback_config(tenant)
+    if organization is not None and not uses_organizations(managed=tc.managed):
+        return Response(status_code=400, content="Organizations are not enabled")
 
-    return await _begin_oidc_login(request, tenant, forwarded_host, redirect_uri, tc=tc)
+    return await _begin_oidc_login(
+        request,
+        tenant,
+        forwarded_host,
+        redirect_uri,
+        tc=tc,
+        organization=organization,
+        idp_hint=idp,
+    )
+
+
+# ── POST /auth/organization ────────────────────────────────────────────────
+
+
+@router.post("/auth/organization")
+async def switch_organization(
+    request: Request,
+    alias: Annotated[str, Form()],
+    redirect_uri: Annotated[str, Form()] = "/",
+) -> Response:
+    """Switch the active organization (``TENANT_SOURCE=organization``).
+
+    Starts a sign-in that requests ``organization:<alias>``. Keycloak reuses
+    the SSO session, so a member is not asked for the password again; the
+    callback replaces the session with one bound to that organization's
+    tenant. Keycloak refuses an organization the user is not a member of.
+
+    The SPA submits a form (``alias``, optional ``redirect_uri``) as a
+    top-level navigation, so the browser follows the redirect to Keycloak.
+    The ``Origin`` (or ``Referer``) must be the app's own host: the switch
+    replaces the session, so another site must not be able to trigger it.
+    """
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if not check_origin(
+        method=request.method,
+        origin=request.headers.get("origin"),
+        referer=request.headers.get("referer"),
+        expected_host=forwarded_host or request.headers.get("host", ""),
+    ):
+        return Response(status_code=403, content="Origin mismatch")
+    if not valid_alias(alias):
+        return Response(status_code=400, content="Invalid organization")
+    try:
+        tenant = extract_tenant(forwarded_host, request.headers.get("host"))
+    except ValueError:
+        return Response(status_code=400, content="Missing host information")
+    tc = await resolve_tenant_config(forwarded_host or request.headers.get("host", ""))
+    if tc is None:
+        tc = get_fallback_config(tenant)
+    if not uses_organizations(managed=tc.managed):
+        return Response(status_code=404, content="Organizations are not enabled")
+    return await _begin_oidc_login(
+        request, tenant, forwarded_host, redirect_uri, tc=tc, organization=alias
+    )
 
 
 # ── GET /auth ───────────────────────────────────────────────────────────────
@@ -439,7 +523,12 @@ async def _check_rate_limit(
     default_limit: int,
     metrics: AuthMetricsRecorder,
 ) -> dict[str, str]:
-    """Enforce tenant rate-limit; record metrics and re-raise on 429."""
+    """Enforce the rate limit of *tenant*; record metrics and re-raise on 429.
+
+    *tenant* is the verified tenant id (the session's, or the API key's), so
+    every host a tenant signs in on shares its quota and ``tenant_tier:<id>``
+    applies to it.
+    """
     try:
         quota = await get_tenant_quota(tenant, default_limit)
         return await enforce_rate_limit(tenant, quota)
@@ -496,11 +585,11 @@ async def auth(request: Request) -> Response:
             return Response(status_code=401, content="API keys are disabled")
         record = await validate_api_key(api_key)
 
-        if not record or record.tenant_id != tc.tenant_id:
+        if not record or not tc.admits(record.tenant_id):
             metrics.record("invalid_key")
             return Response(status_code=401, content="Invalid API Key")
 
-        rate_headers = await _check_rate_limit(tenant, tc.rate_limit, metrics)
+        rate_headers = await _check_rate_limit(record.tenant_id, tc.rate_limit, metrics)
         metrics.record("success")
         key_payload = _synthetic_keycloak_payload(
             user_id=f"api-key:{record.key_id}",
@@ -630,7 +719,7 @@ async def auth(request: Request) -> Response:
         return await _redirect_to_login(request, tenant, forwarded_host, tc=tc)
 
     # 4. Validate the access token from the session row.
-    if session.tenant_id != tc.tenant_id:
+    if not tc.admits(session.tenant_id):
         await server_session.delete(session_id)
         response = await _redirect_to_login(request, tenant, forwarded_host, tc=tc)
         _delete_session_id_cookie(response)
@@ -641,10 +730,13 @@ async def auth(request: Request) -> Response:
             tenant,
             issuer_url=tc.issuer_url,
             client_id=tc.client_id,
+            managed=tc.managed,
         )
         if not _session_identity_matches(session, payload, tc):
             return Response(status_code=403, content="Session identity mismatch")
-        rate_headers = await _check_rate_limit(tenant, tc.rate_limit, metrics)
+        rate_headers = await _check_rate_limit(
+            session.tenant_id, tc.rate_limit, metrics
+        )
         metrics.record("success")
         internal_token = await _mint_internal_token(request, keycloak_payload=payload)
         return create_success_response(
@@ -713,6 +805,7 @@ async def _try_refresh_or_redirect(
             tenant,
             issuer_url=tc.issuer_url,
             client_id=tc.client_id,
+            managed=tc.managed,
         )
         if not _session_identity_matches(session, payload, tc):
             return Response(status_code=403, content="Session identity mismatch")
@@ -720,8 +813,11 @@ async def _try_refresh_or_redirect(
             session.session_id,
             access_token=new_access,
             refresh_token=new_refresh,
+            id_token=token_data.get("id_token"),
         )
-        rate_headers = await _check_rate_limit(tenant, tc.rate_limit, metrics)
+        rate_headers = await _check_rate_limit(
+            session.tenant_id, tc.rate_limit, metrics
+        )
         metrics.record("expired_refreshed")
         internal_token = await _mint_internal_token(request, keycloak_payload=payload)
         return create_success_response(
@@ -772,6 +868,61 @@ async def _redirect_to_login(
 
 
 # ── GET /callback ───────────────────────────────────────────────────────────
+
+
+async def _end_keycloak_session(
+    tenant: str, refresh_token: str, tc: TenantConfig
+) -> None:
+    """Best-effort back-channel logout of the Keycloak session behind *refresh_token*."""
+    if not refresh_token:
+        return
+    try:
+        await end_session(
+            tenant,
+            refresh_token,
+            issuer_url=tc.issuer_url,
+            client_id=tc.client_id,
+            client_secret=tc.client_secret,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("Keycloak back-channel logout failed: %s", exc)
+
+
+async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str | None:
+    """Create an organization for a user in none; return its alias.
+
+    ``SELF_REGISTRATION=own_organization``. Returns ``None`` when the user
+    already belongs to an organization (Keycloak asks which one at sign-in)
+    or another sign-in of theirs is creating one. A per-user Redis lock keeps
+    two concurrent first sign-ins from creating two organizations.
+    """
+    cfg = get_settings()
+    sub = claims.get("sub")
+    if not sub:
+        return None
+    redis = get_redis()
+    lock = f"gk:own-organization:{tc.realm_name}:{sub}"
+    if not await redis.set(lock, "1", nx=True, ex=30):
+        return None
+    try:
+        admin = GatekeeperKeycloakAdmin(
+            server_url=cfg.keycloak_base_url.rstrip("/").removesuffix("/realms"),
+            realm=tc.realm_name,
+            client_id=tc.client_id,
+            client_secret=tc.client_secret,
+        )
+        if await admin.user_organizations(sub):
+            return None
+        alias = f"u-{secrets.token_hex(6)}"
+        owner = claims.get("email") or claims.get("preferred_username") or sub
+        organization_id = await admin.create_organization(
+            name=f"{owner} ({alias})", alias=alias
+        )
+        await admin.add_organization_member(organization_id, sub)
+        logger.info("Created organization %s for sub=%s", alias, sub)
+        return alias
+    finally:
+        await redis.delete(lock)
 
 
 @router.get("/callback")
@@ -889,11 +1040,49 @@ async def callback(
     # mappers re-run and emit the claim.
     try:
         claims = await verify_token(
-            access_token, tenant, issuer_url=tc.issuer_url, client_id=tc.client_id
+            access_token,
+            tenant,
+            issuer_url=tc.issuer_url,
+            client_id=tc.client_id,
+            managed=tc.managed,
         )
     except jwt.InvalidTokenError:
         return Response(status_code=401, content="Invalid access token")
 
+    if cfg.tenant_id_claim not in claims and uses_organizations(managed=tc.managed):
+        # No active organization: not a member of any, or of several without
+        # choosing. With SELF_REGISTRATION=own_organization a user in none
+        # gets one of their own and signs in to it (Keycloak reuses the SSO
+        # session); otherwise the sign-in is refused and the Keycloak session
+        # ended, so the next attempt asks for credentials again.
+        if cfg.self_registration == "own_organization":
+            try:
+                alias = await _own_organization(tc, claims)
+            except (httpx.HTTPError, KeyError) as exc:
+                logger.error(
+                    "Could not create an organization for sub=%s: %s",
+                    claims.get("sub"),
+                    exc,
+                )
+                await _end_keycloak_session(tenant, refresh_token, tc)
+                return Response(status_code=502, content="Organization creation failed")
+            if alias is not None:
+                return await _begin_oidc_login(
+                    request,
+                    tenant,
+                    forwarded_host,
+                    safe_state,
+                    tc=tc,
+                    organization=alias,
+                )
+        logger.warning(
+            "Sign-in without an active organization for sub=%s", claims.get("sub")
+        )
+        await _end_keycloak_session(tenant, refresh_token, tc)
+        return Response(
+            status_code=403,
+            content="No active organization: the user must belong to an organization",
+        )
     if cfg.tenant_id_claim not in claims:
         sub = claims.get("sub", "")
         if not sub:
@@ -944,12 +1133,16 @@ async def callback(
     # Bind sessions to verified identity after any tenant-assignment refresh.
     try:
         claims = await verify_token(
-            access_token, tenant, issuer_url=tc.issuer_url, client_id=tc.client_id
+            access_token,
+            tenant,
+            issuer_url=tc.issuer_url,
+            client_id=tc.client_id,
+            managed=tc.managed,
         )
     except jwt.InvalidTokenError:
         return Response(status_code=401, content="Invalid access token")
     verified_tenant = claims.get(cfg.tenant_id_claim)
-    if not verified_tenant or verified_tenant != tc.tenant_id:
+    if not tc.admits(verified_tenant):
         return Response(status_code=403, content="Tenant mismatch")
 
     # 5. BFF: persist tokens server-side, issue an opaque session_id, set
@@ -961,6 +1154,12 @@ async def callback(
         )
         return Response(status_code=503, content="Session store unavailable")
 
+    # A sign-in replaces the browser's previous session (an organization
+    # switch, or a sign-in over a live session) instead of orphaning it.
+    previous = request.cookies.get(cfg.session_id_cookie_name)
+    if previous:
+        await server_session.delete(previous)
+
     sub = claims.get("sub", "")
     session_id = await server_session.issue(
         access_token=access_token,
@@ -969,6 +1168,7 @@ async def callback(
         sub=sub,
         idle_timeout_seconds=tc.idle_timeout_seconds,
         absolute_timeout_seconds=tc.absolute_timeout_seconds,
+        id_token=id_token,
     )
 
     response = RedirectResponse(url=safe_state, status_code=302)
@@ -1011,9 +1211,15 @@ async def logout(request: Request) -> Response:
     # 2. Best-effort revocation propagation BEFORE deleting the row.
     session_id = request.cookies.get(cfg.session_id_cookie_name)
     server_session = getattr(request.app.state, "server_session", None)
+    id_token_hint: str | None = None
     if session_id and server_session is not None:
         session = await server_session.get(session_id)
         if session is not None:
+            id_token_hint = session.id_token or None
+            # Back-channel: end the Keycloak SSO session with the refresh
+            # token, so the next sign-in asks for the password even if the
+            # browser never follows the redirect below.
+            await _end_keycloak_session(tenant, session.refresh_token, tc)
             cache = getattr(request.app.state, "internal_token_cache", None)
             if cache is not None and hasattr(cache, "evict_for_sub"):
                 try:
@@ -1026,8 +1232,17 @@ async def logout(request: Request) -> Response:
                     )
         await server_session.delete(session_id)
 
-    # 3. Build Keycloak logout URL, expire cookie, redirect.
-    logout_url = build_logout_url(tenant, issuer_url=tc.issuer_url)
+    # 3. Front-channel: Keycloak's end-session endpoint with the id_token
+    # hint (no confirmation page) and the way back to the app.
+    scheme = request.headers.get("x-forwarded-proto", "http")
+    host = forwarded_host or request.headers.get("host", "localhost")
+    logout_url = build_logout_url(
+        tenant,
+        issuer_url=tc.issuer_url,
+        client_id=tc.client_id,
+        id_token_hint=id_token_hint,
+        post_logout_redirect_uri=f"{scheme}://{host}/",
+    )
     response = RedirectResponse(url=logout_url, status_code=302)
     _delete_session_id_cookie(response)
     return response

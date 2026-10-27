@@ -49,6 +49,10 @@ func command(t *testing.T, name string, env ...string) *exec.Cmd {
 	return cmd
 }
 
+// serverEnv returns extra environment for a service binary that must start and
+// serve; a feature that constrains the database role sets it from init.
+var serverEnv = func(*testing.T) []string { return nil }
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -90,7 +94,7 @@ func TestRealNetworkLifecycle(t *testing.T) {
 
 func TestActualServiceBinaryStartsAndStopsGracefully(t *testing.T) {
 	port := freePort(t)
-	server := command(t, "server", "ENV=testing", "PORT="+strconv.Itoa(port))
+	server := command(t, "server", append(serverEnv(t), "ENV=testing", "PORT="+strconv.Itoa(port))...)
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}

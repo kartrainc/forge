@@ -52,14 +52,26 @@ func (r *Resolver) Resolve(req *http.Request) string {
 // tenant but is not a UUID.
 var ErrTenantNotUUID = errors.New("the request's tenant must be a UUID")
 
+// ErrTenantMismatch rejects a header or subdomain tenant that is not the
+// tenant of the request's verified token.
+var ErrTenantMismatch = errors.New("the requested tenant is not the tenant of the verified identity")
+
 // Attach returns the context of req carrying its resolved tenant. Without a
 // verified token the tenant also becomes the tenant of the request's identity,
-// so it must be a UUID; a verified token's tenant is never replaced.
+// so it must be a UUID. With one, a header or subdomain tenant must be the
+// token's tenant (ErrTenantMismatch otherwise); it is never replaced.
 func (r *Resolver) Attach(req *http.Request) (context.Context, error) {
 	ctx := req.Context()
 	tenant := r.Resolve(req)
 	if tenant == "" {
 		return ctx, nil
+	}
+	if r.settings.Resolution != ResolutionTokenClaim {
+		if verified, ok := verifiedTenant(ctx); ok {
+			if id, err := uuid.Parse(tenant); err != nil || id != verified {
+				return nil, ErrTenantMismatch
+			}
+		}
 	}
 	ctx = WithTenant(ctx, tenant)
 	if ident, ok := unverifiedIdentity(ctx); ok {

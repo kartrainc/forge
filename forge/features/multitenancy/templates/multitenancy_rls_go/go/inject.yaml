@@ -28,3 +28,19 @@
   marker: FORGE:REPOSITORY_SCOPE
   position: before
   snippet: "items = items.WithScope(tenantScope(pool))"
+
+# database.rls_startup_guard: exit when the pool's role would bypass RLS
+# (superuser, BYPASSRLS, or owner of tables).
+- target: cmd/server/main.go
+  marker: FORGE:POOL_READY
+  position: before
+  render: true
+  snippet: |-
+    {% if options['database.rls_startup_guard'] -%}
+    if err := app.CheckTenantRole(ctx, pool); err != nil {
+    	slog.Error("tenant isolation is not enforced", "error", err)
+    	return 1
+    }
+    {%- else -%}
+    // database.rls_startup_guard is off: the database role is not checked.
+    {%- endif %}

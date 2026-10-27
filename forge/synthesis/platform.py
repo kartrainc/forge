@@ -32,10 +32,9 @@ if TYPE_CHECKING:
     from forge.config import ProjectConfig
 
 # Shared platform invariants. The gatekeeper is the sole token issuer across
-# every generated service (the sole-issuer invariant); ``forge`` is the default
-# realm; ``forge-services`` is the internal S2S audience. These are platform
-# constants in P4.1 — later sub-steps may surface them as options.
-_DEFAULT_REALM = "forge"
+# every generated service (the sole-issuer invariant); ``forge-services`` is the
+# internal S2S audience. The realm is the project's own
+# (``forge.config._topology.project_keycloak_realm``).
 _DEFAULT_ISSUER = "http://gatekeeper:5000"
 _DEFAULT_INTERNAL_AUDIENCE = "forge-services"
 _TOKEN_ENDPOINT = f"{_DEFAULT_ISSUER}/auth/token"
@@ -199,6 +198,8 @@ def compute_platform_synthesis(
     if plan.option_values.get("auth.provider") != "gatekeeper":
         return None
 
+    from forge.config._topology import project_keycloak_realm  # noqa: PLC0415
+
     known_names = {bc.name for bc in config.backends}
 
     event_bus = str(plan.option_values.get("infrastructure.event_bus", "none"))
@@ -225,7 +226,7 @@ def compute_platform_synthesis(
 
     return PlatformSynthesis(
         clients=tuple(clients),
-        realm=_DEFAULT_REALM,
+        realm=project_keycloak_realm(config),
         issuer=_DEFAULT_ISSUER,
         internal_audience=_DEFAULT_INTERNAL_AUDIENCE,
         event_bus=event_bus,

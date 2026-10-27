@@ -140,7 +140,7 @@ async def get_session(request: Request) -> Response:
     session = await server_session.get(session_id)
     if session is None:
         return Response(status_code=401, content="Session expired")
-    if session.tenant_id != tc.tenant_id:
+    if not tc.admits(session.tenant_id):
         await server_session.delete(session_id)
         response = Response(status_code=401, content="Session expired")
         _delete_session_id_cookie(response)
@@ -202,7 +202,7 @@ async def extend_session(request: Request) -> Response:
     session = await server_session.get(session_id)
     if session is None:
         return Response(status_code=401, content="Session expired")
-    if session.tenant_id != tc.tenant_id:
+    if not tc.admits(session.tenant_id):
         await server_session.delete(session_id)
         response = Response(status_code=401, content="Session expired")
         _delete_session_id_cookie(response)

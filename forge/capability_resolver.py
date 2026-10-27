@@ -634,6 +634,64 @@ def _check_go_multitenancy(
     )
 
 
+_DB_ISOLATING_MULTITENANCY: frozenset[str] = frozenset({"shared_rls", "schema_per_tenant"})
+_CLIENT_SUPPLIED_TENANT: frozenset[str] = frozenset({"header", "subdomain"})
+
+
+def _check_unverified_tenant(option_values: dict[str, object]) -> None:
+    """Refuse a client-chosen tenant that no verified identity backs.
+
+    Checked against the EFFECTIVE ``auth.mode`` (after the no-keycloak
+    coercion), since that is what the generated services run with.
+    ``database.allow_unverified_tenant`` opts out for a trusted gateway.
+    """
+    strategy = option_values.get("database.multitenancy")
+    resolution = option_values.get("database.tenant_resolution")
+    if (
+        strategy not in _DB_ISOLATING_MULTITENANCY
+        or resolution not in _CLIENT_SUPPLIED_TENANT
+        or option_values.get("auth.mode") != "none"
+        or option_values.get("database.allow_unverified_tenant")
+    ):
+        return
+    raise OptionsError(
+        f"database.multitenancy={strategy!r} with database.tenant_resolution="
+        f"{resolution!r} and auth.mode=none lets any caller choose the tenant: "
+        f"nothing verifies who sends the request, so anyone reads any tenant's "
+        f"data. Set auth.mode=generate (with include_keycloak, or auth.provider="
+        f"oidc_generic/in_memory), use database.tenant_resolution='token_claim', "
+        f"or set database.allow_unverified_tenant=true when a trusted gateway "
+        f"authenticates callers and owns the tenant header.",
+        code=OPTIONS_INVALID_VALUE,
+        context={
+            "database.multitenancy": strategy,
+            "database.tenant_resolution": resolution,
+            "auth.mode": "none",
+        },
+    )
+
+
+def _check_self_registration(option_values: dict[str, object]) -> None:
+    """``own_organization`` creates organizations, so it needs them as the tenant."""
+    source = option_values.get("auth.keycloak_tenant_source", "organization")
+    if option_values.get("auth.keycloak_self_registration") != "own_organization":
+        return
+    if source == "organization":
+        return
+    raise OptionsError(
+        "auth.keycloak_self_registration='own_organization' gives each new user "
+        f"an organization as their tenant, but auth.keycloak_tenant_source={source!r} "
+        "takes the tenant from the tenant_id user attribute. Set "
+        "auth.keycloak_tenant_source='organization', or keep "
+        "auth.keycloak_self_registration='off'.",
+        code=OPTIONS_INVALID_VALUE,
+        context={
+            "auth.keycloak_self_registration": "own_organization",
+            "auth.keycloak_tenant_source": source,
+        },
+    )
+
+
 def _check_security_constraints(option_values: dict[str, object], fragment_set: set[str]) -> None:
     """Cross-option safety rules enforced at config time.
 
@@ -811,6 +869,8 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
     fragment_set = _expand_deps(fragment_set)
     _check_fragment_ui_kits(config, fragment_set)
     _check_security_constraints(option_values, fragment_set)
+    _check_unverified_tenant(option_values)
+    _check_self_registration(option_values)
     _validate_reads_options(fragment_set)
     _check_conflicts(fragment_set, project_backends)
     order = _topo_sort(fragment_set)
