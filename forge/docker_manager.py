@@ -60,16 +60,38 @@ def keycloak_self_registration(options: Mapping[str, object]) -> str:
 
 
 def app_origins(config: ProjectConfig) -> list[str]:
-    """Origins the apps are served from: the primary on Traefik's
-    ``app.localhost`` in Compose and every further frontend on
-    ``<label>.localhost``, plus the chart's ingress hosts (``<label>.<host>``
-    for further frontends) for ``deploy.target=kubernetes``."""
-    labels = config.frontend_host_labels
-    origins = ["http://app.localhost", *(f"http://{label}.localhost" for label in labels)]
-    if option_value(config.options, "deploy.target") == "kubernetes":
-        host = f"{config.project_slug}.example.com"
-        origins += [f"https://{host}", *(f"https://{label}.{host}" for label in labels)]
-    return origins
+    """Origins the apps are served from in Compose: the primary on Traefik's
+    ``app.localhost``, every further frontend on ``<label>.localhost``."""
+    return [
+        "http://app.localhost",
+        *(f"http://{label}.localhost" for label in config.frontend_host_labels),
+    ]
+
+
+# Placeholders for the chart's hosts in its copy of the realm; templates/infra.yaml
+# replaces them with ingress.host and each further frontend's host at install.
+HELM_APP_HOST = "__APP_HOST__"
+
+
+def helm_realm_json(config: ProjectConfig, realm_json: str) -> str:
+    """The realm for the Helm chart: the gatekeeper client also accepts the
+    ingress origins, as placeholders the chart fills from its values."""
+    import json  # noqa: PLC0415
+
+    realm = json.loads(realm_json)
+    origins = [
+        f"https://{HELM_APP_HOST}",
+        *(f"https://__APP_HOST_{label}__" for label in config.frontend_host_labels),
+    ]
+    for client in realm.get("clients", []):
+        if client.get("clientId") != "gatekeeper":
+            continue
+        client["redirectUris"] = [*client["redirectUris"], *(f"{o}/callback" for o in origins)]
+        client["webOrigins"] = [*client["webOrigins"], *origins]
+        attributes = client.setdefault("attributes", {})
+        logout = [u for u in attributes.get("post.logout.redirect.uris", "").split("##") if u]
+        attributes["post.logout.redirect.uris"] = "##".join([*logout, *(f"{o}/*" for o in origins)])
+    return json.dumps(realm, indent=2) + "\n"
 
 
 def _jinja_env() -> Environment:

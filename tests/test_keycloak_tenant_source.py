@@ -119,32 +119,56 @@ def test_user_attribute_keeps_the_attribute_mapper(tmp_path: Path) -> None:
     assert _compose(root)["gatekeeper"]["environment"]["TENANT_SOURCE"] == "user_attribute"
 
 
-@pytest.mark.parametrize(
-    ("target", "expected"),
-    [
-        ("compose", "http://app.localhost/*"),
-        ("kubernetes", "http://app.localhost/*##https://kc.example.com/*"),
-    ],
-)
-def test_logout_returns_to_the_apps_origin_only(tmp_path: Path, target: str, expected: str) -> None:
-    gatekeeper = _client(_realm(_generate(tmp_path, **{"deploy.target": target})), "gatekeeper")
-    assert gatekeeper["attributes"]["post.logout.redirect.uris"] == expected
+def _origins_of(client: dict) -> tuple[list[str], list[str], list[str]]:
+    return (
+        client["redirectUris"],
+        client["webOrigins"],
+        client["attributes"]["post.logout.redirect.uris"].split("##"),
+    )
 
 
-def test_logout_returns_to_every_frontends_origin(tmp_path: Path) -> None:
+def _expect(origins: list[str]) -> tuple[list[str], list[str], list[str]]:
+    return ([f"{o}/callback" for o in origins], origins, [f"{o}/*" for o in origins])
+
+
+def test_the_gatekeeper_returns_only_to_every_frontends_origin(tmp_path: Path) -> None:
     root = _generate(tmp_path, extra_frontends=1, **{"deploy.target": "kubernetes"})
-    gatekeeper = _client(_realm(root), "gatekeeper")
-    origins = [
-        "http://app.localhost",
-        "http://admin0.localhost",
-        "https://kc.example.com",
-        "https://admin0.kc.example.com",
-    ]
-    uris = gatekeeper["attributes"]["post.logout.redirect.uris"]
-    assert uris.split("##") == [f"{origin}/*" for origin in origins]
-    # Sign-in returns only to /callback on an app's own origin.
-    assert gatekeeper["redirectUris"] == [f"{origin}/callback" for origin in origins]
-    assert gatekeeper["webOrigins"] == origins
+    local = ["http://app.localhost", "http://admin0.localhost"]
+    # Compose: the local hosts. Sign-in returns only to /callback on an app's own
+    # origin, logout only to an app's origin.
+    assert _origins_of(_client(_realm(root), "gatekeeper")) == _expect(local)
+
+    # Helm: the chart's ingress hosts too, from its values at install time.
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm is not installed")
+    rendered = subprocess.run(
+        [
+            helm,
+            "template",
+            "rel",
+            str(root / "deploy/helm"),
+            "--set",
+            "infra.inCluster=true",
+            "--set",
+            "ingress.host=shop.acme.io",
+            "--set",
+            "frontends.admin0.host=back.acme.io",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    configmap = next(
+        d
+        for d in yaml.safe_load_all(rendered)
+        if d and d["kind"] == "ConfigMap" and d["metadata"]["name"] == "rel-keycloak-realm"
+    )
+    realm = json.loads(configmap["data"]["keycloak-realm.json"])
+    assert "__APP_HOST" not in configmap["data"]["keycloak-realm.json"]
+    assert _origins_of(_client(realm, "gatekeeper")) == _expect(
+        [*local, "https://shop.acme.io", "https://back.acme.io"]
+    )
 
 
 def _gatekeeper_roles(realm: dict) -> list[str]:

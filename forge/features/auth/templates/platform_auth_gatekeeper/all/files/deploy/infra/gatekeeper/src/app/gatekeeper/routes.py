@@ -18,6 +18,7 @@ from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+import asyncio
 import hmac
 import json
 import secrets
@@ -429,7 +430,6 @@ async def _begin_oidc_login(
 async def auth_login(
     request: Request,
     redirect_uri: str = "/",
-    organization: str | None = None,
     idp: str | None = None,
 ) -> Response:
     """
@@ -439,13 +439,14 @@ async def auth_login(
     server-side bound-state envelope) and redirects the browser to start the
     OIDC Authorization Code flow. The ``redirect_uri`` query parameter is the
     page to return to after login; it rides inside the envelope, not the raw
-    ``state``. ``organization`` (with ``TENANT_SOURCE=organization``) signs in
-    to that organization, and ``idp`` becomes Keycloak's ``kc_idp_hint``.
+    ``state``. ``idp`` becomes Keycloak's ``kc_idp_hint``.
+
+    It takes no organization: a GET can be triggered by another site, and a
+    sign-in replaces the session. Choosing an organization is the same-origin
+    ``POST /auth/organization``.
     """
-    if (organization is not None and not valid_alias(organization)) or (
-        idp is not None and not valid_alias(idp)
-    ):
-        return Response(status_code=400, content="Invalid organization or idp")
+    if idp is not None and not valid_alias(idp):
+        return Response(status_code=400, content="Invalid idp")
     forwarded_host = request.headers.get("x-forwarded-host")
     try:
         tenant = extract_tenant(forwarded_host, request.headers.get("host"))
@@ -456,17 +457,9 @@ async def auth_login(
     tc = await resolve_tenant_config(hostname)
     if tc is None:
         tc = get_fallback_config(tenant)
-    if organization is not None and not uses_organizations(managed=tc.managed):
-        return Response(status_code=400, content="Organizations are not enabled")
 
     return await _begin_oidc_login(
-        request,
-        tenant,
-        forwarded_host,
-        redirect_uri,
-        tc=tc,
-        organization=organization,
-        idp_hint=idp,
+        request, tenant, forwarded_host, redirect_uri, tc=tc, idp_hint=idp
     )
 
 
@@ -888,31 +881,54 @@ async def _end_keycloak_session(
         logger.warning("Keycloak back-channel logout failed: %s", exc)
 
 
-async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str | None:
-    """Create an organization for a user in none; return its alias.
+class _OrganizationBusy(Exception):
+    """Another sign-in of the same user is creating their organization."""
 
-    ``SELF_REGISTRATION=own_organization``. Returns ``None`` when the user
-    already belongs to an organization (Keycloak asks which one at sign-in)
-    or another sign-in of theirs is creating one. A per-user Redis lock keeps
-    two concurrent first sign-ins from creating two organizations.
+
+async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str | None:
+    """The organization a user in none signs in to; create it when needed.
+
+    ``SELF_REGISTRATION=own_organization``. Returns the alias of the user's
+    only organization, creating it (with the user as its member) when they
+    have none, or ``None`` when they belong to several (Keycloak asks which
+    one at sign-in). A per-user Redis lock keeps two concurrent first sign-ins
+    (two tabs, a resubmitted callback) from creating two organizations: the
+    second waits for the first and signs in to the organization it created,
+    or raises :class:`_OrganizationBusy` when it is still running.
     """
     cfg = get_settings()
     sub = claims.get("sub")
     if not sub:
         return None
+    admin = GatekeeperKeycloakAdmin(
+        server_url=cfg.keycloak_base_url.rstrip("/").removesuffix("/realms"),
+        realm=tc.realm_name,
+        client_id=tc.client_id,
+        client_secret=tc.client_secret,
+    )
+
+    async def existing() -> str | None | bool:
+        """The only organization's alias, None for several, False for none."""
+        organizations = await admin.user_organizations(sub)
+        if not organizations:
+            return False
+        return str(organizations[0]["alias"]) if len(organizations) == 1 else None
+
     redis = get_redis()
     lock = f"gk:own-organization:{tc.realm_name}:{sub}"
     if not await redis.set(lock, "1", nx=True, ex=30):
-        return None
+        for _ in range(_OWN_ORGANIZATION_WAIT_STEPS):
+            await asyncio.sleep(0.5)
+            if not await redis.get(lock):
+                break
+        found = await existing()
+        if found is False:
+            raise _OrganizationBusy
+        return found  # type: ignore[return-value]
     try:
-        admin = GatekeeperKeycloakAdmin(
-            server_url=cfg.keycloak_base_url.rstrip("/").removesuffix("/realms"),
-            realm=tc.realm_name,
-            client_id=tc.client_id,
-            client_secret=tc.client_secret,
-        )
-        if await admin.user_organizations(sub):
-            return None
+        found = await existing()
+        if found is not False:
+            return found  # type: ignore[return-value]
         alias = f"u-{secrets.token_hex(6)}"
         owner = claims.get("email") or claims.get("preferred_username") or sub
         organization_id = await admin.create_organization(
@@ -923,6 +939,10 @@ async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str 
         return alias
     finally:
         await redis.delete(lock)
+
+
+# Half-second steps a concurrent first sign-in waits for the other to finish.
+_OWN_ORGANIZATION_WAIT_STEPS = 10
 
 
 @router.get("/callback")
@@ -1058,6 +1078,14 @@ async def callback(
         if cfg.self_registration == "own_organization":
             try:
                 alias = await _own_organization(tc, claims)
+            except _OrganizationBusy:
+                # Another sign-in of this user is still creating their
+                # organization: retry shortly, keeping the Keycloak session.
+                return Response(
+                    status_code=503,
+                    content="Your organization is being created; try again",
+                    headers={"Retry-After": "2"},
+                )
             except (httpx.HTTPError, KeyError) as exc:
                 logger.error(
                     "Could not create an organization for sub=%s: %s",
@@ -1233,8 +1261,10 @@ async def logout(request: Request) -> Response:
         await server_session.delete(session_id)
 
     # 3. Front-channel: Keycloak's end-session endpoint with the id_token
-    # hint (no confirmation page) and the way back to the app.
-    scheme = request.headers.get("x-forwarded-proto", "http")
+    # hint (no confirmation page) and the way back to the app. Without
+    # X-Forwarded-Proto the request's own scheme, not a guessed http, so the
+    # URI matches the https origins the realm accepts.
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
     host = forwarded_host or request.headers.get("host", "localhost")
     logout_url = build_logout_url(
         tenant,

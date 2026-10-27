@@ -1941,8 +1941,8 @@
       "sha256": "6bcd0424245f4160"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes.py": {
-      "size": 50079,
-      "sha256": "6a7d02878b7a9b5f"
+      "size": 51466,
+      "sha256": "9835d97f57be4453"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes_jwks.py": {
       "size": 1839,

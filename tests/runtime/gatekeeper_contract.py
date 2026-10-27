@@ -793,6 +793,36 @@ async def test_own_organization_signs_a_new_user_in_to_a_new_organization(
     assert len(orgs.created) == 1
 
 
+@pytest.mark.parametrize("finished", [True, False])
+async def test_a_concurrent_first_sign_in_waits_for_the_other(organizations, monkeypatch, finished):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    monkeypatch.setattr(routes, "_OWN_ORGANIZATION_WAIT_STEPS", 1)
+    orgs = _FakeOrganizations(existing=[{"alias": "u-first"}] if finished else []).install(
+        monkeypatch
+    )
+    ended = []
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append(refresh_token)
+
+    monkeypatch.setattr(routes, "end_session", end)
+    # The other sign-in holds the lock.
+    await r.redis.set("gk:own-organization:app:newcomer", "1", ex=30)
+    r.client.cookies.clear()
+    response, _ = await _callback(
+        r, monkeypatch, _org_token(r, organizations=None, subject="newcomer")
+    )
+    assert orgs.created == []
+    assert ended == []  # the Keycloak session is kept either way
+    if finished:
+        # It signs in to the organization the other sign-in created.
+        scope = httpx.URL(response.headers["location"]).params["scope"]
+        assert response.status_code == 302 and scope.endswith("organization:u-first")
+    else:
+        assert response.status_code == 503 and response.headers["retry-after"] == "2"
+
+
 async def test_own_organization_never_adds_a_member_of_one(organizations, monkeypatch):
     r = organizations
     monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
@@ -897,9 +927,6 @@ async def test_tms_host_takes_its_tenant_from_tms_with_organizations(organizatio
     login = await r.client.get("/auth/login", headers=tms)
     assert "scope=openid+email+profile&" in login.headers["location"]
     assert (
-        await r.client.get("/auth/login", headers=tms, params={"organization": "acme"})
-    ).status_code == 400
-    assert (
         await r.client.post("/auth/organization", headers=tms, data={"alias": "acme"})
     ).status_code == 404
 
@@ -958,6 +985,16 @@ async def test_organization_switch_and_idp_hint(organizations):
         assert (await r.client.get("/auth/login", params={"idp": bad})).status_code == 400
 
 
+async def test_a_get_cannot_choose_the_organization(organizations):
+    """Another site can make a browser GET /auth/login, and a sign-in replaces
+    the session: only the same-origin POST /auth/organization selects one."""
+    r = organizations
+    login = await r.client.get("/auth/login", params={"organization": "acme"})
+    assert login.status_code == 302
+    scope = httpx.URL(login.headers["location"]).params["scope"]
+    assert scope == "openid email profile organization"
+
+
 @pytest.mark.parametrize(
     "headers",
     [{}, {"Origin": "https://evil.example"}, {"Referer": "https://evil.example/page"}],
@@ -976,7 +1013,6 @@ async def test_organization_routes_off_with_user_attribute(runtime):
         "/auth/organization", headers={"Origin": "http://app.localhost"}, data={"alias": "acme"}
     )
     assert switch.status_code == 404
-    assert (await r.client.get("/auth/login", params={"organization": "acme"})).status_code == 400
     login = await r.client.get("/auth/login")
     assert "scope=openid+email+profile&" in login.headers["location"]
 
@@ -1129,3 +1165,21 @@ def test_frontend_host_labels_resolve_to_the_project_realm(monkeypatch, host, re
     resolved = tenant_config.get_fallback_config(host)
     assert (resolved.realm_name, resolved.tenant_id) == (realm, tenant)
     assert resolved.issuer_url == f"https://issuer.test/realms/{realm}"
+
+
+async def test_logout_returns_over_the_requests_own_scheme(runtime, monkeypatch):
+    r = runtime
+
+    async def end(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(routes, "end_session", end)
+    secure = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=r.app), base_url="https://app.localhost"
+    )
+    try:
+        response = await secure.get("/logout")
+    finally:
+        await secure.aclose()
+    location = httpx.URL(response.headers["location"])
+    assert location.params["post_logout_redirect_uri"] == "https://app.localhost/"

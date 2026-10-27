@@ -215,6 +215,16 @@ func TestAttachGivesTheRequestTenantToAnUnverifiedIdentity(t *testing.T) {
 			t.Fatalf("the verified token's own tenant %q passes: %+v %v", tenant, ident, err)
 		}
 	}
+	slugged := account
+	slugged.TenantSlug = "acme"
+	withSlug := platformauth.WithIdentity(identity.WithContext(context.Background(), slugged),
+		platformauth.IdentityContext{TenantID: slugged.TenantID, Subject: slugged.Subject})
+	if _, err := attach(withSlug, "acme"); err != nil {
+		t.Fatalf("a slug names the verified token's tenant by its slug: %v", err)
+	}
+	if _, err := attach(withSlug, "beta"); !errors.Is(err, tenancy.ErrTenantMismatch) {
+		t.Fatalf("another slug than the token's: %v", err)
+	}
 	tokenClaim := tenancy.DefaultSettings()
 	tokenClaim.Resolution = tenancy.ResolutionTokenClaim
 	request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(verified)

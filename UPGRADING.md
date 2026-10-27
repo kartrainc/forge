@@ -35,7 +35,15 @@ keep a different strategy.
   `tenant_id` attribute instead, set `auth.keycloak_tenant_source="user_attribute"`.
 - **Organization switch:** `/auth/organization` is now a form `POST` (`alias`,
   optional `redirect_uri`) from the app's own origin; a `GET` link no longer
-  switches.
+  switches, and `/auth/login` ignores an `organization` parameter.
+- **Gatekeeper client origins:** the realm's `gatekeeper` client accepts
+  `redirectUris`, `webOrigins` and `post.logout.redirect.uris` only for the
+  apps' origins instead of `*`/`+`. Helm fills them from `ingress.host` and
+  `frontends.<name>.host` when Keycloak first imports the realm; Keycloak keeps
+  an existing realm, so after changing those hosts update the client's URIs in
+  the admin console (or the realm export) too.
+- **Subdomain tenants with authentication:** a subdomain or header tenant that
+  is not a UUID must be the token's `https://forge/tenant_slug`, else 403.
 - **Realm per subdomain:** without a TMS `tenant-route`, the gatekeeper now signs
   users in to the project's realm. Set `REALM_PER_HOST=true` on the gatekeeper to
   keep deriving the realm from the host.

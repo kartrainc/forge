@@ -333,6 +333,13 @@ def test_helm_role_exists_before_the_service_starts(tmp_path: Path, in_cluster: 
         d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "rel-api0-config"
     )
     assert config["data"]["MIGRATE_ON_START"] == "false"
+    # The role script and the owner credentials: regular release resources when
+    # pods mount them (never missing while one starts, removed on uninstall),
+    # else hooks created once before the pre-install Job.
+    for kind, name in (("ConfigMap", "rel-db-app-role"), ("Secret", "rel-api0-migrate-secret")):
+        doc = next(d for d in docs if d["kind"] == kind and d["metadata"]["name"] == name)
+        hook = (doc["metadata"].get("annotations") or {}).get("helm.sh/hook")
+        assert hook == (None if in_cluster else "pre-install,pre-upgrade"), (name, hook)
 
 
 # -- generated CI ---------------------------------------------------------------

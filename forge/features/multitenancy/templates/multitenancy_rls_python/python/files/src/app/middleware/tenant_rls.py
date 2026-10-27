@@ -26,10 +26,12 @@ the account-scoped ``app.current_tenant`` GUC on every transaction, so RLS holds
 even when this middleware resolves ``None``.
 
 Header / subdomain with a verified identity: a client chooses the header (and
-the host), so when the request also carries a bearer token the middleware
-verifies it with the app's auth guard and answers 403 unless the requested
-tenant is the token's. Without a token nothing is verified and the request
-tenant is used as is (``database.allow_unverified_tenant``).
+the host), so when the request has a verified identity (bound by an outer auth
+middleware, or a bearer token the middleware verifies with the app's auth
+guard) it answers 403 unless the requested tenant is the identity's: its
+tenant id, or its tenant slug for a value that is not a UUID. Without one
+nothing is verified and the request tenant is used as is
+(``database.allow_unverified_tenant``).
 """
 
 from __future__ import annotations
@@ -56,39 +58,50 @@ def _bearer(request: Request) -> str | None:
     return token.strip() or None
 
 
-async def verified_tenant(request: Request) -> str | None:
-    """The tenant of the request's verified bearer token, else ``None``.
+async def verified_identity(request: Request) -> Any | None:
+    """The request's verified identity, else ``None``.
 
-    Reuses the identity an outer auth middleware bound; otherwise verifies the
-    token with the app's auth guard (``forge_core.security.auth``). A request
-    without a token, an app without auth, or a token the guard rejects has no
-    verified tenant (the route's auth dependency answers the rejection).
+    An identity an outer auth middleware already bound (whatever it verified:
+    a bearer token, an internal-token header, an API key) comes first;
+    otherwise a bearer token is verified with the app's auth guard
+    (``forge_core.security.auth``). No token, an app without auth, or a token
+    the guard rejects verify nothing (the route's auth dependency answers the
+    rejection).
     """
+    identity = getattr(request.state, "identity", None)
+    if identity is not None:
+        return identity
     token = _bearer(request)
     if token is None:
         return None
-    identity = getattr(request.state, "identity", None)
-    if identity is None:
-        try:
-            from forge_core.security.auth import get_auth_bundle_from_state  # noqa: PLC0415
-
-            bundle = get_auth_bundle_from_state(request)
-        except (ImportError, RuntimeError):
-            return None
-        try:
-            identity = await bundle.guard.verify(token)
-        except Exception:  # noqa: BLE001 — an unverified token verifies nothing
-            return None
-    tenant = getattr(identity, "tenant_id", None)
-    return str(tenant) if tenant else None
-
-
-def same_tenant(requested: str, verified: str) -> bool:
-    """Whether two tenant ids name the same tenant (UUIDs compare by value)."""
     try:
-        return uuid.UUID(requested) == uuid.UUID(verified)
+        from forge_core.security.auth import get_auth_bundle_from_state  # noqa: PLC0415
+
+        bundle = get_auth_bundle_from_state(request)
+    except (ImportError, RuntimeError):
+        return None
+    try:
+        return await bundle.guard.verify(token)
+    except Exception:  # noqa: BLE001 — an unverified token verifies nothing
+        return None
+
+
+def same_tenant(requested: str, identity: Any) -> bool:
+    """Whether the requested tenant is *identity*'s.
+
+    A UUID compares with the identity's tenant id; anything else (a subdomain
+    slug such as ``acme``) with its tenant slug (``https://forge/tenant_slug``).
+    """
+    try:
+        requested_id = uuid.UUID(requested)
     except ValueError:
-        return requested == verified
+        slug = getattr(identity, "tenant_slug", None)
+        return bool(slug) and requested == slug
+    tenant = getattr(identity, "tenant_id", None)
+    try:
+        return tenant is not None and requested_id == uuid.UUID(str(tenant))
+    except ValueError:
+        return False
 
 
 def _tenant_mismatch(request: Request) -> JSONResponse:
@@ -128,8 +141,8 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
         resolver = self._resolver_for(request)
         tenant_id = resolver.resolve(request)
         if tenant_id is not None and resolver.settings.resolution != "token_claim":
-            verified = await verified_tenant(request)
-            if verified is not None and not same_tenant(tenant_id, verified):
+            identity = await verified_identity(request)
+            if identity is not None and not same_tenant(tenant_id, identity):
                 return _tenant_mismatch(request)
         setattr(request.state, TENANT_STATE_KEY, tenant_id)
         token = current_tenant_var.set(tenant_id)
@@ -139,4 +152,4 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
             current_tenant_var.reset(token)
 
 
-__all__ = ["TENANT_STATE_KEY", "TenantRLSMiddleware", "same_tenant", "verified_tenant"]
+__all__ = ["TENANT_STATE_KEY", "TenantRLSMiddleware", "same_tenant", "verified_identity"]

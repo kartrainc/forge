@@ -150,6 +150,15 @@ spec:
 {{- end }}
 {{- if .Values.infra.keycloak }}
 {{- $realmJson := .Files.Get "files/keycloak-realm.json" }}
+{{- /* The gatekeeper client accepts the app's own origins: the realm file
+       carries placeholders for them, filled from ingress.host and each
+       further frontend's host. Change those values and upgrade to update
+       a fresh import; an existing realm keeps its clients (see UPGRADING). */}}
+{{- range $name, $fe := .Values.frontends }}
+{{- $host := $fe.host | default (printf "%s.%s" $name $.Values.ingress.host) }}
+{{- $realmJson = replace (printf "__APP_HOST_%s__" $name) $host $realmJson }}
+{{- end }}
+{{- $realmJson = replace "__APP_HOST__" .Values.ingress.host $realmJson }}
 {{- if $realmJson }}
 ---
 # The project's realm, imported by the in-cluster Keycloak and read by the

@@ -26,18 +26,21 @@ Each safeguard below is an option, so a project can choose another strategy.
 - `database.allow_unverified_tenant` (default `false`): generation refuses
   `shared_rls`/`schema_per_tenant` with a header or subdomain tenant and
   `auth.mode=none`, which let any caller choose the tenant. With authentication,
-  a header or subdomain tenant must be the verified token's (403 otherwise), in
-  Python and Go, and Go rate-limits by tenant only when the token is verified.
+  a header or subdomain tenant must be the verified identity's (403 otherwise),
+  in Python and Go: a UUID its tenant id, a slug such as `acme` its tenant slug.
+  Go rate-limits by tenant only when the token is verified.
 - `auth.keycloak_tenant_source` (default `organization`): the gatekeeper takes
   the tenant from the active Keycloak organization, requests the `organization`
-  scope, adds a form `POST /auth/organization` (`alias`, same-origin only) to
-  switch, and passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
+  scope, adds a form `POST /auth/organization` (`alias`, same-origin only) as
+  the only way to choose one (`GET /auth/login` takes no organization), and
+  passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
   `tenant-route` keeps the TMS tenant. `user_attribute` keeps the `tenant_id`
   attribute. Keycloak moves to 26.6, which Organizations require.
 - `auth.keycloak_self_registration` (default `off`): with organizations, `off`
   closes the realm's registration, and a user in no organization is refused
   with their Keycloak session ended. `own_organization` keeps registration and
-  gives each new user an organization of their own through the Admin API.
+  gives each new user an organization of their own through the Admin API; a
+  concurrent first sign-in waits for it, or gets a retryable 503.
 
 ### Dependency compatibility
 
@@ -277,7 +280,11 @@ Each safeguard below is an option, so a project can choose another strategy.
   realm-per-subdomain without a TMS route.
 - Logout ends the Keycloak session: a back-channel call with the refresh token,
   then the end-session redirect with `id_token_hint`, `client_id` and
-  `post_logout_redirect_uri`, which the realm accepts only for the app's origin.
+  `post_logout_redirect_uri` (over the request's own scheme without
+  `X-Forwarded-Proto`). The gatekeeper client accepts callbacks and logout
+  redirects only from the apps' origins: every frontend's local host in
+  Compose, and in Helm `ingress.host` and each frontend's host, filled in at
+  install.
 - `POST /auth/session` no longer revives a session that expired from inactivity,
   even when it expires during the call (`SET … XX`).
 - The gatekeeper rate-limits by the session's (or API key's) tenant, not the

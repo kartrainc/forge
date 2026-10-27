@@ -115,8 +115,11 @@ spec:
       {{- end }}
 {{- end }}
 {{- end }}
-{{- /* The database.rls_app_role script, shared by every workload's migrate Job.
-       A hook like the Jobs that mount it, created before them. */ -}}
+{{- /* The database.rls_app_role script, shared by every workload. With
+       infra.inCluster the Deployments' init containers mount it, so it is a
+       regular release resource (never missing while pods start, removed on
+       uninstall); otherwise the pre-install migrate Jobs mount it, so it is a
+       hook created before them. */ -}}
 {{- $roleScript := .Files.Get "files/db-app-role.sh" }}
 {{- if $roleScript }}
 ---
@@ -127,10 +130,12 @@ metadata:
   labels:
     {{- include "app.labels" . | nindent 4 }}
     app.kubernetes.io/name: db-app-role
+  {{- if not .Values.infra.inCluster }}
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation
+  {{- end }}
 data:
   db-app-role.sh: |
 {{ $roleScript | indent 4 }}

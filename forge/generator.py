@@ -875,7 +875,11 @@ def _apply_project_scope(
         if _realm.is_file():
             _realm_dst = project_root / "deploy" / "helm" / "files" / "keycloak-realm.json"
             _realm_dst.parent.mkdir(parents=True, exist_ok=True)
-            _realm_dst.write_text(_realm.read_text(encoding="utf-8"), encoding="utf-8")
+            from forge.docker_manager import helm_realm_json  # noqa: PLC0415
+
+            _realm_dst.write_text(
+                helm_realm_json(config, _realm.read_text(encoding="utf-8")), encoding="utf-8"
+            )
             collector.record(_realm_dst, origin="base-template")
         _role_script = project_root / "deploy" / "compose" / "db-app-role.sh"
         if _role_script.is_file():
