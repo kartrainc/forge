@@ -33,7 +33,7 @@ def _render(tmp_path: Path, *, dev_server: bool, package_manager: str = "npm") -
         dev_server=dev_server,
     )
     config = ProjectConfig(
-        project_name="web", backends=[BackendConfig(project_name="web")], frontend=frontend
+        project_name="web", backends=[BackendConfig(project_name="web")], frontends=[frontend]
     )
     return render_frontend_dockerfile(config, tmp_path).read_text(encoding="utf-8")
 

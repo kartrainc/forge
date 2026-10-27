@@ -60,6 +60,7 @@ def _scaffold_project_with_block(
     backend_name: str = "api",
     fragment_name: str = "demo_block_fragment",
     frontend: ForgeFrontendData | None = None,
+    frontends: tuple[ForgeFrontendData, ...] | None = None,
 ) -> dict:
     """Build a project tree with one tracked merge_block.
 
@@ -94,6 +95,7 @@ def _scaffold_project_with_block(
         options={},
         merge_blocks=merge_blocks,
         frontend=frontend,
+        frontends=frontends,
     )
     return {
         "backend_dir": backend_dir,
@@ -484,6 +486,51 @@ class TestAcceptHarvestedBlockHappyPath:
         data = read_forge_toml(tmp_path / "forge.toml")
         assert data.frontend.framework == "flutter"
         assert data.frontend.layout == "threepane"
+
+    def test_restamp_preserves_every_frontend(self, tmp_path: Path) -> None:
+        """Accepting a harvest bundle keeps every recorded frontend."""
+        fragment_name = "test_block_accept_frontends"
+        meta = _scaffold_project_with_block(
+            tmp_path,
+            fragment_name=fragment_name,
+            frontends=(
+                ForgeFrontendData(framework="vue", app_dir="apps/frontend", layout="topnav"),
+                ForgeFrontendData(framework="vue", app_dir="apps/admin", ui_kit="nuxt-ui"),
+            ),
+        )
+        edited_body = "# block body line 1\n# user added a line\n# block body line 2\n"
+        original_segment = _block_text(fragment_name, "DEMO_MARKER", meta["block_body"])
+        new_segment = _block_text(fragment_name, "DEMO_MARKER", edited_body)
+        meta["main_py"].write_text(
+            meta["main_py"].read_text().replace(original_segment, new_segment)
+        )
+        fragment_dir = _make_fragment_dir_with_block(
+            tmp_path,
+            fragment_name=fragment_name,
+            target_relpath="src/app/main.py",
+            marker_bare="DEMO_MARKER",
+            snippet=edited_body,
+        )
+        _register_fragment(fragment_name, fragment_dir)
+        try:
+            bundle = tmp_path / "_bundle"
+            _write_bundle_manifest(
+                bundle,
+                _make_block_bundle(
+                    bundle_id="harvest-test-frontends",
+                    project_root=tmp_path,
+                    meta=meta,
+                    edited_body=edited_body,
+                ),
+            )
+            report = accept_harvested(project_root=tmp_path, bundle_path=bundle, quiet=True)
+        finally:
+            _unregister_fragment(fragment_name)
+
+        assert report.restamped == 1  # a rewrite actually happened
+        data = read_forge_toml(tmp_path / "forge.toml")
+        assert [fe.app_dir for fe in data.frontends] == ["apps/frontend", "apps/admin"]
+        assert data.frontends[1].ui_kit == "nuxt-ui"
 
     def test_indented_block_restamps_when_upstream_matches(self, tmp_path: Path) -> None:
         """Indented merge-blocks must round-trip, not only zero-indent ones.

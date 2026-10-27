@@ -22,6 +22,8 @@ The option is off by default, and an existing project turns it on with the same
 `forge --update` as any other option (see
 [UPGRADING](../../UPGRADING.md#frontend-dev-server-unreleased)).
 
+With several frontends (ADR-012) set it on each app that wants it; the overlay then has a service per app, on that app's port and host.
+
 It adds three things:
 
 - a `dev` stage in `apps/<frontend>/Dockerfile`, which runs as the unprivileged

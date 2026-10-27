@@ -184,7 +184,7 @@ def check_compose_for_dev_server(project_path: Path) -> CheckResult | None:
     try:
         from forge.sync.manifest import read_forge_toml  # noqa: PLC0415
 
-        enabled = read_forge_toml(manifest).frontend.dev_server
+        enabled = any(fe.dev_server for fe in read_forge_toml(manifest).frontends)
     except Exception:  # noqa: BLE001
         return None  # check_forge_toml reports an unreadable manifest
     if not enabled:

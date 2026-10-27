@@ -31,12 +31,12 @@ export default async (env: ConfigEnv): Promise<UserConfig> => {
       host: '0.0.0.0',
       // The port is the one the router targets: fail rather than move.
       strictPort: true,
-      // The host Traefik routes to this service, plus any named above; other
+      // The host Traefik routes to this app, plus any named above; other
       // external names are refused (Vite also always admits localhost, *.localhost
       // and IP addresses). Set after the project's config, not merged into it: a
       // merge concatenates host lists and keeps `true`, so the project could widen
       // the list.
-      allowedHosts: ['app.localhost', ...extraHosts],
+      allowedHosts: ['{{ dev_server_host }}', ...extraHosts],
     },
   }
 }

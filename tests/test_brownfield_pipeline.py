@@ -45,7 +45,7 @@ def _config(tmp: Path, *, with_spec: bool) -> ProjectConfig:
     return ProjectConfig(
         project_name="App",
         backends=[BackendConfig(project_name="App")],
-        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
+        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
         components=["EntityList"],
         options=opts,
     )
@@ -109,9 +109,12 @@ def test_emits_ts_adapters_for_valid_bindings(tmp_path: Path) -> None:
     (cc / "EntityList.contract.json").write_text(json.dumps({"component": "EntityList",
         "operations": [{"name": "list", "kind": "read", "input": {}, "output": {}}]}))
     cfg = ProjectConfig(
-        project_name="App", backends=[BackendConfig(project_name="App")],
-        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
-        components=["EntityList"], options={"frontend.openapi_spec_url": str(spec)})
+        project_name="App",
+        backends=[BackendConfig(project_name="App")],
+        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
+        components=["EntityList"],
+        options={"frontend.openapi_spec_url": str(spec)},
+    )
     proj = tmp_path / "proj"
     api = proj / "apps" / cfg.frontend_slug / "src" / "shared" / "api"
     api.mkdir(parents=True)
@@ -143,9 +146,12 @@ def test_capabilities_external_when_subscribe_op_bound(tmp_path: Path) -> None:
     (cc / "AgentChat.contract.json").write_text(json.dumps({"component": "AgentChat",
         "operations": [{"name": "stream", "kind": "subscribe", "input": {}, "output": {}}]}))
     cfg = ProjectConfig(
-        project_name="App", backends=[BackendConfig(project_name="App")],
-        frontend=FrontendConfig(framework=FrontendFramework.VUE, project_name="App"),
-        components=["AgentChat"], options={"frontend.openapi_spec_url": str(spec)})
+        project_name="App",
+        backends=[BackendConfig(project_name="App")],
+        frontends=[FrontendConfig(framework=FrontendFramework.VUE, project_name="App")],
+        components=["AgentChat"],
+        options={"frontend.openapi_spec_url": str(spec)},
+    )
     proj = tmp_path / "proj"
     api = proj / "apps" / cfg.frontend_slug / "src" / "shared" / "api"
     api.mkdir(parents=True)

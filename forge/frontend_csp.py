@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from forge.config import FrontendFramework
 
 if TYPE_CHECKING:
-    from forge.config import ProjectConfig
+    from forge.config import FrontendConfig, ProjectConfig
 
 #: The option that turns the policy on.
 OPTION = "security.csp"
@@ -41,9 +41,13 @@ _FONT_STYLESHEETS = "https://fonts.googleapis.com"
 _FONT_FILES = "https://fonts.gstatic.com"
 
 
-def csp_enabled(config: ProjectConfig) -> bool:
-    """True when ``security.csp`` is on and the frontend is the Vue template without chat."""
-    frontend = config.frontend
+def csp_enabled(config: ProjectConfig, frontend: FrontendConfig | None = None) -> bool:
+    """True when ``security.csp`` is on and ``frontend`` is the Vue template without chat.
+
+    ``frontend`` defaults to the primary; each app of a project decides on its own
+    (one with the AI chat is served without the policy).
+    """
+    frontend = frontend or config.frontend
     if frontend is None or frontend.framework != FrontendFramework.VUE:
         return False
     if frontend.include_chat:
@@ -57,7 +61,12 @@ def csp_enabled(config: ProjectConfig) -> bool:
 
 
 def _connect_sources(config: ProjectConfig) -> list[str]:
-    """``'self'``, the external API's origin when the frontend calls one, websockets."""
+    """``'self'``, plus the external API's origin when the frontend calls one.
+
+    No ``ws:`` or ``wss:``: the template opens no WebSocket (its event streams
+    are ``fetch`` requests, which ``'self'`` admits), and either scheme alone
+    admits every host. A project that opens one adds its origin in ``nginx.conf``.
+    """
     from forge.variable_mapper import external_api_url  # noqa: PLC0415
 
     sources = ["'self'"]
@@ -66,18 +75,17 @@ def _connect_sources(config: ProjectConfig) -> list[str]:
         parts = urlsplit(url)
         if parts.scheme and parts.netloc:
             sources.append(f"{parts.scheme}://{parts.netloc}")
-    sources += ["ws:", "wss:"]
     return sources
 
 
-def content_security_policy(config: ProjectConfig) -> str:
+def content_security_policy(config: ProjectConfig, frontend: FrontendConfig | None = None) -> str:
     """The policy nginx sends with ``index.html``, or ``""`` when it sends none.
 
     ``'report-sample'`` makes a violation report carry the first characters of
     the blocked code, which tells two known upstream elements apart from a real
     violation (``forge.quality.csp``).
     """
-    if not csp_enabled(config):
+    if not csp_enabled(config, frontend):
         return ""
     nonce = f"'nonce-{NONCE_VARIABLE}'"
     directives = [
@@ -95,9 +103,11 @@ def content_security_policy(config: ProjectConfig) -> str:
     return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives)
 
 
-def security_headers(config: ProjectConfig) -> tuple[tuple[str, str], ...]:
+def security_headers(
+    config: ProjectConfig, frontend: FrontendConfig | None = None
+) -> tuple[tuple[str, str], ...]:
     """The headers nginx sends with every response when the policy is on."""
-    if not csp_enabled(config):
+    if not csp_enabled(config, frontend):
         return ()
     return (
         ("X-Content-Type-Options", "nosniff"),

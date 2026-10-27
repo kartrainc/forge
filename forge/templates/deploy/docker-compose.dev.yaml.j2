@@ -2,12 +2,13 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch
 #
-# Replaces the nginx `frontend` service with a Vite dev server behind the same
-# Traefik router and host. Needs Docker Compose 2.39.4 or newer. It serves no
-# content-security policy and does not route the gatekeeper's sign-in paths:
-# check both on the built image.
+# Replaces the nginx service of each frontend that has `dev_server` with a Vite dev
+# server behind the same Traefik router and host. Needs Docker Compose 2.39.4 or newer.
+# It serves no content-security policy and does not route the gatekeeper's sign-in
+# paths: check both on the built image.
 services:
-  frontend:
+{% for app in apps %}
+  {{ app.service }}:
     build:
       target: dev
     volumes: !reset []
@@ -16,21 +17,21 @@ services:
     # Only the port the router targets changes. Labels merge key by key, so the rule,
     # the entrypoint and any host another overlay added to the router stay as they are.
     labels:
-      traefik.http.services.frontend.loadbalancer.server.port: "{{ frontend_port }}"
+      traefik.http.services.{{ app.service }}.loadbalancer.server.port: "{{ app.port }}"
     healthcheck: !override
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:{{ frontend_port }}/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:{{ app.port }}/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 20s
     develop:
       watch:
-        # The project is copied in as it changes. Vite restarts itself when its
-        # config, its imports or an .env file change. What the install owns
-        # stays in the image, and the files Vite generates at startup stay in
-        # the container, so nothing the container writes lands in the checkout.
+        # The app is copied in as it changes. Vite restarts itself when its config,
+        # its imports or an .env file change. What the install owns stays in the
+        # image, and the files Vite generates at startup stay in the container, so
+        # nothing the container writes lands in the checkout.
         - action: sync
-          path: ./apps/{{ frontend_slug }}
+          path: ./apps/{{ app.name }}
           target: /app
           initial_sync: true
           ignore:
@@ -38,11 +39,12 @@ services:
             - dist
             - coverage
             - package.json
-            - {{ lockfile }}
+            - {{ app.lockfile }}
             - src/auto-imports.d.ts
             - src/components.d.ts
         # A changed dependency list needs a new image.
         - action: rebuild
-          path: ./apps/{{ frontend_slug }}/package.json
+          path: ./apps/{{ app.name }}/package.json
         - action: rebuild
-          path: ./apps/{{ frontend_slug }}/{{ lockfile }}
+          path: ./apps/{{ app.name }}/{{ app.lockfile }}
+{% endfor %}

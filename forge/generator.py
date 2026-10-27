@@ -34,6 +34,7 @@ from forge.config import (
     BACKEND_REGISTRY,
     BackendConfig,
     BackendLanguage,
+    FrontendConfig,
     FrontendFramework,
     ProjectConfig,
     frontend_uses_subdirectory,
@@ -72,7 +73,7 @@ from forge.reports import (
     NextAction,
     SkippedToolchain,
 )
-from forge.sync.forge_to_project import apply_features, apply_project_features
+from forge.sync.forge_to_project import apply_features, apply_project_features, frontend_targets
 from forge.sync.provenance import ProvenanceCollector
 from forge.synthesis import PlatformSynthesis, compute_platform_synthesis
 
@@ -231,10 +232,11 @@ def generate(
     # the default kit's files while the recipe and manifest record the other,
     # and a kit with settings it cannot render (chat, a layout) would render
     # two variants of the same file.
-    if config.frontend is not None:
+    if config.frontends:
         from forge.ui_kits import check_frontend  # noqa: PLC0415
 
-        check_frontend(config.frontend)
+        for fc in config.frontends:
+            check_frontend(fc)
 
     if dry_run:
         # dry_run: generate into a throwaway temp dir as before.
@@ -640,15 +642,16 @@ def _generate_frontend_phase(
         if not quiet:
             print(msg)
 
-    # 2. Generate frontend
-    if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-        _log(f"  Generating {config.frontend.framework.value} frontend ...")
+    # 2. Generate every frontend, the primary first
+    for fc in config.active_frontends:
+        named = "" if config.is_primary_frontend(fc) else f" '{fc.name}'"
+        _log(f"  Generating {fc.framework.value} frontend{named} ...")
         with phase_timer(
             _logger,
             "generate.copier.frontend",
-            framework=config.frontend.framework.value,
+            framework=fc.framework.value,
         ):
-            _generate_frontend(config, project_root, quiet=quiet, dry_run=dry_run)
+            _generate_frontend(config, project_root, quiet=quiet, dry_run=dry_run, frontend=fc)
 
 
 def _synthesize_platform(
@@ -769,7 +772,7 @@ def _generate_frontend_extras(
         if not quiet:
             print(msg)
 
-    # 4. Generate Playwright e2e tests
+    # 4. Generate Playwright e2e tests — the root harness drives the primary app
     if (
         config.frontend
         and config.frontend.framework != FrontendFramework.NONE
@@ -778,27 +781,27 @@ def _generate_frontend_extras(
         _log("  Generating Playwright e2e tests ...")
         _generate_e2e_tests(config, project_root, quiet=quiet, dry_run=dry_run)
 
-    # 5. Render frontend Dockerfile and nginx.conf — built-ins always, and
-    # node-based plugin frontends (npm build → nginx static serve). A
+    # 5. Render each frontend's Dockerfile and nginx.conf — built-ins always,
+    # and node-based plugin frontends (npm build → nginx static serve). A
     # non-node plugin frontend ships its OWN deploy assets in its template
     # (forge can't presume the build tooling), so skip forge's Node/nginx
     # render for it.
-    if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-        fw = config.frontend.framework
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
 
-        _spec = FRONTEND_SPECS.get(fw.value)
+    for fc in config.active_frontends:
+        _spec = FRONTEND_SPECS.get(fc.framework.value)
         forge_renders_deploy = _spec is None or _spec.node_based
         if forge_renders_deploy:
             _log("  Rendering frontend Dockerfile ...")
-            frontend_dir = project_root / "apps" / config.frontend_slug
-            render_frontend_dockerfile(config, frontend_dir)
-            render_frontend_dockerignore(config, frontend_dir)
-            render_nginx_conf(config, frontend_dir)
-            if config.frontend.dev_server:
-                _log("  Rendering docker-compose.dev.yaml ...")
-                render_dev_overlay(config, project_root)
-                append_dev_server_readme(config, frontend_dir)
+            frontend_dir = project_root / "apps" / fc.name
+            render_frontend_dockerfile(config, frontend_dir, fc)
+            render_frontend_dockerignore(config, frontend_dir, fc)
+            render_nginx_conf(config, frontend_dir, fc)
+            if fc.dev_server:
+                append_dev_server_readme(config, frontend_dir, fc)
+    if any(fc.dev_server for fc in config.active_frontends):
+        _log("  Rendering docker-compose.dev.yaml ...")
+        render_dev_overlay(config, project_root)
 
 
 def _vue_ui_kit(config: ProjectConfig) -> str | None:
@@ -845,21 +848,16 @@ def _apply_project_scope(
     with phase_timer(_logger, "generate.apply_project_features"):
         from forge.config._topology import compute_topology  # noqa: PLC0415
 
-        _has_frontend = (
-            config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
-        )
         apply_project_features(
             project_root,
             plan.ordered,
             quiet=quiet,
             collector=collector,
             option_values=plan.option_values,
-            frontend_framework=(
-                config.frontend.framework if config.frontend else FrontendFramework.NONE
-            ),
             # Frontend-targeted project fragments (layered components, auth Vue
-            # fragments) emit into the active app at apps/<slug>/, not the root.
-            frontend_dir=(project_root / "apps" / config.frontend_slug if _has_frontend else None),
+            # fragments) emit into every app at apps/<name>/ that can take them,
+            # each with its own UI kit — not the root.
+            frontends=frontend_targets(config, project_root),
             # So project-level templates (e.g. the Helm chart values.yaml) that
             # render {{ server_port }} pick up the primary backend's port.
             primary_server_port=(config.backend.server_port if config.backend else None),
@@ -1178,13 +1176,14 @@ def _write_forge_toml(
         spec = BACKEND_REGISTRY[resolve_backend_language(lang)]
         templates[lang] = spec.template_dir
         template_versions[lang] = _resolve_template_version_for(spec.template_dir, spec.version)
-    if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-        fw = config.frontend.framework
+    # Every frontend framework of the project, as for backend languages: a
+    # Svelte app beside a Vue primary is update-checked against its own template.
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+
+    for fw in sorted({fc.framework for fc in config.active_frontends}, key=lambda f: f.value):
         # Built-in frontends dispatch via TEMPLATE_DIRS; plugin frontends carry
         # their template_dir on the registered FrontendSpec. Resolve either so
         # the frontend is recorded in [forge.templates] (required for --update).
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
-
         frontend_spec = FRONTEND_SPECS.get(fw.value)
         template_dir = TEMPLATE_DIRS.get(fw) or (
             frontend_spec.template_dir if frontend_spec is not None else None
@@ -1253,7 +1252,7 @@ def _write_forge_toml(
     # That inference can be wrong (matrix sandboxes with stale
     # ``apps/`` subdirs, monorepos that ship multiple frontends side-
     # by-side), so populate it from the typed config at write time.
-    frontend_data = _frontend_manifest_data(config)
+    frontends_data = _frontend_manifest_data(config)
 
     write_forge_toml(
         project_root / "forge.toml",
@@ -1265,32 +1264,32 @@ def _write_forge_toml(
         provenance=provenance,
         merge_blocks=merge_blocks,
         template_versions=template_versions,
-        frontend=frontend_data,
+        frontends=frontends_data,
         platform_template=config.platform_template,
     )
 
 
 def _frontend_manifest_data(config: ProjectConfig):
-    """Return the v4 ``[forge.frontend]`` manifest payload for ``config``.
+    """Return the manifest records of every rendered frontend, the primary first.
 
-    Returns ``None`` when the project is backend-only (no frontend
-    framework, or framework set to ``NONE``) so ``write_forge_toml``
-    omits the table — matches the read-side contract that "no frontend"
-    is expressed by absent table OR ``framework == "none"``.
+    Empty when the project is backend-only (no frontend, or framework
+    ``NONE``) so ``write_forge_toml`` omits ``[forge.frontend]`` — matches
+    the read-side contract that "no frontend" is expressed by an absent
+    table OR ``framework == "none"``.
     """
     from forge.sync.manifest import ForgeFrontendData  # noqa: PLC0415
-
-    if config.frontend is None or config.frontend.framework == FrontendFramework.NONE:
-        return None
     from forge.ui_kits import applies_to  # noqa: PLC0415
 
-    return ForgeFrontendData(
-        framework=config.frontend.framework.value,
-        app_dir=f"apps/{config.frontend_slug}",
-        layout=config.frontend.layout,
-        # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
-        ui_kit=config.frontend.ui_kit if applies_to(config.frontend.framework) else "",
-        dev_server=config.frontend.dev_server,
+    return tuple(
+        ForgeFrontendData(
+            framework=fc.framework.value,
+            app_dir=f"apps/{fc.name}",
+            layout=fc.layout,
+            # Only templates with kits record one; Svelte/Flutter manifests stay as they were.
+            ui_kit=fc.ui_kit if applies_to(fc.framework) else "",
+            dev_server=fc.dev_server,
+        )
+        for fc in config.active_frontends
     )
 
 
@@ -1480,16 +1479,22 @@ def _generate_single_backend(
 
 
 def _generate_frontend(
-    config: ProjectConfig, project_root: Path, quiet: bool = False, dry_run: bool = False
+    config: ProjectConfig,
+    project_root: Path,
+    quiet: bool = False,
+    dry_run: bool = False,
+    *,
+    frontend: FrontendConfig | None = None,
 ) -> Path:
-    """Generate frontend using Copier."""
-    if config.frontend is None:
+    """Generate one frontend (default: the primary) into ``apps/<name>`` using Copier."""
+    fc = frontend or config.frontend
+    if fc is None:
         raise GeneratorError("_generate_frontend called without a frontend configured")
-    fw = config.frontend.framework
+    fw = fc.framework
     # Layout dispatch: a registered LayoutVariant selects the template dir for
     # the chosen (framework, layout). Built-ins always have a variant; anything
     # without one falls back to the legacy framework template (plugin frontends).
-    layout_name = config.frontend.layout or DEFAULT_LAYOUT
+    layout_name = fc.layout or DEFAULT_LAYOUT
     variant = get_layout_variant(fw, layout_name)
     template_dir = variant.template_dir if variant is not None else TEMPLATE_DIRS.get(fw)
     if template_dir is None:
@@ -1504,7 +1509,7 @@ def _generate_frontend(
     if template_dir is None:
         raise GeneratorError(f"No template for framework {fw.value!r} (layout {layout_name!r})")
 
-    ctx = variable_mapper.frontend_context(config)
+    ctx = variable_mapper.frontend_context(config, fc)
     if fw in {FrontendFramework.VUE, FrontendFramework.SVELTE}:
         # Copier still installs dependencies and prepares the template. Checks
         # need the API clients/protocols emitted by later composition phases.
@@ -1515,7 +1520,7 @@ def _generate_frontend(
     # inner directory name (Flutter's ``{{project_slug}}/``) and need
     # dst_path set to the parent.
     uses_subdir = frontend_uses_subdirectory(fw)
-    app_dir = project_root / "apps" / config.frontend_slug
+    app_dir = project_root / "apps" / fc.name
     dst = app_dir if uses_subdir else project_root / "apps"
     dst.mkdir(parents=True, exist_ok=True)
     base_dir = variant.base_template_dir if variant is not None else ""
@@ -1526,13 +1531,11 @@ def _generate_frontend(
         # Phase-0 PoC. Self-contained variants (base_dir == "") skip this.
         _run_copier(TEMPLATES_DIR / base_dir, dst, ctx, quiet, skip_tasks=True, dry_run=dry_run)
     _run_copier(TEMPLATES_DIR / template_dir, dst, ctx, quiet, dry_run=dry_run)
-    if dry_run and config.frontend.framework in {FrontendFramework.VUE, FrontendFramework.SVELTE}:
+    if dry_run and fw in {FrontendFramework.VUE, FrontendFramework.SVELTE}:
         import sys
 
         relative = (
-            "scripts/post_generate.py"
-            if config.frontend.framework == FrontendFramework.VUE
-            else "_build/post_generate.py"
+            "scripts/post_generate.py" if fw == FrontendFramework.VUE else "_build/post_generate.py"
         )
         script = app_dir / relative
         if script.is_file():
@@ -1565,21 +1568,21 @@ def _run_frontend_checks(
     Copier's setup hook installs dependencies once, but cannot check sources
     that Forge has not emitted yet. Quiet mode suppresses progress, not checks.
     """
-    frontend = config.frontend
-    if dry_run or frontend is None:
+    if dry_run:
         return
-    scripts = {
-        FrontendFramework.VUE: ("lint", "build"),  # build includes vue-tsc
-        FrontendFramework.SVELTE: ("check", "lint", "build"),
-    }.get(frontend.framework, ())
-    for script in scripts:
-        _run_backend_cmd(
-            project_root / "apps" / config.frontend_slug,
-            [frontend.package_manager, "run", script],
-            f"Frontend {frontend.framework.value} {script}",
-            required=True,
-            quiet=quiet,
-        )
+    for frontend in config.active_frontends:
+        scripts = {
+            FrontendFramework.VUE: ("lint", "build"),  # build includes vue-tsc
+            FrontendFramework.SVELTE: ("check", "lint", "build"),
+        }.get(frontend.framework, ())
+        for script in scripts:
+            _run_backend_cmd(
+                project_root / "apps" / frontend.name,
+                [frontend.package_manager, "run", script],
+                f"Frontend {frontend.framework.value} {script}",
+                required=True,
+                quiet=quiet,
+            )
 
 
 def _run_backend_cmd(
@@ -1844,7 +1847,7 @@ def _populate_report(
     if config.backends or (
         config.frontend is not None and config.frontend.framework != FrontendFramework.NONE
     ):
-        if config.frontend is not None and config.frontend.dev_server:
+        if any(fc.dev_server for fc in config.active_frontends):
             report.add_next_action(
                 NextAction(
                     command=DEV_STACK_COMMAND,

@@ -51,14 +51,16 @@ def _project(*, dev_server: bool, package_manager: str = "npm") -> ProjectConfig
     config = ProjectConfig(
         project_name="dev",
         backends=[BackendConfig(name="api", project_name="dev", language=BackendLanguage.PYTHON)],
-        frontend=FrontendConfig(
-            project_name="frontend",
-            framework=FrontendFramework.VUE,
-            package_manager=package_manager,
-            include_auth=False,
-            include_chat=False,
-            dev_server=dev_server,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework.VUE,
+                package_manager=package_manager,
+                include_auth=False,
+                include_chat=False,
+                dev_server=dev_server,
+            )
+        ],
     )
     config.validate()
     return config
@@ -270,3 +272,112 @@ def test_the_merged_compose_file_serves_vite_behind_the_same_router(on: Path) ->
         "rebuild",
         "rebuild",
     ]
+
+
+@pytest.fixture(scope="module")
+def both() -> Iterator[Path]:
+    root = Path(
+        generate(TestSeveralFrontends._config(first=True, second=True), quiet=True, dry_run=True)
+    )
+    yield root
+    shutil.rmtree(root.parent, ignore_errors=True)
+
+
+class TestSeveralFrontends:
+    """With a list of frontends (ADR-012) each app that has the option gets its own service."""
+
+    @staticmethod
+    def _config(*, first: bool, second: bool) -> ProjectConfig:
+        def app(name: str, port: int, dev_server: bool) -> FrontendConfig:
+            return FrontendConfig(
+                project_name=name,
+                name=name,
+                framework=FrontendFramework.VUE,
+                include_auth=False,
+                include_chat=False,
+                server_port=port,
+                dev_server=dev_server,
+            )
+
+        config = ProjectConfig(
+            project_name="two",
+            backends=[
+                BackendConfig(name="api", project_name="two", language=BackendLanguage.PYTHON)
+            ],
+            frontends=[app("frontend", 5173, first), app("console", 5174, second)],
+        )
+        config.validate()
+        return config
+
+    def test_each_app_has_its_own_service_port_and_sync(self, both: Path) -> None:
+        services = _load(both / "docker-compose.dev.yaml")["services"]
+        assert list(services) == ["frontend", "console"]
+        assert services["console"]["build"] == {"target": "dev"}
+        assert services["frontend"]["labels"] == {
+            "traefik.http.services.frontend.loadbalancer.server.port": "5173"
+        }
+        assert services["console"]["labels"] == {
+            "traefik.http.services.console.loadbalancer.server.port": "5174"
+        }
+        assert "127.0.0.1:5174" in services["console"]["healthcheck"]["value"]["test"][3]
+        assert services["console"]["develop"]["watch"][0]["path"] == "./apps/console"
+        assert services["frontend"]["develop"]["watch"][0]["path"] == "./apps/frontend"
+
+    def test_each_wrapper_admits_its_own_host(self, both: Path) -> None:
+        primary = (both / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
+        second = (both / "apps/console/vite.dev.config.ts").read_text(encoding="utf-8")
+        assert "allowedHosts: ['app.localhost', ...extraHosts]" in primary
+        assert "allowedHosts: ['console.localhost', ...extraHosts]" in second
+
+    def test_each_app_has_its_own_dev_stage_and_readme_section(self, both: Path) -> None:
+        for name in ("frontend", "console"):
+            assert " AS dev" in (both / f"apps/{name}/Dockerfile").read_text(encoding="utf-8")
+            readme = (both / f"apps/{name}/README.md").read_text(encoding="utf-8")
+            assert f"Edits under `apps/{name}` sync" in readme
+
+    def test_only_the_apps_that_ask_for_it_are_overridden(self) -> None:
+        root = Path(generate(self._config(first=False, second=True), quiet=True, dry_run=True))
+        try:
+            assert list(_load(root / "docker-compose.dev.yaml")["services"]) == ["console"]
+            assert not (root / "apps/frontend/vite.dev.config.ts").exists()
+            assert (root / "apps/console/vite.dev.config.ts").is_file()
+            assert " AS dev" not in (root / "apps/frontend/Dockerfile").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(root.parent, ignore_errors=True)
+
+    def test_neither_app_means_no_overlay(self) -> None:
+        root = Path(generate(self._config(first=False, second=False), quiet=True, dry_run=True))
+        try:
+            assert not (root / "docker-compose.dev.yaml").exists()
+        finally:
+            shutil.rmtree(root.parent, ignore_errors=True)
+
+
+@pytest.mark.e2e
+def test_the_merged_compose_file_overrides_every_enabled_app(tmp_path: Path) -> None:
+    root = Path(
+        generate(TestSeveralFrontends._config(first=True, second=True), quiet=True, dry_run=True)
+    )
+    try:
+        docker = shutil.which("docker")
+        assert docker, "the Docker CLI is required for this test"
+        result = subprocess.run(
+            [docker, "compose", "-f", "docker-compose.yml", "-f", "docker-compose.dev.yaml"]
+            + ["config", "--format", "json"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+        services = json.loads(result.stdout)["services"]
+        for service, port, host in (
+            ("frontend", "5173", "app.localhost"),
+            ("console", "5174", "console.localhost"),
+        ):
+            labels = services[service]["labels"]
+            assert services[service]["build"]["target"] == "dev"
+            assert labels[f"traefik.http.services.{service}.loadbalancer.server.port"] == port
+            assert labels[f"traefik.http.routers.{service}.rule"] == f"Host(`{host}`)"
+    finally:
+        shutil.rmtree(root.parent, ignore_errors=True)

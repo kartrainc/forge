@@ -36,14 +36,16 @@ def _config(*, dev_server: bool) -> ProjectConfig:
     config = ProjectConfig(
         project_name="toggle",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontend=FrontendConfig(
-            project_name="frontend",
-            framework=FrontendFramework.VUE,
-            include_auth=True,
-            include_chat=False,
-            include_openapi=False,
-            dev_server=dev_server,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="frontend",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                include_openapi=False,
+                dev_server=dev_server,
+            )
+        ],
     )
     config.validate()
     return config
@@ -132,3 +134,50 @@ def test_the_plan_reports_the_removal_without_touching_the_project(project: Path
     deleted = {c["path"] for c in plan["changes"] if c["action"] == "delete"}
     assert {OVERLAY, WRAPPER} <= deleted
     assert (project / OVERLAY).is_file() and (project / WRAPPER).is_file()
+
+
+def test_with_two_apps_disabling_one_removes_only_its_wrapper(tmp_path: Path) -> None:
+    """The overlay is one file for every app; it goes only when no app has the option."""
+
+    def config(first: bool, second: bool) -> ProjectConfig:
+        def app(name: str, port: int, dev_server: bool) -> FrontendConfig:
+            return FrontendConfig(
+                project_name=name,
+                name=name,
+                framework=FrontendFramework.VUE,
+                include_auth=False,
+                include_chat=False,
+                server_port=port,
+                dev_server=dev_server,
+            )
+
+        built = ProjectConfig(
+            project_name="two",
+            backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
+            frontends=[app("frontend", 5173, first), app("console", 5174, second)],
+        )
+        built.validate()
+        return built
+
+    rendered = Path(generate(config(True, True), quiet=True, dry_run=True))
+    root = tmp_path / "project"
+    shutil.copytree(rendered, root)
+    shutil.rmtree(rendered.parent, ignore_errors=True)
+    recipe = root / ".forge" / "quality.json"
+
+    def set_flags(first: bool, second: bool) -> dict:
+        data = json.loads(recipe.read_text(encoding="utf-8"))
+        # The recipe records the primary twice: as `frontend` and as `frontends[0]`.
+        data["config"]["frontend"]["dev_server"] = first
+        data["config"]["frontends"][0]["dev_server"] = first
+        data["config"]["frontends"][1]["dev_server"] = second
+        recipe.write_text(json.dumps(data), encoding="utf-8")
+        return update_owned_project(root)
+
+    assert (root / "apps/console/vite.dev.config.ts").is_file()
+    assert set_flags(True, False)["passed"]
+    assert (root / OVERLAY).is_file() and (root / WRAPPER).is_file()
+    assert not (root / "apps/console/vite.dev.config.ts").exists()
+    assert "console" not in (root / OVERLAY).read_text(encoding="utf-8").split("services:")[1]
+    assert set_flags(False, False)["passed"]
+    assert not (root / OVERLAY).exists() and not (root / WRAPPER).exists()

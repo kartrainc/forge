@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from forge.config import (
     DEFAULT_REALM,
     TRAEFIK_DASHBOARD_PORT,
     BackendLanguage,
+    FrontendConfig,
     FrontendFramework,
     ProjectConfig,
 )
@@ -21,6 +23,8 @@ from forge.config._topology import (
     backend_topology_entry,
     compute_render_postgres,
     compute_rendered_infra,
+    frontend_host_rule,
+    frontend_topology_entry,
 )
 from forge.errors import GeneratorError
 from forge.services.registry import get_services_for_capabilities
@@ -87,6 +91,12 @@ def render_compose(
                 block.setdefault("environment", {})["API_KEYS_ENABLED"] = (
                     "true" if plan.option_values.get("auth.api_keys") else "false"
                 )
+                if config.frontend_host_labels:
+                    # Hosts of the frontends beside the primary, which the
+                    # gatekeeper resolves to the project's realm and tenant.
+                    block["environment"]["GATEKEEPER_FRONTEND_HOST_LABELS"] = ",".join(
+                        config.frontend_host_labels
+                    )
             extra_services.append({"name": svc.name, "block": block})
             for vol in svc.named_volumes:
                 if vol not in seen_volumes:
@@ -180,6 +190,14 @@ def render_compose(
         ),
         "extra_services": extra_services,
         "extra_volumes": extra_volumes,
+        # Frontends beside the primary, and the host rule backend routers
+        # match (every frontend's host; app.localhost alone for one frontend).
+        "extra_frontends": [
+            frontend_topology_entry(config, fc)
+            for fc in config.active_frontends
+            if not config.is_primary_frontend(fc)
+        ],
+        "frontend_host_rule": frontend_host_rule(config),
     }
 
     output = template.render(context)
@@ -210,17 +228,14 @@ def render_compose(
 def _project_has_node(config: ProjectConfig, active_fragments: set[str]) -> bool:
     if any(b.language == BackendLanguage.NODE for b in config.backends):
         return True
-    if config.frontend is not None and config.frontend.framework in (
-        FrontendFramework.VUE,
-        FrontendFramework.SVELTE,
-    ):
-        return True
-    # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
-    # workspace root — its FrontendSpec declares node_based.
-    if config.frontend is not None:
-        from forge.config import FRONTEND_SPECS  # noqa: PLC0415
+    from forge.config import FRONTEND_SPECS  # noqa: PLC0415
 
-        spec = FRONTEND_SPECS.get(config.frontend.framework.value)
+    for fc in config.active_frontends:
+        if fc.framework in (FrontendFramework.VUE, FrontendFramework.SVELTE):
+            return True
+        # A node-based plugin frontend (e.g. Solid/Qwik) also needs the npm
+        # workspace root — its FrontendSpec declares node_based.
+        spec = FRONTEND_SPECS.get(fc.framework.value)
         if spec is not None and spec.node_based:
             return True
     return "platform_auth_sdk_node" in active_fragments
@@ -306,10 +321,15 @@ def render_workspace_cargo_toml(
     return cargo_path
 
 
-def render_frontend_dockerfile(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render a two-stage production Dockerfile into the frontend directory."""
+def render_frontend_dockerfile(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render a two-stage production Dockerfile into the frontend directory.
+
+    ``frontend`` defaults to the primary.
+    """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerfile called without a frontend configured")
 
@@ -376,7 +396,9 @@ Traefik router and host as the built app. From the project root:
 """
 
 
-def append_dev_server_readme(config: ProjectConfig, frontend_dir: Path) -> Path | None:
+def append_dev_server_readme(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path | None:
     """Add the hot-reload section to the app's README, which the Vue template writes.
 
     Done here rather than in the template's post-generate script so a project without
@@ -388,51 +410,64 @@ def append_dev_server_readme(config: ProjectConfig, frontend_dir: Path) -> Path 
     text = readme.read_text(encoding="utf-8")
     if "## Hot reload in Docker Compose" in text:
         return readme
-    section = _DEV_SERVER_README.format(command=DEV_STACK_COMMAND, slug=config.frontend_slug)
+    fc = frontend or config.frontend
+    slug = fc.name if fc is not None else config.frontend_slug
+    section = _DEV_SERVER_README.format(command=DEV_STACK_COMMAND, slug=slug)
     readme.write_text(text.rstrip("\n") + "\n" + section, encoding="utf-8")
     return readme
 
 
-def dev_server_files(app_dir: str) -> tuple[str, ...]:
-    """The files ``frontend.dev_server`` makes forge write, relative to the project root."""
-    return (DEV_OVERLAY, f"{app_dir.strip('/') or 'apps/frontend'}/vite.dev.config.ts")
+def dev_server_files(app_dirs: Iterable[str]) -> tuple[str, ...]:
+    """The files ``frontend.dev_server`` makes forge write for these app directories.
+
+    The overlay is one file for every frontend that has the option; the wrapper is one
+    per app. Relative to the project root.
+    """
+    wrappers = tuple(f"{app_dir.strip('/')}/vite.dev.config.ts" for app_dir in app_dirs)
+    return (DEV_OVERLAY, *wrappers) if wrappers else ()
 
 
 def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
     """Render ``docker-compose.dev.yaml``, the Vite dev-server overlay (ADR-013).
 
-    It overrides the ``frontend`` service of ``docker-compose.yml`` only: the
-    ``dev`` Dockerfile stage as the build target, the router's labels with the
-    service port set to the dev server's, a Node health check, and the Compose
-    Watch rules that sync the project into the container.
+    It overrides the compose service of every frontend that has ``dev_server``: the
+    ``dev`` Dockerfile stage as the build target, the router's service port set to the
+    dev server's, a Node health check, and the Compose Watch rules that sync the app
+    into the container. The primary frontend's service is ``frontend``; a further
+    frontend's is its DNS name, as in ``docker-compose.yml``.
     """
-    fc = config.frontend
-    if fc is None or not fc.dev_server:
-        raise ValueError("render_dev_overlay called without frontend.dev_server")
-    template = _jinja_env().get_template("deploy/docker-compose.dev.yaml.j2")
-    output = template.render(
+    apps = [
         {
-            "frontend_slug": config.frontend_slug,
-            "frontend_port": fc.server_port,
+            "service": "frontend" if config.is_primary_frontend(fc) else fc.dns_name,
+            "name": fc.name,
+            "port": fc.server_port,
             "lockfile": _LOCKFILES.get(fc.package_manager, "package-lock.json"),
         }
-    )
+        for fc in config.active_frontends
+        if fc.dev_server
+    ]
+    if not apps:
+        raise ValueError("render_dev_overlay called without a frontend that has dev_server")
+    template = _jinja_env().get_template("deploy/docker-compose.dev.yaml.j2")
+    output = template.render({"apps": apps})
     overlay_path = project_root / DEV_OVERLAY
     overlay_path.write_text(output, encoding="utf-8")
     return overlay_path
 
 
-def render_frontend_dockerignore(config: ProjectConfig, frontend_dir: Path) -> Path:
-    """Render the ``.dockerignore`` of the frontend image's build context.
+def render_frontend_dockerignore(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
+    """Render the ``.dockerignore`` of a frontend image's build context.
 
     The build context is the whole application directory, and ``COPY . .``
     merges a directory file by file over what the image already holds. The
     Dockerfile installs from the lockfile and builds from source, so a host
     install, build output and ``.env.*.local`` files (which ``vite build``
-    reads) stay out of the context.
+    reads) stay out of the context. ``frontend`` defaults to the primary.
     """
     env = _jinja_env()
-    fc = config.frontend
+    fc = frontend or config.frontend
     if fc is None:
         raise ValueError("render_frontend_dockerignore called without a frontend configured")
 
@@ -675,11 +710,14 @@ def render_service_registry(
     return registry_path
 
 
-def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
+def render_nginx_conf(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path:
     """Render nginx.conf into the frontend directory.
 
     It serves the static build with an SPA fallback and, under ``security.csp``,
-    the headers and nonce policy of :mod:`forge.frontend_csp`.
+    the headers and nonce policy of :mod:`forge.frontend_csp` for ``frontend``
+    (default: the primary).
     """
     from forge import frontend_csp  # noqa: PLC0415
 
@@ -687,8 +725,8 @@ def render_nginx_conf(config: ProjectConfig, frontend_dir: Path) -> Path:
     template = env.get_template("deploy/nginx.conf.j2")
     output = template.render(
         {
-            "security_headers": frontend_csp.security_headers(config),
-            "content_security_policy": frontend_csp.content_security_policy(config),
+            "security_headers": frontend_csp.security_headers(config, frontend),
+            "content_security_policy": frontend_csp.content_security_policy(config, frontend),
             "nonce_placeholder": frontend_csp.NONCE_PLACEHOLDER,
             "nonce_variable": frontend_csp.NONCE_VARIABLE,
         }

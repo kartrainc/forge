@@ -37,7 +37,6 @@ features:
     {% if not f | regex_search('^[a-z][a-z0-9_]*$') %}Feature '{{ f }}' must be snake_case. {% endif %}
     {% if f in reserved %}Feature '{{ f }}' is a reserved name. {% endif %}
     {% endfor %}
-    {% if features.split(',') | map('trim') | select() | list | length == 0 %}At least one feature is required.{% endif %}
 
 author_name:
   type: str

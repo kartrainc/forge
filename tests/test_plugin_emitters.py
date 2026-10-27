@@ -64,7 +64,7 @@ def _make_project(tmp_path: Path) -> tuple[ProjectConfig, Path]:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
     )
     return config, project_root
 

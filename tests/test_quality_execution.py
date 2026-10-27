@@ -157,10 +157,12 @@ def test_lcov_adapters_require_successful_native_tests(service, monkeypatch, lan
 
 def test_browser_remaps_original_sources(service, monkeypatch):
     root, directory, source = service
+    monkeypatch.delenv("VITE_AUTH_DISABLED", raising=False)
 
     def playwright(argv, **kwargs):
-        # The browser suites mock the API in the page; no gateway serves /auth.
-        assert kwargs["env"]["VITE_AUTH_DISABLED"] == "true"
+        # The app keeps the project's authentication setting (its .env): the
+        # suites answer the session in the page, as a consumer's own specs do.
+        assert "VITE_AUTH_DISABLED" not in kwargs["env"]
         kwargs["stdout"].write(json.dumps({"stats": {"expected": 2, "unexpected": 0, "flaky": 0}}))
         return subprocess.CompletedProcess(argv, 0)
 
@@ -184,6 +186,12 @@ _TRANSITION = {
     "blocked-uri": "inline",
     "script-sample": "*,*::before,*::after{-webkit-transition:",
 }
+_CANARY = {
+    "document-uri": "http://127.0.0.1:4174/__csp-canary",
+    "effective-directive": "script-src-elem",
+    "blocked-uri": "http://127.0.0.1:4174/__csp-canary.js",
+    "script-sample": "",
+}
 _ICON_FETCH = {
     "document-uri": "http://127.0.0.1:4174/",
     "effective-directive": "connect-src",
@@ -193,19 +201,36 @@ _ICON_FETCH = {
 
 
 def _content_security(
-    tmp_path, monkeypatch, reports, stats=None, *, ui_kit="nuxt-ui", exit_code=0, errors=()
+    tmp_path,
+    monkeypatch,
+    reports,
+    stats=None,
+    *,
+    ui_kit="nuxt-ui",
+    exit_code=0,
+    errors=(),
+    canary=True,
+    script="fetch('/__csp-canary')\n",
 ):
     service = tmp_path / "apps" / "web"
-    service.mkdir(parents=True)
+    (service / "scripts").mkdir(parents=True)
     (service / "playwright.csp.config.ts").write_text("export default {}\n", encoding="utf-8")
+    # The project's serve script; one that opens the canary page makes its
+    # report mandatory.
+    (service / "scripts" / "serve-csp.mjs").write_text(script, encoding="utf-8")
+    # serve-csp.mjs opens its canary page once: its report proves that reports
+    # reach the check.
+    reports = [*reports, _CANARY] if canary else reports
     monkeypatch.setenv("FORGE_BROWSER_COVERAGE", "/coverage")
+    monkeypatch.delenv("VITE_AUTH_DISABLED", raising=False)
     calls = []
 
     def run(argv, **kwargs):
         env = kwargs["env"]
         calls.append(argv[:3])
-        # The production build, without instrumentation, auth off, reporting.
-        assert "FORGE_BROWSER_COVERAGE" not in env and env["VITE_AUTH_DISABLED"] == "true"
+        # The production build, without instrumentation, with the project's own
+        # authentication setting, reporting.
+        assert "FORGE_BROWSER_COVERAGE" not in env and "VITE_AUTH_DISABLED" not in env
         if argv[:3] == ["npx", "--no-install", "playwright"]:
             with open(env["FORGE_CSP_REPORT"], "w", encoding="utf-8") as stream:
                 stream.writelines(json.dumps(report) + "\n" for report in reports)
@@ -261,6 +286,30 @@ def test_content_security_fails_when_playwright_fails_outside_the_tests(
     result = _content_security(tmp_path, monkeypatch, [], exit_code=exit_code, errors=errors)
     assert result["passed"] is False
     assert (result["exit_code"], result["errors"]) == (exit_code, len(errors))
+
+
+def test_content_security_fails_when_no_report_reaches_it(tmp_path, monkeypatch):
+    # An empty report file would otherwise pass: a policy that reports nowhere,
+    # a broken collector, a browser that never loaded a page.
+    result = _content_security(tmp_path, monkeypatch, [], canary=False)
+    assert result["passed"] is False and result["canary"] == 0
+    assert "no report reached the check" in result["error"]
+
+
+def test_a_serve_script_older_than_the_canary_warns_instead_of_failing(tmp_path, monkeypatch):
+    # A project updated without a recipe, or with an unmerged sidecar, still
+    # runs the serve script forge wrote before the canary existed.
+    result = _content_security(
+        tmp_path, monkeypatch, [], ui_kit="shadcn", canary=False, script="// before the canary\n"
+    )
+    assert result["passed"] is True and result["canary"] == 0 and "error" not in result
+    assert "predates the canary" in result["warning"] and "forge --update" in result["warning"]
+
+
+def test_the_canary_proves_collection_and_is_no_violation(tmp_path, monkeypatch):
+    result = _content_security(tmp_path, monkeypatch, [], ui_kit="shadcn")
+    assert result["passed"] is True and result["canary"] == 1
+    assert result["violations"] == [] and "error" not in result
 
 
 def test_content_security_skips_a_frontend_without_the_policy(tmp_path):
@@ -380,9 +429,11 @@ def test_workspace_dependencies_are_explicit_and_frozen(tmp_path, monkeypatch, l
             BackendConfig(name="node", language=BackendLanguage.NODE, server_port=5001),
             BackendConfig(name="rust", language=BackendLanguage.RUST, server_port=5002),
         ],
-        frontend=FrontendConfig(
-            project_name="locks", framework=FrontendFramework.SVELTE, include_auth=False
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="locks", framework=FrontendFramework.SVELTE, include_auth=False
+            )
+        ],
     )
     write_recipe(tmp_path, config)
     (tmp_path / "package.json").write_text(
@@ -409,12 +460,14 @@ def test_flutter_dependency_generation_is_explicit(tmp_path, monkeypatch):
     config = ProjectConfig(
         project_name="flutter",
         backends=[],
-        frontend=FrontendConfig(
-            project_name="flutter",
-            framework=FrontendFramework.FLUTTER,
-            include_auth=False,
-            include_openapi=True,
-        ),
+        frontends=[
+            FrontendConfig(
+                project_name="flutter",
+                framework=FrontendFramework.FLUTTER,
+                include_auth=False,
+                include_openapi=True,
+            )
+        ],
     )
     write_recipe(tmp_path, config)
     calls = []
@@ -682,7 +735,7 @@ def test_go_subjects_record_runtime_and_shared_modules(tmp_path) -> None:
     config = ProjectConfig(
         project_name="shop",
         backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
-        frontend=None,
+        frontends=[],
     )
     package = tmp_path / "packages" / "platform-auth-go"
     package.mkdir(parents=True)
@@ -701,7 +754,7 @@ def test_go_dependency_commands(tmp_path, monkeypatch) -> None:
     config = ProjectConfig(
         project_name="shop",
         backends=[BackendConfig(name="orders", project_name="shop", language=BackendLanguage.GO)],
-        frontend=None,
+        frontends=[],
     )
     write_recipe(tmp_path, config)
     executed: list[list[str]] = []

@@ -33,6 +33,7 @@ from forge.sync.forge_to_project.updater import (
     update_project,
 )
 from forge.sync.manifest import (
+    CURRENT_SCHEMA_VERSION,
     ForgeFrontendData,
     read_forge_toml,
     write_forge_toml,
@@ -129,7 +130,7 @@ class TestFrontendOnlyUpdatePositive:
         assert summary["update_mode"] == "merge"
         # Manifest was re-stamped to current schema version.
         data = read_forge_toml(project_root / "forge.toml")
-        assert data.schema_version == 4
+        assert data.schema_version == CURRENT_SCHEMA_VERSION
         assert data.frontend.framework == "vue"
         assert data.frontend.app_dir == "apps/frontend"
 
@@ -147,8 +148,8 @@ class TestFrontendOnlyUpdatePositive:
         data = read_forge_toml(project_root / "forge.toml")
         assert data.frontend.framework == "flutter"
 
-    def test_v3_manifest_upgrades_to_v4_via_inference(self, tmp_path: Path) -> None:
-        """A v3 manifest with apps/ on disk loads, updates, and stamps v4."""
+    def test_v3_manifest_upgrades_to_current_via_inference(self, tmp_path: Path) -> None:
+        """A v3 manifest with apps/ on disk loads, updates, and stamps the current version."""
         # ``schema_version=3`` keeps the writer from emitting the v4
         # [forge.frontend] table; the read path then re-infers from
         # disk and the updater's re-stamp writes v4 with the
@@ -169,7 +170,7 @@ class TestFrontendOnlyUpdatePositive:
         assert summary["backends"] == []
 
         after = read_forge_toml(project_root / "forge.toml")
-        assert after.schema_version == 4
+        assert after.schema_version == CURRENT_SCHEMA_VERSION
         # Inference picked up vue from apps/frontend/package.json.
         assert after.frontend.framework == "vue"
         assert after.frontend.app_dir == "apps/frontend"
@@ -430,7 +431,7 @@ class TestResolverBridgeForFrontendOnly:
                     language=BackendLanguage.PYTHON,
                 ),
             ],
-            frontend=fc,
+            frontends=[fc],
             # include_keycloak so auth.mode=generate stays effective (the
             # resolver coerces it to none when keycloak is off).
             include_keycloak=True,
@@ -448,7 +449,7 @@ class TestResolverBridgeForFrontendOnly:
         cfg_unbridged = ProjectConfig(
             project_name="fe",
             backends=[],
-            frontend=fc,
+            frontends=[fc],
             options={"backend.mode": "none", "auth.mode": "generate"},
             option_origins={"backend.mode": "user", "auth.mode": "user"},
         )

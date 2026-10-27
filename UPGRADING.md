@@ -372,6 +372,25 @@ was inlined into the served bundle. Every frontend now ships
   file: it is scaffold, so later updates keep your edit or propose a
   `.forge-merge` sidecar.
 
+### Browser suites keep the project's authentication setting (unreleased)
+
+`forge --quality test` and the rendered lanes used to run the Vue and Svelte
+browser suites with `VITE_AUTH_DISABLED=true` forced, whatever the project's
+`.env` said. They now run the app as the project configures it, as the unit
+and integration suites always did; so does the content-security check.
+
+- Nothing serves `/auth/*` in the browser suites, so a suite of a project with
+  authentication on answers the session in the page. The template's specs call
+  `mockSession(page)` from the new `tests/e2e/session.ts`, which answers
+  `/auth/userinfo` with the development user's details; a spec that routes
+  `/auth/*` itself after it takes precedence.
+- Untouched `application.spec.ts` and `crud.ts` are updated in place; edited
+  ones receive a sidecar. A spec of your own that reached a signed-in page
+  only because authentication was forced off calls `mockSession` too.
+- A project whose specs already mock the session, signed in or out, runs them
+  as written again: forcing authentication off had made the app skip those
+  mocks.
+
 ### Frontend content-security policy (unreleased)
 
 `security.csp` (on by default) used to emit `deploy/infra/nginx-csp.conf`,
@@ -398,20 +417,93 @@ kit it uses, unless the project has the AI chat:
   `FORGE_BROWSER_COVERAGE` is set.
 - Code of your own that inserts `<style>` elements or writes `style`
   attributes as markup is blocked from now on; Vue's `:style` bindings are not.
-  Add the origins your frontend calls, such as an error tracker, to
-  `connect-src` in `nginx.conf`. To serve without the policy, set
+  Add the origins your frontend calls, such as an error tracker or a
+  WebSocket server, to `connect-src` in `nginx.conf`: the policy admits the
+  page's own origin and an external API's, not `ws:` or `wss:` at large, which
+  would admit every host. To serve without the policy, set
   `"security.csp" = false` under `[forge.options]` in `forge.toml`, and
   `"security.csp" = "user"` under `[forge.option_origins]`, then update: the
   update takes options from `forge.toml`, not from the recipe.
 - `scripts/serve-csp.mjs` and `playwright.csp.config.ts` run the browser suites
-  against the production build under the policy, with auth disabled since
-  nothing serves `/auth/*` there:
-  `VITE_AUTH_DISABLED=true npm run build && npx playwright test -c playwright.csp.config.ts`.
-  The sign-in flow, a same-origin `fetch` of `/auth/userinfo` and navigations
-  to `/auth/login` and `/logout`, is not run under the policy.
+  against the production build under the policy, with the project's
+  authentication setting: `npm run build && npx playwright test -c playwright.csp.config.ts`.
+  Nothing serves `/auth/*` there, so the suites answer the session in the page
+  (above). The policy is read from `nginx.conf`; a project that keeps its own
+  policy in a header template names that file in `csp-check.json` beside the
+  config, with the values of its `${NAME}` variables
+  (`{"policy": "security-headers.conf", "variables": {"MEDIA_ORIGINS": "…"}}`);
+  exactly one source names the policy, and both or neither, an undeclared
+  variable or two different policies stop the check. Before the suites, the
+  script opens a canary page of its own in the project's Playwright Chromium,
+  under a fixed policy that blocks the page's script whatever the project's
+  policy admits; the check fails without its report, so a collector that
+  receives nothing cannot pass. The app's pages are served untouched. Both
+  scripts are scaffold: an update replaces them while you have not edited
+  them and writes a `.forge-merge` sidecar once you have (an update without a
+  recipe writes them only when absent). Give the config the specs, projects
+  and builds a production run can serve (a development-only route or a second
+  build is the project's to arrange). A serve script older than the canary
+  makes the check warn, not fail, until you take the current one.
+- A project that keeps its own policy and adopts the nonce rewrites the
+  placeholder in `index.html` wherever the page is served: in `nginx.conf` and
+  in the Helm chart's server block, or every script is blocked.
 - Svelte, Flutter and plugin frontends, and Vue projects with the AI chat, are
   served as before, without a policy. The chat's MCP panels load remote
   origins in frames, which the policy would block.
+
+### Several frontends per project (unreleased)
+
+A project can list several frontends under `frontends:`
+([ADR-012](docs/architecture-decisions/ADR-012-a-list-of-frontends.md)). A
+project with one frontend keeps its apps, services and routes. On the next
+`forge --update` the recipe gains `frontends`, `forge.toml` is re-stamped to
+v5, the generated gatekeeper's `config.py` and `tenant_config.py` gain the
+host-label setting, and a Kubernetes chart gains two pieces that render
+nothing with one frontend.
+
+- **`forge.toml` moves to schema v5.** A v4 manifest reads as a list of one
+  frontend and is re-stamped to v5, unchanged apart from the version number.
+  With two or more frontends a `[[forge.frontends]]` array lists them, the
+  primary first; `[forge.frontend]` keeps the primary. Tools that read
+  `[forge.frontend]` keep working; tools that pin `schema_version = 4` must
+  accept 5. An older forge refuses a recipe written now ("Unsupported quality
+  recipe version"); on a project without a recipe it reads a v5
+  manifest but sees only the primary, re-renders only that app and re-stamps
+  the manifest as v4 without the array. Run one forge version on a project.
+- **The recipe moves to version 2.** `.forge/quality.json` lists every app under
+  `frontends`, beside `frontend`, and records each frontend's `name`. Edit the
+  primary under `config.frontend`, as before (its copy in `frontends` follows on
+  the next update), and further apps under `config.frontends`. A version 1
+  recipe reads as one frontend, and its `features: []` reads as "every backend
+  feature", the meaning it had; the next update writes version 2.
+- **`features` on a frontend is now read.** In a stack file, an absent key
+  means every backend feature, `[]` no CRUD pages and a list those pages; each
+  listed page must be a backend feature or the file is refused. The builder
+  used to drop the key, so a `frontend:` table that already set it now takes it
+  into account: check such a stack file before updating.
+- **`name` exists on `frontends:` entries only.** It sets the app's folder
+  (`apps/<name>`). The single `frontend:` table ignores it, as before, and keeps
+  the app at `apps/frontend`.
+- **A `frontends:` list reads like a `backends:` list.** Its entries give every
+  value, so frontend CLI flags beside it have no effect, as backend flags have
+  none beside `backends:`; a `frontends:` value that is not a list falls back to
+  the single `frontend:` table, as `backends:` falls back to `backend:`.
+- **Every Kubernetes project's chart gains two inert pieces.**
+  `templates/frontends.yaml` renders the further apps from a `frontends:` values
+  map, and the gatekeeper container takes `GATEKEEPER_FRONTEND_HOST_LABELS` from
+  their hosts; with one frontend the map is absent and both render nothing.
+- **The generated gatekeeper reads `GATEKEEPER_FRONTEND_HOST_LABELS`.** Empty
+  (the default) keeps its behaviour. A gatekeeper you run yourself in front of
+  several apps needs the first label of each further app's host listed there.
+- **Python API (internal).** `ProjectConfig` is not part of the plugin API
+  (`forge/api.py`), which SemVer covers, and forge's CLI and stack files do not
+  depend on it. Code that builds one directly passes `frontends=[...]`, as it
+  passes `backends=[...]`; `frontend=` is not accepted. `config.frontend` still
+  returns the primary and can still be assigned. `FrontendConfig.features` defaults to `None`
+  (every backend feature), and an app's pages are
+  `fc.page_features(config.all_features)`.
+- **Template updates reach every backend.** A template bump now re-renders each
+  backend of that language, not only the first one.
 
 ## 1.0 → 1.1
 

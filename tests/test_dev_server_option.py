@@ -37,7 +37,7 @@ def _project(frontend: FrontendConfig) -> ProjectConfig:
     return ProjectConfig(
         project_name="dev-server",
         backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON)],
-        frontend=frontend,
+        frontends=[frontend],
     )
 
 
@@ -103,10 +103,10 @@ class TestWithoutAFramework:
 
 class TestRecorded:
     def test_the_manifest_records_it_only_when_on(self) -> None:
-        on = _frontend_manifest_data(_project(_frontend(dev_server=True)))
-        off = _frontend_manifest_data(_project(_frontend()))
-        assert on is not None and on.dev_server is True
-        assert off is not None and off.dev_server is False
+        (on,) = _frontend_manifest_data(_project(_frontend(dev_server=True)))
+        (off,) = _frontend_manifest_data(_project(_frontend()))
+        assert on.dev_server is True
+        assert off.dev_server is False
 
     def test_the_manifest_round_trips_it(self, tmp_path: Path) -> None:
         manifest = tmp_path / "forge.toml"

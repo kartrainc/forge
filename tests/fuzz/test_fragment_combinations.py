@@ -295,7 +295,7 @@ def random_project_config(draw):
     return ProjectConfig(
         project_name="fuzz",
         backends=backends,
-        frontend=frontend,
+        frontends=([frontend] if frontend is not None else []),
         options=option_values,
     )
 
@@ -453,7 +453,7 @@ class TestExpandedFuzzSurface:
         config = ProjectConfig(
             project_name="fuzz-fe",
             backends=[_backend("api", BackendLanguage.PYTHON, 5000)],
-            frontend=_frontend_for(framework),
+            frontends=[_frontend_for(framework)],
         )
         config.validate()
         plan = resolve(config)

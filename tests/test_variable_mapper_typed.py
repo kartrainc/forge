@@ -41,13 +41,15 @@ def _project(
     return ProjectConfig(
         project_name="P",
         backends=[BackendConfig(project_name="P", server_port=5000)] if with_backend else [],
-        frontend=FrontendConfig(
-            framework=frontend_framework,
-            project_name="P",
-            server_port=5173,
-        )
+        frontends=[
+            FrontendConfig(
+                framework=frontend_framework,
+                project_name="P",
+                server_port=5173,
+            )
+        ]
         if frontend_framework != FrontendFramework.NONE
-        else None,
+        else [],
         options=options or {},
     )
 

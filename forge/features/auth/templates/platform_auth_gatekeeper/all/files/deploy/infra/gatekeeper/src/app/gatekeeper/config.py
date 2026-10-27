@@ -31,6 +31,7 @@ class GatekeeperSettings(BaseSettings):
     | DEFAULT_TENANT_ID         | Tenant UUID assigned to self-registered users|
     | TENANT_ID_CLAIM           | JWT claim name carrying the tenant_id        |
     | KEYCLOAK_ADMIN_REALM      | Realm where self-registration happens         |
+    | GATEKEEPER_FRONTEND_HOST_LABELS | Further frontends' host labels         |
     | MINT_INTERNAL_TOKEN_ENABLED | Mint gatekeeper-signed internal JWTs       |
     | FORWARD_INTERNAL_TOKEN_ENABLED | Forward internal JWT in Authorization  |
     | GATEKEEPER_ISSUER         | iss claim of internal JWTs (e.g. http://...) |
@@ -84,6 +85,13 @@ class GatekeeperSettings(BaseSettings):
     default_tenant_id: str = "00000000-0000-0000-0000-000000000001"
     tenant_id_claim: str = "https://forge/tenant_id"
     keycloak_admin_realm: str = "app"
+    # A project with several frontends serves each on its own host
+    # (``admin.localhost`` beside ``app.localhost``). Without a
+    # ``tenant-route:<host>`` record, the first label of those hosts resolves
+    # to the admin realm and the default tenant, exactly as ``app`` does —
+    # not to a realm of the same name. Comma-separated; empty for a project
+    # with one frontend.
+    gatekeeper_frontend_host_labels: str = ""
 
     # ── Boot-time realm invariant probe ───────────────────────────────
     # On startup the gatekeeper verifies (read-only) that the running

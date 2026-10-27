@@ -33,7 +33,7 @@ def config_with_reliability(tmp_path: Path) -> ProjectConfig:
                 features=["items"],
             )
         ],
-        frontend=None,
+        frontends=[],
         options={
             "reliability.connection_pool": True,
             "reliability.circuit_breaker": True,
@@ -140,7 +140,7 @@ class TestServiceClientFragment:
                     features=["items"],
                 )
             ],
-            frontend=None,
+            frontends=[],
             options={"reliability.service_client": enabled},
         )
         return generate(config, quiet=True, dry_run=True)

@@ -308,9 +308,10 @@ def reapply_baseline(
             merge_blocks=merge_blocks,
             template_versions=data.template_versions,
             schema_version=data.schema_version,
-            # Preserve the [forge.frontend] table (framework + app_dir +
-            # layout) — re-deriving it would drop the user's --layout choice.
-            frontend=data.frontend if data.frontend.framework else None,
+            # Preserve every recorded frontend (framework + app_dir + layout) —
+            # re-deriving them would drop the user's --layout choice and every
+            # frontend beside the primary.
+            frontends=data.frontends,
         )
 
     # Tally aggregates. The block + file loops produce per-record

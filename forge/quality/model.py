@@ -16,6 +16,9 @@ from forge.config._backend import resolve_backend_language
 from forge.config._frontend import resolve_frontend_framework
 
 RECIPE = ".forge/quality.json"
+# Version 2 records ``frontends`` and each frontend's ``name``; version 1, the
+# frontend alone. A reader refuses a version it does not know.
+RECIPE_VERSION = 2
 Ownership = Literal["generated", "scaffold", "user"]
 SOURCE_SUFFIXES = {
     ".py",
@@ -160,10 +163,14 @@ def _json_value(value: Any) -> Any:
 def write_recipe(root: Path, config: ProjectConfig) -> None:
     raw = asdict(config)
     raw["output_dir"] = "."
-    if config.frontend and config.frontend.framework.value == "none":
-        raw["frontend"] = None
+    # ``frontends`` records every rendered app; the primary is recorded under
+    # ``frontend`` as well, as version 1 recorded it. A frontend without a
+    # framework renders nothing and is not recorded.
+    frontends = [fc for fc in raw.pop("frontends") if fc["framework"].value != "none"]
+    raw["frontends"] = frontends
+    raw["frontend"] = frontends[0] if frontends else None
     payload = {
-        "schema_version": 1,
+        "schema_version": RECIPE_VERSION,
         "generator_version": __version__,
         "generator_requirement": generator_requirement(),
         "generator_sha256": source_fingerprint(),
@@ -215,7 +222,8 @@ def generator_requirement() -> str:
 
 def read_recipe(root: Path, *, check_generator: bool = True) -> ProjectConfig:
     data = json.loads(project_path(root, RECIPE).read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1:
+    version = data.get("schema_version")
+    if version not in (1, RECIPE_VERSION):
         raise ValueError("Unsupported quality recipe version")
     if check_generator and data.get("generator_sha256") != source_fingerprint():
         raise ValueError(
@@ -229,11 +237,23 @@ def read_recipe(root: Path, *, check_generator: bool = True) -> ProjectConfig:
         item = dict(item)
         item["language"] = resolve_backend_language(item["language"])
         backends.append(BackendConfig(**item))
-    frontend = raw.pop("frontend")
-    if frontend is not None:
-        frontend["framework"] = resolve_frontend_framework(frontend["framework"])
-        frontend = FrontendConfig(**frontend)
-    config = ProjectConfig(backends=backends, frontend=frontend, **raw)
+    # A version 1 recipe has only ``frontend``. Version 2 also has
+    # ``frontends``, every app with the primary first; ``frontend`` stays the
+    # primary's record, the one to edit, so its first entry is a mirror.
+    legacy = version == 1
+    primary = raw.pop("frontend", None)
+    entries = raw.pop("frontends", None) or []
+    entries = ([primary] if primary is not None else []) + entries[1:]
+    frontends = []
+    for item in entries:
+        item = dict(item)
+        item["framework"] = resolve_frontend_framework(item["framework"])
+        if legacy and item.get("features") == []:
+            # The old dataclass default, never set by the builder, which the
+            # template read as "a page per backend feature" — now ``None``.
+            item["features"] = None
+        frontends.append(FrontendConfig(**item))
+    config = ProjectConfig(backends=backends, frontends=frontends, **raw)
     config.validate()
     return config
 
@@ -255,15 +275,15 @@ def subjects(config: ProjectConfig, root: Path | None = None) -> list[dict]:
         for b in config.backends
         if config.backend_mode == "generate"
     ]
-    if config.frontend and config.frontend.framework.value != "none":
-        items.append(
-            {
-                "name": config.frontend_slug,
-                "path": f"apps/{config.frontend_slug}",
-                "language": config.frontend.framework.value,
-                "runtime": "stable",
-            }
-        )
+    items.extend(
+        {
+            "name": fc.name,
+            "path": f"apps/{fc.name}",
+            "language": fc.framework.value,
+            "runtime": "stable",
+        }
+        for fc in config.active_frontends
+    )
     if root:
         for parent in [
             root / "sdks",

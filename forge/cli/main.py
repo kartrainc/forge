@@ -107,11 +107,39 @@ def _json_error(stdout_fd, err: object) -> None:
     sys.exit(exit_code)
 
 
+def _frontend_report(config: ProjectConfig, project_root: Path) -> dict[str, Any]:
+    """The ``--json`` keys that describe the project's frontends.
+
+    ``frontend_dir``, ``framework`` and ``features`` describe the primary, as
+    they always have; ``frontends`` lists every app, the primary first.
+    """
+    if not (config.frontend and config.frontend.framework != FrontendFramework.NONE):
+        return {}
+    return {
+        # The frontend app lives at apps/<slug>/ (the generator's layout),
+        # not project_root/<slug>/ — report the real path to automation.
+        "frontend_dir": str(project_root / "apps" / config.frontend_slug),
+        "framework": config.frontend.framework.value,
+        "features": config.frontend.page_features(config.all_features),
+        "frontends": [
+            {
+                "name": fc.name,
+                "dir": str(project_root / "apps" / fc.name),
+                "framework": fc.framework.value,
+                "port": fc.server_port,
+                "ui_kit": fc.ui_kit,
+                "features": fc.page_features(config.all_features),
+            }
+            for fc in config.active_frontends
+        ],
+    }
+
+
 def _start_stack(args: argparse.Namespace, config: Any, project_root: Path, quiet: bool) -> None:
     """Start the generated Compose stack when asked to, or say how to."""
     if args.no_docker or getattr(args, "dry_run", False):
         return
-    if config.frontend is not None and config.frontend.dev_server:
+    if any(fc.dev_server for fc in config.active_frontends):
         # boot() runs docker-compose.yml alone, which serves the nginx frontend, so
         # it never starts the dev server: print the command that does (ADR-013).
         if not quiet:
@@ -571,12 +599,7 @@ def main() -> None:
                 for bc in config.backends
             ]
             result["backend_dir"] = str(project_root / config.backends[0].name)
-        if config.frontend and config.frontend.framework != FrontendFramework.NONE:
-            # The frontend app lives at apps/<slug>/ (the generator's layout),
-            # not project_root/<slug>/ — report the real path to automation.
-            result["frontend_dir"] = str(project_root / "apps" / config.frontend_slug)
-            result["framework"] = config.frontend.framework.value
-            result["features"] = config.all_features
+        result.update(_frontend_report(config, project_root))
         # Init #5 — additive: emit the agent-grade GenerationReport
         # under a new top-level ``report`` key so old keys
         # (project_root, backends, frontend_dir, framework, features)

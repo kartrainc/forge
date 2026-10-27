@@ -13,7 +13,8 @@
   `forge.toml` and the quality recipe
 - Related: [plan](../../plans/2026-10-26-frontend-dev-server.md);
   [[ADR-006]] (provenance), [[ADR-007]] (separate frontend templates),
-  [[ADR-011]] (UI kit option, the precedent for a field of the frontend)
+  [[ADR-011]] (UI kit option, the precedent for a field of the frontend),
+  [[ADR-012]] (a list of frontends)
 
 ## Context
 
@@ -56,11 +57,9 @@ What it learned shapes this decision:
    only when on, so a project without it keeps the manifest it had; the recipe
    always holds the field. It is not an option-registry
    path. It applies to Vue first; Svelte follows in a separate change with the
-   same tests; Flutter is refused. The overlay overrides the project's one
-   `frontend` service (`apps/<frontend_slug>`, host `app.localhost`). A list of
-   frontends is proposed separately (kartrainc/forge#6); because the field
-   belongs to a frontend, that change adds one override per enabled frontend
-   without changing this decision.
+   same tests; Flutter is refused. The overlay overrides the compose service of every frontend that has the
+   field (ADR-012): `frontend` for the primary, on `app.localhost`, and a further
+   app's DNS name on its own host, each on its own `server_port`.
 2. **The Dockerfile gains a `dev` stage; nginx stays last.** With the field
    on, the stages are `deps → source → dev` and `source → builder → nginx`,
    where `source` is the single place that runs `COPY . .`, so the dev and
@@ -74,7 +73,7 @@ What it learned shapes this decision:
    unchanged, byte for byte. `dev` runs as a non-root user, and the application
    tree, including Vite's cache directories, is writable by that user; the
    files arrive with `COPY --chown`.
-3. **A generated `docker-compose.dev.yaml` overrides the `frontend` service.**
+3. **A generated `docker-compose.dev.yaml` overrides each enabled frontend's service.**
    It sets the build target to `dev`, a Node-based health check, and the one
    Traefik label that differs. The `dev` stage's `CMD` runs the project's own
    `dev` script with `--host 0.0.0.0` and `--config vite.dev.config.ts`, per
@@ -246,9 +245,9 @@ Rejected. It is the second-origin setup the Context describes.
   the two-file command above would drop its other overlays; the dev overlay
   goes last in that list.
 - Svelte keeps the nginx flow until its parity change lands.
-- If a list of frontends lands (kartrainc/forge#6), the overlay is extended
-  to one override per enabled frontend, with that frontend's service name,
-  host and `server_port`; this change does not assume it.
+- With several frontends the overlay is one file with a service per app that has
+  the option; turning the option off for one app removes that app's wrapper, and
+  the overlay goes when no app has it.
 
 ## References
 

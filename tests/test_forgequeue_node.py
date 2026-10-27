@@ -199,7 +199,7 @@ def _node_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontend=None,
+        frontends=[],
         options=options or {},
     )
 
@@ -215,7 +215,7 @@ def _python_project(options: dict[str, object] | None = None) -> ProjectConfig:
                 server_port=5000,
             )
         ],
-        frontend=None,
+        frontends=[],
         options=options or {},
     )
 
@@ -268,7 +268,7 @@ def test_resolver_targets_only_node_backend_in_mixed_project() -> None:
                 name="node", project_name="P", language=BackendLanguage.NODE, server_port=5002
             ),
         ],
-        frontend=None,
+        frontends=[],
         options={"queue.backend": "bullmq"},
     )
     plan = resolve(config)

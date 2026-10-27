@@ -23,7 +23,7 @@ from forge.sync.manifest import ForgeFrontendData, write_forge_toml
 def _config(*, dev_server: bool, backend: bool = True, frontend: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
         backend=object() if backend else None,
-        frontend=SimpleNamespace(dev_server=dev_server) if frontend else None,
+        active_frontends=[SimpleNamespace(dev_server=dev_server)] if frontend else [],
     )
 
 
@@ -191,13 +191,15 @@ class TestNextAction:
             backends=[
                 BackendConfig(name="api", project_name="dev", language=BackendLanguage.PYTHON)
             ],
-            frontend=FrontendConfig(
-                project_name="frontend",
-                framework=FrontendFramework.VUE,
-                include_auth=False,
-                include_chat=False,
-                dev_server=dev_server,
-            ),
+            frontends=[
+                FrontendConfig(
+                    project_name="frontend",
+                    framework=FrontendFramework.VUE,
+                    include_auth=False,
+                    include_chat=False,
+                    dev_server=dev_server,
+                )
+            ],
         )
         config.validate()
         report = GenerationReport()

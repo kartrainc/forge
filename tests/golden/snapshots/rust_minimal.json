@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 745,
-      "sha256": "7b6aa8e6d417fb82"
+      "size": 762,
+      "sha256": "b50da441dffedfa8"
     },
     ".github/workflows/ci.yml": {
       "size": 882,
@@ -65,7 +65,7 @@
       "sha256": "<version-dependent>"
     },
     "services/api/.copier-answers.yml": {
-      "size": 547,
+      "size": 540,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {

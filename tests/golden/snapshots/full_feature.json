@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 1635,
-      "sha256": "19ce54741f6b6b12"
+      "size": 2248,
+      "sha256": "f5b0913c7aad2236"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -53,7 +53,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 1363,
+      "size": 1356,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -1217,12 +1217,12 @@
       "sha256": "e309286e33878d5e"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 2058,
-      "sha256": "c1eb97a76e473daf"
+      "size": 2128,
+      "sha256": "07edb98af8299473"
     },
     "apps/frontend/tests/e2e/crud.ts": {
-      "size": 4566,
-      "sha256": "c3516784c8a63a53"
+      "size": 4638,
+      "sha256": "fba7086d89f2e450"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1235,6 +1235,10 @@
     "apps/frontend/tests/e2e/orders.spec.ts": {
       "size": 71,
       "sha256": "cc281f01080a837f"
+    },
+    "apps/frontend/tests/e2e/session.ts": {
+      "size": 1351,
+      "sha256": "5b26cc9727297977"
     },
     "apps/frontend/tests/integration/button.test.ts": {
       "size": 504,
@@ -1305,7 +1309,7 @@
       "sha256": "11084b79a8580abe"
     },
     "forge.toml": {
-      "size": 140734,
+      "size": 141161,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -1313,7 +1317,7 @@
       "sha256": "b8e89fd18d75a9c1"
     },
     "services/api/.copier-answers.yml": {
-      "size": 551,
+      "size": 544,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -2001,7 +2005,7 @@
       "sha256": "ac8e4981a661ce9e"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 581,
+      "size": 574,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {

@@ -23,7 +23,7 @@ change. Tracked as KR-59.
 | Sync | Compose Watch: one `sync` rule over the app directory with `initial_sync: true`, and separate `rebuild` rules for `package.json` and the lockfile; Vite restarts itself on config changes |
 | Vite | generated wrapper `vite.dev.config.ts`; object, function and promise exports; `allowedHosts` set to `app.localhost` plus `FORGE_DEV_ALLOWED_HOSTS` after the project's config (Vite still admits localhost, `*.localhost` and IPs); `strictPort`; no polling unless measured |
 | Auth | dev behaves like the built stack: the gatekeeper's browser paths are not routed; `VITE_AUTH_DISABLED` is not overridden; the Vite port is not published, so the origin, cookie and realm redirect URIs are unchanged |
-| Multi-frontend | not assumed; if kartrainc/forge#6 lands first, the overlay gains one override per enabled frontend |
+| Several frontends | ADR-012 is on `main`: one overlay with a service per app that has the option, each with its own port and host |
 | Boot | with the field on, forge skips its automatic `docker compose up` and prints the Watch command |
 | Fallback | documented bind mount for Watch performance or filesystem problems on Compose ≥ 2.39.4; best effort, existing paths only |
 
@@ -46,7 +46,7 @@ Read at the base on 2026-10-26.
 
 One pull request for the Vue implementation, on one branch. Its first commit is
 this plan, ADR-013 and the index row, based on `main`; the number 013 leaves
-012 to the list-of-frontends ADR in kartrainc/forge#6. The commits after it
+012 to the list-of-frontends ADR. The commits after it
 carry the tests of the behaviour they add. Svelte is a second pull request, and
 the Kartra adoption is a change in kartra-ai.
 

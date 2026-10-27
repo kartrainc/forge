@@ -222,7 +222,7 @@ def _make_python_project(
                 features=["items"],
             )
         ],
-        frontend=fe,
+        frontends=([fe] if fe is not None else []),
     )
     return config, project_root
 

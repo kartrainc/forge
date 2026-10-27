@@ -123,14 +123,23 @@ def _statuses(compose: list[str], root: Path) -> dict[str, str]:
 
 
 def _http_status(compose: list[str], root: Path, host_header: str) -> str:
-    """Status the dev server answers with for ``Host: <host_header>``, asked from inside."""
+    """Status the first app's dev server answers with for ``Host: <host_header>``, from inside."""
+    return _http_status_in(compose, root, "frontend", host_header)
+
+
+def _http_status_in(
+    compose: list[str], root: Path, service: str, host_header: str, port: int = 5173
+) -> str:
+    """Status a service's dev server answers with for ``Host: <host_header>``, asked from inside."""
     script = (
-        "require('http').get({host:'127.0.0.1',port:5173,headers:{Host:'"
+        "require('http').get({host:'127.0.0.1',port:"
+        + str(port)
+        + ",headers:{Host:'"
         + host_header
         + "'}},r=>{console.log(r.statusCode);r.resume()})"
     )
     out = subprocess.run(
-        [*compose, "exec", "-T", "frontend", "node", "-e", script],
+        [*compose, "exec", "-T", service, "node", "-e", script],
         cwd=root, capture_output=True, text=True, timeout=60,
     )  # fmt: skip
     return out.stdout.strip()
@@ -297,6 +306,107 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
             cwd=root, capture_output=True, text=True, timeout=60,
         ).stdout  # fmt: skip
         assert "rebuild probe" in shown
+    finally:
+        watcher.terminate()
+        try:
+            watcher.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            watcher.kill()
+        log.close()
+        subprocess.run(
+            [*compose, "down", "-v", "--remove-orphans", "--rmi", "local"],
+            cwd=root, capture_output=True, timeout=180, check=False,
+        )  # fmt: skip
+
+
+_TWO_APPS = """\
+project_name: devhmr2
+description: "dev server hot reload, two apps"
+include_keycloak: false
+backends:
+  - { name: api, language: python, python_version: "3.13", app_template: crud-service, features: [items], server_port: 5010 }
+frontends:
+  - { framework: vue, include_auth: false, include_chat: false, package_manager: npm, server_port: 5173, dev_server: true }
+  - { framework: vue, name: console, include_auth: false, include_chat: false, package_manager: npm, server_port: 5174, dev_server: true }
+"""
+
+
+def test_dev_server_hot_reloads_every_app_that_has_it(
+    tmp_path: Path, has_docker: bool, has_npm: bool
+) -> None:
+    """Two Vue apps, each its own service, port and host: an edit to either reaches its own page."""
+    if not (has_docker and has_npm):
+        pytest.skip("needs Docker and npm")
+    stack = tmp_path / "stack.yaml"
+    stack.write_text(_TWO_APPS, encoding="utf-8")
+    _run(
+        [sys.executable, "-m", "forge", "--config", str(stack)]
+        + ["--output-dir", str(tmp_path / "out"), "--yes", "--no-docker"],
+        _REPO_ROOT,
+        1200,
+    )
+    root = tmp_path / "out" / "devhmr2"
+    project = f"forgedev{uuid.uuid4().hex[:8]}"
+    port = _free_port()
+    (root / "compose.e2e.yaml").write_text(
+        "services:\n"
+        "  traefik:\n"
+        f'    ports: !override\n      - "127.0.0.1:{port}:80"\n'
+        "    environment:\n"
+        "      TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS: "
+        f'"Label(`com.docker.compose.project`,`{project}`)"\n',
+        encoding="utf-8",
+    )
+    compose = [
+        "docker", "compose", "-p", project,
+        "-f", "docker-compose.yml", "-f", "docker-compose.dev.yaml", "-f", "compose.e2e.yaml",
+    ]  # fmt: skip
+    log = (tmp_path / "up.log").open("w")
+    watcher = subprocess.Popen(
+        [*compose, "up", "--build", "--watch", "--no-deps", "frontend", "console", "traefik"],
+        cwd=root,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        deadline = time.monotonic() + _BUILD_TIMEOUT + _HEALTH_WAIT
+        while time.monotonic() < deadline:
+            assert watcher.poll() is None, (
+                f"compose up exited early:\n{(tmp_path / 'up.log').read_text()[-3000:]}"
+            )
+            found = _statuses(compose, root)
+            if found.get("frontend") == "healthy" and found.get("console") == "healthy":
+                break
+            time.sleep(5)
+        else:
+            raise AssertionError(f"apps not healthy:\n{(tmp_path / 'up.log').read_text()[-3000:]}")
+
+        app = root / "apps" / "frontend"
+        _run(["npx", "--no-install", "playwright", "install", "chromium"], app, 900)
+        probe = tmp_path / "probe.mjs"
+        probe.write_text(_PROBE, encoding="utf-8")
+        for name, host in (("frontend", "app.localhost"), ("console", "console.localhost")):
+            ran = _run(
+                [
+                    "node",
+                    str(probe),
+                    str(app),
+                    f"http://{host}:{port}/",
+                    str(root / "apps" / name / _HOME),
+                    _ANCHOR,
+                ],
+                app,
+                300,
+            )
+            result = json.loads(ran.stdout.strip().splitlines()[-1])
+            assert "error" not in result, (name, result)
+            assert result["markerKept"] is True, f"{name}: the page reloaded instead of updating"
+            assert result["navigations"] == 0 and result["errors"] == [], (name, result)
+        # Each app answers only its own host: the other app's name is not one of its hosts.
+        assert (
+            _http_status_in(compose, root, "frontend", "console.localhost") == "200"
+        )  # *.localhost
+        assert _http_status_in(compose, root, "console", "evil.example", 5174) == "403"
     finally:
         watcher.terminate()
         try:
