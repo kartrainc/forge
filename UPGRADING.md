@@ -363,27 +363,22 @@ and integration suites always did; so does the content-security check.
   as written again: forcing authentication off had made the app skip those
   mocks.
 
-### Node HTTP service and development overlay (unreleased)
+### Node HTTP service (unreleased)
 
 Node backends can take the `http-service` app template
-(`app_template: http-service`): the Node template without a database, its
-migrate step, the sample `items` entity, or the queue and cache fragments.
-Every Node service also gains a development path and two fixes.
+(`app_template: http-service`, [ADR-014](docs/architecture-decisions/ADR-014-a-node-http-service-without-a-database.md)):
+the Node template without a database, its migrate step, the sample `items`
+entity, or the queue and cache fragments. Every Node service also gains a
+`.dockerignore`, more tests and two fixes.
 
-- Each Node `Dockerfile` gains a `dev` stage, each service a `.dockerignore`
-  and `tests/integration/setup-env.ts`, and a project with Node services
-  `deploy/compose/dev.yaml`. Run the services from source with
-  `docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch`.
+- Each Node service gains a `.dockerignore` and
+  `tests/integration/setup-env.ts`.
 - The E2E suite gains `tests/e2e/entrypoint.test.ts`, `tests/e2e/network.test.ts`
   checks the verifier when platform auth is on, `vitest.e2e.config.ts` loads
   `tests/integration/setup-env.ts`, and the error-handler suite gains a case.
-- `deploy/compose/dev.yaml` also watches each database-backed service's
-  `prisma/` from its `<name>-migrate` one-shot, so `watch` applies a new
-  migration.
-- An untouched file gets the change on the next update. A `Dockerfile`,
-  `README.md`, `vitest.integration.config.ts`, `vitest.e2e.config.ts` or test
-  you edited gets a `.forge-merge` sidecar: fold the new stage, setup file or
-  case into yours.
+- An untouched file gets the change on the next update. A
+  `vitest.integration.config.ts`, `vitest.e2e.config.ts` or test you edited
+  gets a `.forge-merge` sidecar: fold the new setup file or case into yours.
 - The circuit breaker now adds `@types/opossum` to `dependencies`. If you added
   it yourself under `devDependencies`, keep one of the two.
 

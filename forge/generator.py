@@ -43,7 +43,6 @@ from forge.config import (
 )
 from forge.docker_manager import (
     render_compose,
-    render_compose_dev,
     render_frontend_dockerfile,
     render_frontend_dockerignore,
     render_init_db,
@@ -724,7 +723,6 @@ def _render_docker_stack(
         render_workspace_cargo_toml(config, project_root, plan=plan)
         with phase_timer(_logger, "generate.compose.render"):
             render_compose(config, project_root, plan=plan, synthesis=synthesis)
-            render_compose_dev(config, project_root, plan=plan)
         # init-db creates a database per backend plus keycloak's own db.
         # Skip when there are 0–1 backends and no keycloak — the primary
         # backend's POSTGRES_DB env var already handles the single-db case.

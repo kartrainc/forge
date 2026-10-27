@@ -55,10 +55,3 @@ docker compose up -d
 ```
 
 {% if use_database | default(true) %}Starts the app, PostgreSQL, and optionally pgAdmin (`--profile tools`).{% else %}Starts the app.{% endif %}
-
-To run it from source inside the project's full stack, restarting on every
-change, run from the project root:
-
-```bash
-docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch
-```

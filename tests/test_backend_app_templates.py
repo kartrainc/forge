@@ -468,27 +468,6 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert "store" in init_db
     assert (root / "services" / "store" / "src" / "lib" / "prisma.ts").is_file()
 
-    # The development overlay runs both from source; only the database-backed
-    # one rebuilds on a Prisma schema change.
-    dev = (root / "deploy" / "compose" / "dev.yaml").read_text(encoding="utf-8")
-    assert "  capture:\n    build:\n      target: dev" in dev
-    assert "  store:\n    build:\n      target: dev" in dev
-    assert "./services/store/prisma" in dev
-    assert "./services/capture/prisma" not in dev
-    # A new migration reruns the store's migrate one-shot; capture has none.
-    assert "  store-migrate:\n    develop:\n      watch:" in dev
-    assert "capture-migrate" not in dev
-    assert "./services/capture/tsconfig.json" in dev
-
-    # The dev stage branches before the compile, so a type error mid-edit never
-    # stops the dev image.
-    dockerfile = (svc / "Dockerfile").read_text(encoding="utf-8")
-    dev_stage = dockerfile[dockerfile.index("AS dev") : dockerfile.index("AS builder")]
-    assert "FROM deps AS dev" in dockerfile
-    assert "npm run build" not in dev_stage
-    # A service waiting for this one's service_healthy also waits under the overlay.
-    assert "HEALTHCHECK" in dev_stage and "/api/v1/health/live" in dev_stage
-
     # No entity, so no domain enum; the database-backed sibling keeps them.
     assert not (svc / "src" / "schemas" / "enums").exists()
     assert (root / "services" / "store" / "src" / "schemas" / "enums").is_dir()
@@ -668,28 +647,6 @@ def test_database_name_collision_ignores_backends_without_a_database(tmp_path: P
     )
 
     cfg.validate()
-
-
-def test_dev_overlay_only_for_node_projects(tmp_path: Path):
-    """deploy/compose/dev.yaml drives Node's ``dev`` stage, so a project
-    without a Node backend gets none."""
-    cfg = ProjectConfig(
-        project_name="py_only",
-        output_dir=str(tmp_path),
-        backends=[
-            BackendConfig(
-                name="api",
-                project_name="py_only",
-                language=BackendLanguage.PYTHON,
-                features=["items"],
-            )
-        ],
-        frontends=[],
-    )
-    from forge.generator import generate
-
-    root = generate(cfg, quiet=True, dry_run=True)
-    assert not (root / "deploy" / "compose" / "dev.yaml").exists()
 
 
 def test_two_stage_variant_renders_nonempty_app_title(tmp_path: Path):

@@ -250,16 +250,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   shape without a database of its own.
 - Render a `.dockerignore` into every Node service, so a host install, build
   output and local env files stay out of the image's build context.
-- Run Node services from source in the full stack:
-  `docker compose -f docker-compose.yml -f deploy/compose/dev.yaml watch`
-  builds each Node Dockerfile's new `dev` stage (every dependency, `tsx
-  watch`). A `src/` change is synced and the server restarts; a `config/`
-  change restarts the container; `package.json`, the lockfile, `prisma/` or
-  `packages/` rebuild the image, and a `prisma/` change reruns the service's
-  migrate one-shot, which applies a new migration. The `dev` stage keeps the
-  runtime's health check, so services that wait for a Node service's health
-  still start. The services stay behind the same Traefik, auth and network,
-  which a host-side `npm run dev` leaves.
 - Every Node service's E2E suite runs behind platform auth: it loads the
   integration tier's issuer and audience defaults, serves its own keys, mints
   a token and expects the verifier's 401 for an anonymous request. It also
