@@ -15,6 +15,10 @@ spec:
     metadata:
       labels:
         {{- include "svc.selector" . | nindent 8 }}
+      annotations:
+        # an upgrade that changes only env or secretEnv rolls the pods
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}

@@ -16,8 +16,10 @@ spec:
   backoffLimit: 3
   template:
     metadata:
+      # not the serving pods' labels: no Service, PDB or NetworkPolicy of the service selects a migration
       labels:
-        {{- include "svc.selector" . | nindent 8 }}
+        app.kubernetes.io/name: {{ include "svc.child" (dict "root" . "suffix" "migrate") }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
@@ -39,8 +41,9 @@ spec:
           command: {{ toJson .Values.migrateCommand }}
           envFrom:
             - configMapRef:
-                name: {{ include "svc.child" (dict "root" . "suffix" "config") }}
+                name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
             - secretRef:
-                name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
+                # the hook copy of secretEnv, or the external Secret that replaces it (secretEnv: {})
+                name: {{ include "svc.child" (dict "root" . "suffix" (ternary "migrate-secret" "secret" (not (empty .Values.secretEnv)))) }}
                 optional: true
 {{- end }}

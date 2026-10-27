@@ -158,3 +158,87 @@ def test_placeholder_directories_expand_per_topology_entry(tmp_path: Path) -> No
     # without a topology there is nothing to expand them over
     with pytest.raises(FragmentError):
         copy_files(src, tmp_path / "again", render_context={})
+
+
+@pytest.mark.parametrize(
+    "backends,extra",
+    [
+        ([("platform", 8001)], None),
+        ([("admin", 8001)], "admin"),
+        ([("Bad_Name", 8001)], None),
+    ],
+    ids=["reserved-platform", "backend-and-frontend-share-a-name", "not-a-release-name"],
+)
+def test_service_chart_names_are_distinct_release_names(backends: list, extra: str | None) -> None:
+    from forge.errors import OptionsError
+
+    frontends = [FrontendConfig(framework=FrontendFramework.VUE, project_name="shop")]
+    if extra:
+        frontends.append(
+            FrontendConfig(
+                framework=FrontendFramework.VUE,
+                project_name="shop",
+                name=extra,
+                server_port=5174,
+                features=[],
+            )
+        )
+    config = ProjectConfig(
+        project_name="shop",
+        backends=[
+            BackendConfig(name=n, language=BackendLanguage.PYTHON, server_port=p)
+            for n, p in backends
+        ],
+        frontends=frontends,
+        options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"},
+    )
+    with pytest.raises(OptionsError, match="deploy.helm_layout=per_service"):
+        resolve(config)
+
+
+_TEMPLATES = (
+    Path(__file__).resolve().parents[1]
+    / "forge/features/deploy/templates/deploy_helm_service_charts/all/files"
+)
+
+
+def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) -> None:
+    awkward = 'a "quoted" value with a \\ backslash'
+    src = tmp_path / "src"
+    for kind in ("__backend__", "__frontend__"):
+        (src / kind).mkdir(parents=True)
+        (src / kind / "values.yaml.jinja").write_text(
+            (_TEMPLATES / "deploy/helm" / kind / "values.yaml.jinja").read_text(encoding="utf-8")
+        )
+    topology = {
+        "project_slug": "shop",
+        "include_keycloak": False,
+        "keycloak_realm": "app",
+        "keycloak_client_id": "shop",
+        "backends": (
+            {
+                "name": "api",
+                "language": "python",
+                "port": 8001,
+                "db_name": "api",
+                "has_migrations": True,
+                "synthesis_env": {"X_AWKWARD": awkward},
+            },
+        ),
+        "frontends": (
+            {
+                "name": "frontend",
+                "app": "frontend",
+                "primary": True,
+                "host": "",
+                "security_headers": (("X-Awkward", awkward),),
+                "csp": awkward,
+            },
+        ),
+    }
+    copy_files(src, tmp_path / "out", render_context={"topology": topology})
+    backend = yaml.safe_load((tmp_path / "out/api/values.yaml").read_text())
+    frontend = yaml.safe_load((tmp_path / "out/frontend/values.yaml").read_text())
+    assert backend["env"]["X_AWKWARD"] == awkward
+    assert frontend["securityHeaders"] == {"X-Awkward": awkward}
+    assert frontend["contentSecurityPolicy"] == awkward

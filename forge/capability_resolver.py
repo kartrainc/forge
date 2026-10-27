@@ -19,6 +19,7 @@ so generation + re-application produce identical output.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -834,6 +835,34 @@ def _check_fragment_ui_kits(config: ProjectConfig, fragment_set: set[str]) -> No
         )
 
 
+# A Helm release name: a DNS-1123 label of at most 53 characters.
+_RELEASE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
+
+
+def _check_service_chart_names(config: ProjectConfig) -> None:
+    """deploy.helm_layout=per_service writes deploy/helm/<name>/ per backend and frontend, installed as release <name>
+    beside the release ``platform``: every name must be a release name, distinct from the others and from it."""
+    from forge.config._topology import compute_topology  # noqa: PLC0415
+
+    topology = compute_topology(config)
+    names = [be["name"] for be in topology["backends"]] + [
+        fe["name"] for fe in topology["frontends"]
+    ]
+    seen: set[str] = {"platform"}
+    for name in names:
+        if not _RELEASE_NAME.match(name):
+            raise OptionsError(
+                f"deploy.helm_layout=per_service: {name!r} is not a Helm release name (lowercase letters, digits "
+                "and '-', at most 53 characters); rename the service"
+            )
+        if name in seen:
+            raise OptionsError(
+                f"deploy.helm_layout=per_service: two charts would be deploy/helm/{name}/ "
+                f"({'the platform chart' if name == 'platform' else 'two services share the name'}); rename one"
+            )
+        seen.add(name)
+
+
 def resolve(config: ProjectConfig) -> ResolvedPlan:
     """Produce an ordered ResolvedPlan from ``config.options``.
 
@@ -884,16 +913,17 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
             "and auth.provider=gatekeeper."
         )
     fragment_set = _collect_fragments(option_values)
+    fragment_set |= _collect_component_fragments(config)
+    fragment_set = _expand_deps(fragment_set)
     # deploy.helm_layout picks how deploy.target=kubernetes packages the project: per_service puts one chart per
-    # service in place of the umbrella chart.
+    # service in place of the umbrella chart, after every dependency is in, so the umbrella cannot come back.
     if (
         "deploy_helm_chart" in fragment_set
         and option_values.get("deploy.helm_layout") == "per_service"
     ):
+        _check_service_chart_names(config)
         fragment_set.discard("deploy_helm_chart")
         fragment_set.add("deploy_helm_service_charts")
-    fragment_set |= _collect_component_fragments(config)
-    fragment_set = _expand_deps(fragment_set)
     _check_fragment_ui_kits(config, fragment_set)
     _check_security_constraints(option_values, fragment_set)
     _validate_reads_options(fragment_set)

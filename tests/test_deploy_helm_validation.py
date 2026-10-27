@@ -361,3 +361,59 @@ def test_the_platform_routes_each_host_to_the_services() -> None:
     assert "rewrite-target" in str(ingresses["rel-admin-api"]["metadata"].get("annotations"))
     assert "annotations" not in ingresses["rel-admin-web"]["metadata"]
     assert _gatekeeper_env(docs)["GATEKEEPER_FRONTEND_HOST_LABELS"] == "admin"
+
+
+def _hook(doc: dict) -> str | None:
+    return (doc["metadata"].get("annotations") or {}).get("helm.sh/hook")
+
+
+def test_a_backend_release_owns_its_config_and_rolls_when_it_changes() -> None:
+    chart = _gen_service_charts(**dict(_scenarios())["multi_py_node_vue_keycloak"]) / "user-api"
+
+    def render(*set_args: str) -> dict[tuple[str, str], dict]:
+        docs = subprocess.run(
+            ["helm", "template", "user-api", str(chart), *set_args],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(docs) if d}
+
+    docs = render()
+    # the runtime env is part of the release: a rollback restores it, an uninstall removes it
+    assert _hook(docs[("ConfigMap", "user-api-config")]) is None
+    assert _hook(docs[("Secret", "user-api-secret")]) is None
+    # the migration reads its own hook copies, gone once the release's hooks succeed
+    for name in ("user-api-migrate-config", "user-api-migrate-secret"):
+        kind = "ConfigMap" if name.endswith("config") else "Secret"
+        annotations = docs[(kind, name)]["metadata"]["annotations"]
+        assert annotations["helm.sh/hook"] == "pre-install,pre-upgrade"
+        assert annotations["helm.sh/hook-delete-policy"] == "before-hook-creation,hook-succeeded"
+    job = docs[("Job", "user-api-migrate")]["spec"]["template"]
+    refs = [next(iter(e.values()))["name"] for e in job["spec"]["containers"][0]["envFrom"]]
+    assert refs == ["user-api-migrate-config", "user-api-migrate-secret"]
+    # no Service selects a migration pod
+    selector = docs[("Service", "user-api")]["spec"]["selector"]
+    assert not selector.items() <= job["metadata"]["labels"].items()
+
+    def checksums(rendered: dict) -> dict:
+        return rendered[("Deployment", "user-api")]["spec"]["template"]["metadata"]["annotations"]
+
+    base = checksums(docs)
+    env_changed = checksums(render("--set", "env.LOG_LEVEL=debug"))
+    secret_changed = checksums(
+        render("--set", "secretEnv.APP__DB__URL=postgresql+asyncpg://u:p@db/x")
+    )
+    assert env_changed["checksum/config"] != base["checksum/config"]
+    assert env_changed["checksum/secret"] == base["checksum/secret"]
+    assert secret_changed["checksum/secret"] != base["checksum/secret"]
+
+    # an external Secret (secretEnv: {}) is what the migration reads
+    external = render("--set", "secretEnv=null")
+    assert ("Secret", "user-api-secret") not in external
+    assert ("Secret", "user-api-migrate-secret") not in external
+    job = external[("Job", "user-api-migrate")]["spec"]["template"]
+    assert [next(iter(e.values()))["name"] for e in job["spec"]["containers"][0]["envFrom"]] == [
+        "user-api-migrate-config",
+        "user-api-secret",
+    ]

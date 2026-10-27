@@ -91,7 +91,7 @@ env:
   # inter-service auth at runtime. Credentials here are placeholders;
   # override the secret values via values-prod.yaml / an ExternalSecret.
 {%- for k, v in service.synthesis_env.items() %}
-  {{ k }}: "{{ v }}"
+  {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
 {%- endfor %}
 {%- endif %}
 # Secret env -> Secret (templates/secret.yaml). Placeholders only: forge

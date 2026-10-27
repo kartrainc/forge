@@ -1,0 +1,37 @@
+{{- /* The migrate Job's own copy of the env: pre-install/pre-upgrade hooks at weight -10, before the Job (-5), so they
+       exist on a first install, deleted once every hook of the release succeeded. The runtime ConfigMap and Secret
+       stay untouched by a migration that fails. */ -}}
+{{- if .Values.hasMigrations }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  {{- range $k, $v := .Values.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- if .Values.secretEnv }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+type: Opaque
+stringData:
+  {{- range $k, $v := .Values.secretEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
