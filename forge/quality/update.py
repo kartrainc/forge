@@ -131,6 +131,10 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             for rel, record in old.provenance.items():
                 if record.get("origin") == "user" and rel not in new.provenance:
                     new.provenance[rel] = record
+            # A file left in place stays recorded as forge's own, edited: turning the option back
+            # on then proposes the new version as a sidecar instead of colliding with it.
+            for rel in left_in_place:
+                new.provenance[rel] = dict(old.provenance[rel])
             manifest = tomlkit.parse((candidate / "forge.toml").read_text(encoding="utf-8"))
             manifest["forge"]["provenance"] = dict(sorted(new.provenance.items()))
             writes["forge.toml"] = tomlkit.dumps(manifest).encode()

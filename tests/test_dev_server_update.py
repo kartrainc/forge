@@ -181,3 +181,22 @@ def test_with_two_apps_disabling_one_removes_only_its_wrapper(tmp_path: Path) ->
     assert "console" not in (root / OVERLAY).read_text(encoding="utf-8").split("services:")[1]
     assert set_flags(False, False)["passed"]
     assert not (root / OVERLAY).exists() and not (root / WRAPPER).exists()
+
+
+def test_an_edited_file_left_in_place_survives_the_option_returning(
+    project: Path,
+) -> None:
+    """Edit -> disable -> enable: the kept file is still recorded, so re-enabling does not collide."""
+    _switch(project, True)
+    overlay = project / OVERLAY
+    mine = overlay.read_text(encoding="utf-8") + "# mine\n"
+    overlay.write_text(mine, encoding="utf-8")
+    report = _switch(project, False)
+    assert report["left_in_place"] == [OVERLAY]
+    assert OVERLAY in _recorded(project)
+    # Forge's output for it is what it was, so there is nothing to propose: no collision, the
+    # edited file stays, and the record is intact.
+    again = _switch(project, True)
+    assert again["passed"] and again["conflicts"] == []
+    assert overlay.read_text(encoding="utf-8") == mine
+    assert OVERLAY in _recorded(project)
