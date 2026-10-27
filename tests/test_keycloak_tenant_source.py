@@ -210,6 +210,9 @@ def test_self_registration_renders_realm_and_gatekeeper(
     # off: a user without a tenant could never sign in, so the realm offers
     # no registration.
     assert realm["registrationAllowed"] is registration
+    # own_organization names an organization after the email, so the realm
+    # verifies it first.
+    assert realm["verifyEmail"] is (env == "own_organization")
     assert ("manage-realm" in _gatekeeper_roles(realm)) is manage_realm
     assert _compose(root)["gatekeeper"]["environment"]["SELF_REGISTRATION"] == env
 

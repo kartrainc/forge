@@ -2,7 +2,8 @@
 
 The tenant header is client-chosen: with a bearer token on the request,
 ``TenantRLSMiddleware`` verifies it and refuses a different tenant with 403
-before the request reaches a handler or the database.
+before the request reaches a handler or the database. A token that does not
+verify is refused rather than ignored.
 """
 
 from __future__ import annotations
@@ -22,12 +23,21 @@ TENANT_B = "00000000-0000-0000-0000-00000000000b"
 SLUGS = {TENANT_A: "acme", TENANT_B: "beta"}
 
 
+class _Rejected(Exception):
+    """Shaped like the guard's AuthError."""
+
+    reason = "invalid_token"
+    status_code = 401
+
+
 class _Guard:
     """Verifies ``token-<tenant>`` as an identity of ``<tenant>``."""
 
     async def verify(self, token: str) -> SimpleNamespace:
+        if token == "outage":
+            raise ConnectionError("JWKS endpoint unreachable")
         if not token.startswith("token-"):
-            raise ValueError("invalid token")
+            raise _Rejected("invalid token")
         tenant = token.removeprefix("token-")
         return SimpleNamespace(tenant_id=tenant, tenant_slug=SLUGS.get(tenant), subject="user")
 
@@ -80,7 +90,7 @@ def test_subdomain_tenant_is_checked_too() -> None:
     assert response.status_code == 403
 
 
-@pytest.mark.parametrize(("host", "status"), [("acme", 200), ("beta", 403)])
+@pytest.mark.parametrize(("host", "status"), [("acme", 200), ("ACME", 200), ("beta", 403)])
 def test_a_subdomain_slug_compares_with_the_tokens_slug(host: str, status: int) -> None:
     response = _client("subdomain").get(
         "/items",
@@ -103,7 +113,6 @@ def test_an_identity_bound_without_a_bearer_token_constrains_the_tenant() -> Non
     ("headers", "guard"),
     [
         ({"X-Tenant-ID": TENANT_B}, True),  # no token: nothing verified
-        ({"X-Tenant-ID": TENANT_B, "Authorization": "Bearer forged"}, True),  # rejected token
         ({"X-Tenant-ID": TENANT_B, "Authorization": "Basic abc"}, True),  # not a bearer
         ({"X-Tenant-ID": TENANT_B, "Authorization": f"Bearer token-{TENANT_A}"}, False),  # no auth
     ],
@@ -112,6 +121,29 @@ def test_without_a_verified_identity_the_request_tenant_is_used(headers, guard) 
     response = _client(guard=guard).get("/items", headers=headers)
     assert response.status_code == 200
     assert response.json() == {"tenant": TENANT_B}
+
+
+@pytest.mark.parametrize(
+    ("token", "status", "code"),
+    [
+        ("forged", 401, "AUTH_REQUIRED"),  # rejected
+        ("outage", 503, "DEPENDENCY_UNAVAILABLE"),  # cannot be verified now
+    ],
+)
+def test_a_token_that_does_not_verify_never_binds_the_header_tenant(
+    token: str, status: int, code: str
+) -> None:
+    response = _client().get(
+        "/items", headers={"X-Tenant-ID": TENANT_B, "Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == status
+    assert response.json()["error"]["code"] == code
+
+
+def test_an_unverified_slug_binds_nothing() -> None:
+    response = _client("subdomain").get("/items", headers={"Host": "acme.example.com"})
+    assert response.status_code == 200
+    assert response.json() == {"tenant": None}
 
 
 def test_token_claim_resolution_is_not_rechecked() -> None:
@@ -123,5 +155,5 @@ def test_same_tenant() -> None:
     a = SimpleNamespace(tenant_id=TENANT_A, tenant_slug="acme")
     assert same_tenant(TENANT_A, a) and same_tenant(TENANT_A.upper(), a)
     assert not same_tenant(TENANT_B, a)
-    assert same_tenant("acme", a) and not same_tenant("beta", a)
+    assert same_tenant("acme", a) and same_tenant("Acme", a) and not same_tenant("beta", a)
     assert not same_tenant("acme", SimpleNamespace(tenant_id=TENANT_A, tenant_slug=None))

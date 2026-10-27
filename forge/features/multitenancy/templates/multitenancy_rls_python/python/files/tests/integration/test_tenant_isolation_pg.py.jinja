@@ -277,6 +277,22 @@ async def test_startup_guard_sees_inherited_roles() -> None:
                 await engine.dispose()
                 async with admin.begin() as conn:
                     await conn.exec_driver_sql(f"DROP ROLE {member}")
+        # A temporary table holds no tenant rows: its owner is not refused,
+        # whichever connection of the role created it.
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql(
+                f"CREATE ROLE {member} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'"
+            )
+        engine = create_async_engine(make_url(_URL).set(username=member, password=password))
+        try:
+            async with engine.connect() as conn:
+                await conn.exec_driver_sql("CREATE TEMP TABLE scratch (id int)")
+                await conn.commit()  # visible to the guard's own connection
+                await assert_rls_enforced(engine)
+        finally:
+            await engine.dispose()
+            async with admin.begin() as conn:
+                await conn.exec_driver_sql(f"DROP ROLE {member}")
     finally:
         async with admin.begin() as conn:
             await conn.exec_driver_sql(f"DROP TABLE IF EXISTS {owner}_t")

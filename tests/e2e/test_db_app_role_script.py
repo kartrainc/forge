@@ -120,3 +120,20 @@ def test_an_unsafe_existing_role_is_refused_without_a_superuser(postgres) -> Non
     result = _run_script(name, "bad_app")
     assert result.returncode != 0
     assert "permission denied to alter role" in result.stderr
+
+
+def test_a_role_the_owner_did_not_create_fails_without_leaking_the_verifier(postgres) -> None:
+    # Postgres 16+: a CREATEROLE owner may alter only roles it holds ADMIN
+    # OPTION on, and the failed statement's context would carry the verifier.
+    name, _ = postgres
+    _docker(
+        "exec", name, "psql", "-U", "postgres", "-c",
+        "CREATE ROLE foreign_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+    )  # fmt: skip
+    result = _run_script(name, "foreign_app")
+    assert result.returncode != 0
+    assert "cannot set the password of role foreign_app" in result.stderr
+    assert "ADMIN OPTION" in result.stderr
+    log = _docker("logs", name).stderr + _docker("logs", name).stdout
+    for output in (result.stderr, result.stdout, log):
+        assert re.search(r"SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{8}", output) is None, output

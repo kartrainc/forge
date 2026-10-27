@@ -17,6 +17,7 @@ import jwt
 from fastapi import APIRouter, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from redis.exceptions import WatchError
 
 import asyncio
 import hmac
@@ -902,16 +903,43 @@ class _OrganizationBusy(Exception):
     """Another sign-in of the same user is creating their organization."""
 
 
+class _EmailNotVerified(Exception):
+    """The user's email is not verified, so no organization is created for it."""
+
+
+async def _release_lock(redis: Any, lock: str, token: str) -> None:
+    """Delete *lock* only while it still holds *token*.
+
+    The holder may outlive the lock's TTL; a plain DELETE would then remove
+    the lock of the next sign-in, and a third could create a second
+    organization.
+    """
+    async with redis.pipeline(transaction=True) as pipe:
+        try:
+            await pipe.watch(lock)
+            if await pipe.get(lock) != token:
+                return
+            pipe.multi()
+            pipe.delete(lock)
+            await pipe.execute()
+        except WatchError:
+            # Changed meanwhile: it is no longer this sign-in's lock.
+            return
+
+
 async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str | None:
     """The organization a user in none signs in to; create it when needed.
 
     ``SELF_REGISTRATION=own_organization``. Returns the alias of the user's
     only enabled organization, creating it (with the user as its member) when
     they have none, or ``None`` when they belong to several (Keycloak asks
-    which one at sign-in) or only to disabled ones. A per-user Redis lock keeps two concurrent first sign-ins
-    (two tabs, a resubmitted callback) from creating two organizations: the
-    second waits for the first and signs in to the organization it created,
-    or raises :class:`_OrganizationBusy` when it is still running.
+    which one at sign-in) or only to disabled ones. A per-user Redis lock
+    keeps two concurrent first sign-ins (two tabs, a resubmitted callback)
+    from creating two organizations: the second waits for the first and signs
+    in to the organization it created, or raises :class:`_OrganizationBusy`
+    when it is still running. An organization is created only for a verified
+    email (:class:`_EmailNotVerified` otherwise), since it is named after it,
+    and deleted again when the user cannot be made its member.
     """
     cfg = get_settings()
     sub = claims.get("sub")
@@ -939,7 +967,9 @@ async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str 
 
     redis = get_redis()
     lock = f"gk:own-organization:{tc.realm_name}:{sub}"
-    if not await redis.set(lock, "1", nx=True, ex=30):
+    token = secrets.token_urlsafe(16)
+    # Outlasts the Admin API calls below (10 s timeout each).
+    if not await redis.set(lock, token, nx=True, ex=60):
         for _ in range(_OWN_ORGANIZATION_WAIT_STEPS):
             await asyncio.sleep(0.5)
             if not await redis.get(lock):
@@ -952,16 +982,27 @@ async def _own_organization(tc: TenantConfig, claims: Mapping[str, Any]) -> str 
         found = await existing()
         if found is not False:
             return found  # type: ignore[return-value]
+        if claims.get("email_verified") is not True:
+            raise _EmailNotVerified
         alias = f"u-{secrets.token_hex(6)}"
         owner = claims.get("email") or claims.get("preferred_username") or sub
         organization_id = await admin.create_organization(
             name=f"{owner} ({alias})", alias=alias
         )
-        await admin.add_organization_member(organization_id, sub)
+        try:
+            await admin.add_organization_member(organization_id, sub)
+        except Exception:
+            # An organization without its member would be orphaned: the next
+            # sign-in finds none and creates another.
+            try:
+                await admin.delete_organization(organization_id)
+            except httpx.HTTPError as exc:
+                logger.error("Could not delete organization %s: %s", alias, exc)
+            raise
         logger.info("Created organization %s for sub=%s", alias, sub)
         return alias
     finally:
-        await redis.delete(lock)
+        await _release_lock(redis, lock, token)
 
 
 # Half-second steps a concurrent first sign-in waits for the other to finish.
@@ -1120,6 +1161,15 @@ async def callback(
         ):
             try:
                 alias = await _own_organization(tc, claims)
+            except _EmailNotVerified:
+                logger.warning(
+                    "No organization for sub=%s: email not verified", claims.get("sub")
+                )
+                await _end_keycloak_session(tenant, refresh_token, tc)
+                return Response(
+                    status_code=403,
+                    content="Verify your email address before signing in",
+                )
             except _OrganizationBusy:
                 # Another sign-in of this user is still creating their
                 # organization: retry shortly, keeping the Keycloak session.

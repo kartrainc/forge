@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # inherits a table owner's rights (and the owner skips RLS) and can SET ROLE to
 # a superuser or BYPASSRLS role. Columns: the role, whether it is or can become
 # a superuser, a BYPASSRLS role, and how many tables and partitioned tables
-# outside the system schemas it or a role it belongs to owns.
+# outside the system and temporary schemas it or a role it belongs to owns
+# (a temporary table holds no tenant rows and lasts one session).
 ROLE_CHECK_SQL = """
 SELECT current_user,
        EXISTS (SELECT FROM pg_roles s
@@ -37,7 +38,8 @@ SELECT current_user,
          WHERE pg_has_role(current_user, c.relowner, 'MEMBER')
            AND c.relkind IN ('r', 'p')
            AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-           AND n.nspname NOT LIKE 'pg_toast%')
+           AND n.nspname NOT LIKE 'pg_toast%'
+           AND n.nspname NOT LIKE 'pg_temp%')
 """
 
 

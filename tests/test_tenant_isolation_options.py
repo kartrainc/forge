@@ -283,6 +283,28 @@ def test_go_startup_guard_follows_the_option(tmp_path: Path, guard: bool) -> Non
     assert (backend / "tests/e2e/tenancy_role_test.go").is_file()
 
 
+_MULTITENANCY = Path(__file__).resolve().parents[1] / "forge/features/multitenancy/templates"
+
+
+def test_both_python_strategies_ship_the_same_identity_check() -> None:
+    # shared_rls and schema_per_tenant refuse another tenant than the
+    # verified identity's alike: one module, copied into each fragment.
+    rls, schema = (
+        _MULTITENANCY / f"{fragment}/python/files/src/app/middleware/tenant_identity.py"
+        for fragment in ("multitenancy_rls_python", "multitenancy_schema_per_tenant_python")
+    )
+    assert rls.read_text(encoding="utf-8") == schema.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("strategy", ["shared_rls", "schema_per_tenant"])
+def test_python_tenant_middlewares_check_the_identity(tmp_path: Path, strategy: str) -> None:
+    root = _generate(tmp_path, BackendLanguage.PYTHON, **{"database.multitenancy": strategy})
+    middleware = root / "services/api0/src/app/middleware"
+    assert (middleware / "tenant_identity.py").is_file()
+    name = "tenant_rls.py" if strategy == "shared_rls" else "tenant_schema.py"
+    assert "same_tenant(tenant_id, identity)" in (middleware / name).read_text(encoding="utf-8")
+
+
 def test_python_entrypoint_can_skip_migrations() -> None:
     entrypoint = (
         Path(__file__).resolve().parents[1]

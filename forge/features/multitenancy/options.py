@@ -141,12 +141,14 @@ identical across both; only the binding mechanism differs. Inert when
   (``database.tenant_header_name``). For deployments where an upstream
   proxy / API gateway already resolved + validated the tenant.
 - ``subdomain``: parse the leftmost label of the request Host header
-  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing. Go
-  only reads a UUID label as a tenant (``example.com`` and IP hosts carry none).
+  (``acme.example.com`` → ``acme``). For per-tenant subdomain routing. A
+  single label (``localhost``) or an IP host carries none.
 
 With authentication, a header or subdomain tenant must be the verified
 identity's (403 otherwise): its tenant id, or for a label that is not a UUID,
-its tenant slug. With Keycloak organizations the slug is the organization's
+its tenant slug, ignoring case; the identity's tenant id is then bound.
+Without a verified identity a label that is not a UUID binds no tenant
+(``shared_rls``). With Keycloak organizations the slug is the organization's
 alias, so each tenant's host label must equal its organization's alias. The
 seeded development organization is ``default`` while Compose serves the app on
 ``app.localhost``, so with ``subdomain`` the development user is refused until
@@ -273,9 +275,11 @@ Set this to ``true`` only when a trusted gateway in front of the services
 authenticates the caller and sets or strips the tenant header itself.
 
 With authentication, a request with a verified identity may only name that
-identity's tenant (403 otherwise). A route that needs no sign-in still serves
-whichever tenant the header or host names: keep tenant data that is not
-public behind routes that require one.
+identity's tenant (403 otherwise), and a bearer token that does not verify is
+answered 401 (503 when it cannot be verified now) rather than ignored. A route
+that needs no sign-in, called without a token, still serves whichever tenant
+the header or host names: keep tenant data that is not public behind routes
+that require one.
 
 BACKENDS: python, go. Checked at generation.""",
             category=FeatureCategory.PLATFORM,

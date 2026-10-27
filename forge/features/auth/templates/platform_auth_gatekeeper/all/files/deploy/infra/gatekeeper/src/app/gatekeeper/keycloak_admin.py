@@ -138,6 +138,14 @@ class GatekeeperKeycloakAdmin:
         resp.raise_for_status()
         return resp.headers["location"].rstrip("/").rsplit("/", 1)[-1]
 
+    async def delete_organization(self, organization_id: str) -> None:
+        """Delete the organization *organization_id*."""
+        resp = await self._client().delete(
+            f"{self._organizations_url()}/{organization_id}",
+            headers=await self._headers(),
+        )
+        resp.raise_for_status()
+
     async def add_organization_member(self, organization_id: str, user_id: str) -> None:
         """Make the existing user *user_id* a member of the organization."""
         resp = await self._client().post(

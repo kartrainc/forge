@@ -19,19 +19,23 @@ Each safeguard below is an option, so a project can choose another strategy.
   a superuser: the role gets its attributes when created, and an existing one
   is altered only when an attribute is unsafe. The password never reaches SQL
   text that Postgres could log: it arrives as a startup option and the role
-  stores the SCRAM-SHA-256 verifier computed from it. The generated CI gets a
+  stores the SCRAM-SHA-256 verifier computed from it; a failure to set it (on
+  Postgres 16+, a role this owner did not create) reports neither. The generated CI gets a
   `tenant-isolation` job that migrates a Postgres service container, runs the
   script and runs the isolation tests as that role (`REQUIRE_APP_ROLE_TEST=1`,
   so they fail there rather than skip, and skip in other jobs).
 - `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
   startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
-  through a role it belongs to. The isolation tests run as a role RLS applies to
-  and, under CI, fail instead of skipping.
+  through a role it belongs to (temporary tables do not count). The isolation
+  tests run as a role RLS applies to and, under CI, fail instead of skipping.
 - `database.allow_unverified_tenant` (default `false`): generation refuses
   `shared_rls`/`schema_per_tenant` with a header or subdomain tenant and
   `auth.mode=none`, which let any caller choose the tenant. With authentication,
   a header or subdomain tenant must be the verified identity's (403 otherwise),
-  in Python and Go: a UUID its tenant id, a slug such as `acme` its tenant slug.
+  in Python (`shared_rls` and `schema_per_tenant`) and Go: a UUID its tenant
+  id, a slug such as `acme` its tenant slug, ignoring case. A bearer token that
+  does not verify answers 401 (503 when it cannot be verified now) instead of
+  leaving the header's tenant bound, and an unverified slug binds no tenant.
   Go rate-limits by tenant only when the token is verified.
 - `auth.keycloak_tenant_source` (default `organization`): the gatekeeper takes
   the tenant from the active Keycloak organization, requests the `organization`
@@ -39,14 +43,19 @@ Each safeguard below is an option, so a project can choose another strategy.
   the only way to choose one (`GET /auth/login` takes no organization), and
   passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
   `tenant-route` keeps the TMS tenant. `user_attribute` keeps the `tenant_id`
-  attribute. Keycloak moves to 26.6, which Organizations require.
+  attribute. Keycloak moves to 26.6, which Organizations require. The
+  gatekeeper refuses to start when its realm has Organizations disabled or the
+  `gatekeeper` client lacks the organization mapper, as a realm imported before
+  the upgrade does.
 - `auth.keycloak_self_registration` (default `off`): `off` closes the realm's
   registration, and a user without a tenant (in no organization, or without a
   `tenant_id` attribute) is refused with their Keycloak session ended.
   `own_organization` (organizations) keeps registration and gives each new
-  user an organization of their own through the Admin API; a concurrent first
-  sign-in waits for it, or gets a retryable 503, and a user whose only
-  organizations are disabled is refused rather than given a new one.
+  user an organization of their own through the Admin API, once their email
+  is verified (the realm turns on `verifyEmail`); a concurrent first sign-in
+  waits for it, or gets a retryable 503, an organization whose member cannot
+  be added is deleted again, and a user whose only organizations are disabled
+  is refused rather than given a new one.
   `default_tenant` (`user_attribute`) keeps the previous behaviour: every
   self-registered user gets the default tenant, and so shares its data.
 

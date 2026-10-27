@@ -29,11 +29,14 @@ Header / subdomain with a verified identity: a client chooses the header (and
 the host), so when the request has a verified identity (bound by an outer auth
 middleware, or a bearer token the middleware verifies with the app's auth
 guard) it answers 403 unless the requested tenant is the identity's: its
-tenant id, or its tenant slug for a value that is not a UUID; the identity's
-tenant id is then bound. Without one (a route that needs no sign-in, or no
-token) nothing is verified and the request tenant is used as is
+tenant id, or its tenant slug (any case) for a value that is not a UUID; the
+identity's tenant id is then bound. A bearer token that does not verify
+answers 401 (503 when it cannot be verified now), never the header's tenant.
+Without a token (a route that needs no sign-in) nothing is verified and a
+request tenant that is a UUID is used as is
 (``database.allow_unverified_tenant``): a public route serves whichever
-tenant the header or host names.
+tenant the header or host names. An unverified slug binds nothing. See
+``app.middleware.tenant_identity``.
 """
 
 from __future__ import annotations
@@ -44,82 +47,27 @@ from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
 from app.core.tenancy.resolver import TenantResolver
 from app.core.tenancy.rls import current_tenant_var
+from app.middleware.tenant_identity import (
+    IdentityRefused,
+    same_tenant,
+    tenant_mismatch,
+    verified_identity,
+)
 
 # Where the resolved tenant id is stashed for handlers / diagnostics.
 TENANT_STATE_KEY = "tenant_id"
 
 
-def _bearer(request: Request) -> str | None:
-    scheme, _, token = request.headers.get("authorization", "").partition(" ")
-    if scheme.lower() != "bearer":
-        return None
-    return token.strip() or None
-
-
-async def verified_identity(request: Request) -> Any | None:
-    """The request's verified identity, else ``None``.
-
-    An identity an outer auth middleware already bound (whatever it verified:
-    a bearer token, an internal-token header, an API key) comes first;
-    otherwise a bearer token is verified with the app's auth guard
-    (``forge_core.security.auth``). No token, an app without auth, or a token
-    the guard rejects verify nothing (the route's auth dependency answers the
-    rejection).
-    """
-    identity = getattr(request.state, "identity", None)
-    if identity is not None:
-        return identity
-    token = _bearer(request)
-    if token is None:
-        return None
+def _is_uuid(value: str) -> bool:
     try:
-        from forge_core.security.auth import get_auth_bundle_from_state  # noqa: PLC0415
-
-        bundle = get_auth_bundle_from_state(request)
-    except (ImportError, RuntimeError):
-        return None
-    try:
-        return await bundle.guard.verify(token)
-    except Exception:  # noqa: BLE001 — an unverified token verifies nothing
-        return None
-
-
-def same_tenant(requested: str, identity: Any) -> bool:
-    """Whether the requested tenant is *identity*'s.
-
-    A UUID compares with the identity's tenant id; anything else (a subdomain
-    slug such as ``acme``) with its tenant slug (``https://forge/tenant_slug``).
-    """
-    try:
-        requested_id = uuid.UUID(requested)
-    except ValueError:
-        slug = getattr(identity, "tenant_slug", None)
-        return bool(slug) and requested == slug
-    tenant = getattr(identity, "tenant_id", None)
-    try:
-        return tenant is not None and requested_id == uuid.UUID(str(tenant))
+        uuid.UUID(value)
     except ValueError:
         return False
-
-
-def _tenant_mismatch(request: Request) -> JSONResponse:
-    correlation = request.headers.get("x-correlation-id") or request.headers.get("x-request-id")
-    return JSONResponse(
-        status_code=403,
-        content={
-            "error": {
-                "code": "PERMISSION_DENIED",
-                "message": "The requested tenant is not the tenant of the verified identity.",
-                "type": "PermissionDeniedError",
-                "context": {},
-                "correlation_id": correlation or getattr(request.state, "correlation_id", "") or "",
-            }
-        },
-    )
+    return True
 
 
 class TenantRLSMiddleware(BaseHTTPMiddleware):
@@ -143,13 +91,20 @@ class TenantRLSMiddleware(BaseHTTPMiddleware):
         resolver = self._resolver_for(request)
         tenant_id = resolver.resolve(request)
         if tenant_id is not None and resolver.settings.resolution != "token_claim":
-            identity = await verified_identity(request)
+            try:
+                identity = await verified_identity(request)
+            except IdentityRefused as refused:
+                return refused.response
             if identity is not None:
                 if not same_tenant(tenant_id, identity):
-                    return _tenant_mismatch(request)
+                    return tenant_mismatch(request)
                 # Bind the identity's tenant id: a matching slug (``acme``)
                 # is not what the RLS policies compare with.
                 tenant_id = str(getattr(identity, "tenant_id", None) or tenant_id)
+            elif not _is_uuid(tenant_id):
+                # Unverified, a slug names no tenant id: bind nothing (no rows)
+                # rather than a value the policies' ::uuid cast rejects.
+                tenant_id = None
         setattr(request.state, TENANT_STATE_KEY, tenant_id)
         token = current_tenant_var.set(tenant_id)
         try:

@@ -23,7 +23,9 @@ keep a different strategy.
 - **Header or subdomain tenant without auth:** generation now fails. Enable
   authentication, use `token_claim`, or set `database.allow_unverified_tenant=true`
   when a trusted gateway owns the tenant header. With authentication, a request
-  whose header or subdomain names another tenant than its token now gets 403.
+  whose header or subdomain names another tenant than its token now gets 403
+  (`shared_rls` and `schema_per_tenant`), and one with a bearer token that does
+  not verify gets 401, even on a route that needs no sign-in.
 - **Keycloak projects:** Keycloak moves to 26.6 and the admin variables to
   `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD`. The default
   `auth.keycloak_tenant_source=organization` takes the tenant from Keycloak
@@ -31,10 +33,13 @@ keep a different strategy.
   existing realm needs organizations enabled, an organization per tenant (its id
   is the tenant id), the `organization-id` mapper on the `gatekeeper` client
   (see `deploy/infra/keycloak-realm.json`) and `post.logout.redirect.uris` set
-  to the app's origin (`http://app.localhost/*` in Compose). Registration is
+  to the app's origin (`http://app.localhost/*` in Compose); the gatekeeper
+  refuses to start until the first two are in place. Registration is
   closed unless `auth.keycloak_self_registration="own_organization"`, which
-  also needs `manage-realm` for `service-account-gatekeeper`. To keep the
-  `tenant_id` attribute instead, set `auth.keycloak_tenant_source="user_attribute"`.
+  also needs `manage-realm` for `service-account-gatekeeper`, "Verify email"
+  on the realm and an SMTP server: only a verified email gets an organization.
+  To keep the `tenant_id` attribute instead, set
+  `auth.keycloak_tenant_source="user_attribute"`.
 - **Self-registration with `user_attribute`:** registration is closed too, and
   a user without a `tenant_id` attribute is refused at sign-in instead of being
   given the default tenant (which put every self-registered user in the same
@@ -51,7 +56,9 @@ keep a different strategy.
   an existing realm, so after changing those hosts update the client's URIs in
   the admin console (or the realm export) too.
 - **Subdomain tenants with authentication:** a subdomain or header tenant that
-  is not a UUID must be the token's `https://forge/tenant_slug`, else 403.
+  is not a UUID must be the token's `https://forge/tenant_slug` (any case),
+  else 403, in Go too (which ignored such subdomains). Without a verified token
+  a slug binds no tenant.
 - **Realm per subdomain:** without a TMS `tenant-route`, the gatekeeper now signs
   users in to the project's realm. Set `REALM_PER_HOST=true` on the gatekeeper to
   keep deriving the realm from the host.

@@ -91,12 +91,28 @@ BEGIN
             salted := set_byte(salted, i, get_byte(salted, i) # get_byte(u, i));
         END LOOP;
     END LOOP;
-    EXECUTE format('ALTER ROLE %I PASSWORD %L', current_setting('forge.app_db_role'), format(
-        'SCRAM-SHA-256$%s:%s$%s:%s',
-        iterations,
-        encode(salt, 'base64'),
-        encode(sha256(pg_temp.forge_hmac(salted, convert_to('Client Key', 'UTF8'))), 'base64'),
-        encode(pg_temp.forge_hmac(salted, convert_to('Server Key', 'UTF8')), 'base64')));
+    -- A failure's CONTEXT would carry the statement, verifier included, to the
+    -- log and stderr: re-raise it without. (On Postgres 16+ a CREATEROLE owner
+    -- may alter only a role it created or holds ADMIN OPTION on.)
+    BEGIN
+        EXECUTE format('ALTER ROLE %I PASSWORD %L', current_setting('forge.app_db_role'), format(
+            'SCRAM-SHA-256$%s:%s$%s:%s',
+            iterations,
+            encode(salt, 'base64'),
+            encode(sha256(pg_temp.forge_hmac(salted, convert_to('Client Key', 'UTF8'))), 'base64'),
+            encode(pg_temp.forge_hmac(salted, convert_to('Server Key', 'UTF8')), 'base64')));
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            RAISE EXCEPTION 'cannot set the password of role %: %',
+                current_setting('forge.app_db_role'), SQLERRM
+                USING ERRCODE = SQLSTATE,
+                      HINT = 'The role exists and this owner did not create it: grant the owner '
+                          || 'ADMIN OPTION on it, or set database.rls_app_role=false.';
+        WHEN OTHERS THEN
+            RAISE EXCEPTION 'cannot set the password of role %: %',
+                current_setting('forge.app_db_role'), SQLERRM
+                USING ERRCODE = SQLSTATE;
+    END;
 END
 $do$;
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'role')\gexec

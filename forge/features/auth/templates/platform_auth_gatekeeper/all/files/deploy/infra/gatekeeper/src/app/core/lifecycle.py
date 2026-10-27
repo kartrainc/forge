@@ -76,6 +76,8 @@ class AppLifecycle:
                     realm=gk_cfg_for_probe.keycloak_admin_realm,
                     admin_user=gk_cfg_for_probe.kc_admin_user,
                     admin_password=gk_cfg_for_probe.kc_admin_password,
+                    organizations=gk_cfg_for_probe.tenant_source == "organization",
+                    client_id=gk_cfg_for_probe.gatekeeper_client_id,
                 )
             except RealmInvariantError as exc:
                 logger.error("realm invariant probe FAILED: %s", exc)

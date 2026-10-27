@@ -245,17 +245,22 @@ Self-registration through the realm's registration form.
   realm offers registration. On the first sign-in of a user in no
   organization the Gatekeeper creates an organization with that user as its
   only member, through the Keycloak Admin API, and signs them in to it, so
-  every sign-up starts its own tenant. The Gatekeeper's service account is
-  granted ``manage-realm`` for this, and nothing limits how many sign-ups
-  (organizations) are created: consider a captcha or rate limit on the
-  registration form.
+  every sign-up starts its own tenant. Only a verified email gets an
+  organization (it is named after it): the realm turns on ``verifyEmail``,
+  so configure its SMTP server. The Gatekeeper's service account is granted
+  ``manage-realm`` for this, a realm-wide administration role: whoever holds
+  the Gatekeeper's client secret can also change the realm's authentication
+  flows, password policy, identity providers and SMTP settings, so keep that
+  secret as you would a realm administrator's password. Nothing limits how
+  many sign-ups (organizations) are created: consider a captcha or rate
+  limit on the registration form.
 - ``default_tenant`` (``auth.keycloak_tenant_source=user_attribute``): the
   realm offers registration, and a user without a ``tenant_id`` attribute is
   given the default tenant at their first sign-in. Every self-registered user
   shares that tenant and its data: only for a single-tenant application.
 
 Sets the Gatekeeper's ``SELF_REGISTRATION`` and the realm's
-``registrationAllowed``.""",
+``registrationAllowed`` and ``verifyEmail``.""",
             category=FeatureCategory.PLATFORM,
         )
     )

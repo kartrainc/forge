@@ -17,6 +17,7 @@ from app.gatekeeper.http_client import set_http_client
 from app.gatekeeper.internal_token import mint_internal_token
 from app.gatekeeper.internal_token_cache import InternalTokenCache
 from app.gatekeeper.key_store import FileKeyRing
+from app.gatekeeper.realm_invariants import RealmInvariantError, verify_user_profile_active
 from app.gatekeeper.server_session import ServerSessionStore
 from app.gatekeeper.service_registry import load_registry
 from app.gatekeeper.service_verifier import PreSharedSecretVerifier
@@ -728,7 +729,7 @@ async def test_concurrent_sign_ins_keep_their_own_login_cookies(runtime):
     assert len(names) == 2 and names <= set(r.client.cookies.keys())
 
 
-def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
+def _org_token(r, *, organizations, subject="admin", tenant_attribute=None, email_verified=True):
     """A Keycloak access token carrying the organization-id mapper claim."""
     payload = {
         "sub": subject,
@@ -736,6 +737,8 @@ def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
         "aud": "gatekeeper",
         "exp": int(time.time()) + 600,
         "realm_access": {"roles": ["admin"]},
+        "email": f"{subject}@example.com",
+        "email_verified": email_verified,
         "https://forge/organization": organizations,
     }
     if tenant_attribute is not None:
@@ -814,10 +817,13 @@ async def test_sign_in_without_one_active_organization_is_refused(organizations,
 class _FakeOrganizations:
     """The Keycloak Admin API calls of SELF_REGISTRATION=own_organization."""
 
-    def __init__(self, existing=()):
+    def __init__(self, existing=(), *, member_error=None, on_create=None):
         self.existing = list(existing)
         self.created = []
         self.members = []
+        self.deleted = []
+        self.member_error = member_error
+        self.on_create = on_create
 
     def install(self, monkeypatch):
         fake = self
@@ -827,15 +833,23 @@ class _FakeOrganizations:
 
         async def create_organization(self, *, name, alias):
             fake.created.append((self._realm, name, alias))
+            if fake.on_create is not None:
+                await fake.on_create()
             return "new-org-id"
 
         async def add_organization_member(self, organization_id, user_id):
+            if fake.member_error is not None:
+                raise fake.member_error
             fake.members.append((organization_id, user_id))
+
+        async def delete_organization(self, organization_id):
+            fake.deleted.append(organization_id)
 
         for name, fn in (
             ("user_organizations", user_organizations),
             ("create_organization", create_organization),
             ("add_organization_member", add_organization_member),
+            ("delete_organization", delete_organization),
         ):
             monkeypatch.setattr(routes.GatekeeperKeycloakAdmin, name, fn)
         return self
@@ -899,6 +913,59 @@ async def test_a_concurrent_first_sign_in_waits_for_the_other(organizations, mon
         assert response.status_code == 302 and scope.endswith("organization:u-first")
     else:
         assert response.status_code == 503 and response.headers["retry-after"] == "2"
+
+
+async def test_own_organization_needs_a_verified_email(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    orgs = _FakeOrganizations().install(monkeypatch)
+    ended = []
+
+    async def end(tenant, refresh_token, **kwargs):
+        ended.append(refresh_token)
+
+    monkeypatch.setattr(routes, "end_session", end)
+    r.client.cookies.clear()
+    # The organization is named after the email: anyone could otherwise sign
+    # up with someone else's address and get an organization in their name.
+    token = _org_token(r, organizations=None, subject="newcomer", email_verified=False)
+    response, _ = await _callback(r, monkeypatch, token)
+    assert response.status_code == 403 and "Verify your email" in response.text
+    assert orgs.created == [] and ended == ["refresh"]
+    assert "tenant_session_id" not in response.cookies
+
+
+async def test_an_organization_without_its_member_is_deleted(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    orgs = _FakeOrganizations(member_error=httpx.ConnectError("keycloak down")).install(monkeypatch)
+    monkeypatch.setattr(routes, "end_session", _noop_end_session)
+    r.client.cookies.clear()
+    response, _ = await _callback(
+        r, monkeypatch, _org_token(r, organizations=None, subject="newcomer")
+    )
+    # Left behind, it would be found by no one and replaced at the next sign-in.
+    assert response.status_code == 502
+    assert len(orgs.created) == 1 and orgs.deleted == ["new-org-id"]
+    assert await r.redis.get("gk:own-organization:app:newcomer") is None
+
+
+async def test_own_organization_releases_only_its_own_lock(organizations, monkeypatch):
+    r = organizations
+    monkeypatch.setattr(r.cfg, "self_registration", "own_organization")
+    lock = "gk:own-organization:app:newcomer"
+
+    async def expire_and_retake():
+        # This sign-in outlived the lock's TTL and another one took it.
+        await r.redis.set(lock, "the-next-sign-in")
+
+    _FakeOrganizations(on_create=expire_and_retake).install(monkeypatch)
+    r.client.cookies.clear()
+    response, _ = await _callback(
+        r, monkeypatch, _org_token(r, organizations=None, subject="newcomer")
+    )
+    assert response.status_code == 302, response.text
+    assert await r.redis.get(lock) == "the-next-sign-in"
 
 
 async def test_own_organization_never_adds_a_member_of_one(organizations, monkeypatch):
@@ -979,6 +1046,68 @@ async def test_own_organization_admin_failure_fails_closed(organizations, monkey
     assert response.status_code == 502
     assert "tenant_session_id" not in response.cookies
     assert ended == ["refresh"]
+
+
+def _keycloak_admin(*, organizations_enabled=True, mapper=True):
+    """A Keycloak Admin API answering the realm invariant probe."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "admin"})
+        if path.endswith("/users/profile"):
+            return httpx.Response(
+                200,
+                json={
+                    "attributes": [{"name": "tenant_id"}],
+                    "unmanagedAttributePolicy": "ADMIN_EDIT",
+                },
+            )
+        if path.endswith("/clients"):
+            assert request.url.params["clientId"] == "gatekeeper"
+            mappers = [{"protocolMapper": "oidc-audience-mapper"}]
+            if mapper:
+                mappers.append({"protocolMapper": "oidc-organization-membership-mapper"})
+            return httpx.Response(
+                200, json=[{"clientId": "gatekeeper", "protocolMappers": mappers}]
+            )
+        if path.endswith("/admin/realms/app"):
+            return httpx.Response(200, json={"organizationsEnabled": organizations_enabled})
+        return httpx.Response(404)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle))
+
+
+async def _probe(admin, *, organizations=True):
+    await verify_user_profile_active(
+        server_url="http://keycloak",
+        realm="app",
+        admin_user="admin",
+        admin_password="admin",
+        organizations=organizations,
+        http_client=admin,
+        max_attempts=1,
+    )
+
+
+@pytest.mark.parametrize(
+    ("organizations_enabled", "mapper", "problem"),
+    [(False, True, "Organizations disabled"), (True, False, "organization membership mapper")],
+)
+async def test_a_realm_not_upgraded_to_organizations_fails_at_boot(
+    organizations_enabled, mapper, problem
+):
+    # Keycloak keeps an existing realm: without Organizations or the mapper
+    # every sign-in would get 403, so the gatekeeper refuses to start.
+    admin = _keycloak_admin(organizations_enabled=organizations_enabled, mapper=mapper)
+    with pytest.raises(RealmInvariantError, match=problem):
+        await _probe(admin)
+    # The user_attribute source needs neither.
+    await _probe(_keycloak_admin(organizations_enabled=False, mapper=False), organizations=False)
+
+
+async def test_an_organization_realm_passes_the_boot_probe():
+    await _probe(_keycloak_admin())
 
 
 async def test_tenant_route_still_pins_its_host_with_organizations(organizations):

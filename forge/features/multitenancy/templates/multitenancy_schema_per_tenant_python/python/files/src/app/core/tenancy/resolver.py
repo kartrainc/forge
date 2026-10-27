@@ -28,6 +28,7 @@ the authenticated account by the UoW binder (``schema.py:bind_tenant_search_path
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Mapping
 from typing import Any
 
@@ -39,6 +40,14 @@ except Exception:  # pragma: no cover - defensive
     _customer_id_var = None  # type: ignore[assignment]
 
 _UNSET = object()
+
+
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
 
 def _customer_id_from_context() -> Any:
@@ -102,7 +111,7 @@ class TenantResolver:
         host = request.headers.get("host", "")
         # Strip any :port suffix, then take the leftmost label.
         host = host.split(":", 1)[0].strip()
-        if not host or "." not in host:
+        if not host or "." not in host or _is_ip(host):
             return None
         label = host.split(".", 1)[0]
         return label or None
