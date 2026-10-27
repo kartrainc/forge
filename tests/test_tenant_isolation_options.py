@@ -207,9 +207,12 @@ def test_compose_runs_services_as_the_app_role(tmp_path: Path) -> None:
     assert "NOSUPERUSER NOBYPASSRLS" in body
     assert "ALTER DEFAULT PRIVILEGES" in body
     assert "\r\n" not in body
-    # The password comes from the environment, never the psql command line.
-    assert "\\getenv password APP_DB_PASSWORD" in body
+    # The password comes from the environment, never the psql command line,
+    # and reaches the server as a startup option, never in SQL text (which
+    # Postgres may log): ALTER ROLE gets the SCRAM verifier.
     assert "-v password" not in body and "-v role" not in body
+    assert "\\getenv password" not in body and ":'password'" not in body
+    assert "forge.app_db_password=" in body and "SCRAM-SHA-256$" in body
     assert "pg_advisory_lock" in body
 
 
@@ -365,6 +368,8 @@ def test_ci_runs_the_isolation_test_as_the_app_role(tmp_path: Path) -> None:
         assert steps["Create the app role"]["env"]["APP_DB_ROLE"] == "${{ matrix.app_role }}"
         test_env = steps["Tenant isolation as the app role"]["env"]
         assert test_env["APP_ROLE_DATABASE_URL"] == "${{ env.APP_ROLE_URL }}"
+        # Only this job fails, rather than skips, without the app role.
+        assert test_env["REQUIRE_APP_ROLE_TEST"] == "1"
         assert job["env"]["APP_ROLE_URL"].startswith("postgresql://${{ matrix.app_role }}:")
 
 

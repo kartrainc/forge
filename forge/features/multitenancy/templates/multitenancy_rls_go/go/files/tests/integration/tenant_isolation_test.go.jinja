@@ -317,8 +317,9 @@ func TestRLSIsolatesTenantsForTheAppRole(t *testing.T) {
 	appURL := os.Getenv("APP_ROLE_DATABASE_URL")
 	if appURL == "" {
 {%- if options['database.rls_app_role'] and options['database.rls_startup_guard'] %}
-		if os.Getenv("CI") != "" {
-			// database.rls_startup_guard: a skipped isolation test reads as a pass.
+		if os.Getenv("REQUIRE_APP_ROLE_TEST") == "1" {
+			// The tenant-isolation CI job sets it: there a skipped isolation
+			// test would read as a pass (database.rls_startup_guard).
 			t.Fatal("APP_ROLE_DATABASE_URL is not set, so tenant isolation is not tested as the app role")
 		}
 {%- endif %}

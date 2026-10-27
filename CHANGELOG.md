@@ -15,10 +15,14 @@ Each safeguard below is an option, so a project can choose another strategy.
   its grants after every migration: in Compose, in the Helm pre-install migrate
   Job, or with `infra.inCluster` in each pod's init containers, so the role exists
   before the service starts. The service skips its own migration
-  (`MIGRATE_ON_START=false`). The script reads the role's password from the
-  environment, and the generated CI gets a `tenant-isolation` job that migrates
-  a Postgres service container, runs the script and runs the isolation tests as
-  that role.
+  (`MIGRATE_ON_START=false`). The script needs an owner with `CREATEROLE`, not
+  a superuser: the role gets its attributes when created, and an existing one
+  is altered only when an attribute is unsafe. The password never reaches SQL
+  text that Postgres could log: it arrives as a startup option and the role
+  stores the SCRAM-SHA-256 verifier computed from it. The generated CI gets a
+  `tenant-isolation` job that migrates a Postgres service container, runs the
+  script and runs the isolation tests as that role (`REQUIRE_APP_ROLE_TEST=1`,
+  so they fail there rather than skip, and skip in other jobs).
 - `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
   startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
   through a role it belongs to. The isolation tests run as a role RLS applies to

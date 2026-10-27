@@ -1402,6 +1402,15 @@ identical across both; only the binding mechanism differs. Inert when
   (``acme.example.com`` → ``acme``). For per-tenant subdomain routing. Go
   only reads a UUID label as a tenant (``example.com`` and IP hosts carry none).
 
+With authentication, a header or subdomain tenant must be the verified
+identity's (403 otherwise): its tenant id, or for a label that is not a UUID,
+its tenant slug. With Keycloak organizations the slug is the organization's
+alias, so each tenant's host label must equal its organization's alias. The
+seeded development organization is ``default`` while Compose serves the app on
+``app.localhost``, so with ``subdomain`` the development user is refused until
+the alias and the host agree. With ``auth.keycloak_tenant_source=user_attribute``
+there is no slug, so only UUID labels are accepted.
+
 BACKENDS: python, go. Inert unless ``database.multitenancy != none``.
 
 ### `deploy.target`

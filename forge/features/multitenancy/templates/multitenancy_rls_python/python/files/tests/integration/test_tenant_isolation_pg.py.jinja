@@ -11,8 +11,10 @@ RLS the test creates a throwaway role that does not, and queries as it.
 
 ``test_app_role_isolates_the_migrated_tables`` runs as the role the service
 runs as (``database.rls_app_role``, created by ``deploy/compose/db-app-role.sh``)
-on the migrated database: ``$APP_ROLE_DATABASE_URL``. The generated CI migrates
-as the owner, runs the script and sets it.
+on the migrated database: ``$APP_ROLE_DATABASE_URL``. The generated CI's
+``tenant-isolation`` job migrates as the owner, runs the script and sets it,
+with ``REQUIRE_APP_ROLE_TEST=1`` so the test fails there rather than skip;
+other jobs, which have no app role, skip it.
 
 With ``database.rls_startup_guard`` on, the tests fail rather than skip when
 CI provides no Postgres or no role RLS applies to: a skipped isolation test
@@ -182,8 +184,8 @@ async def test_app_role_isolates_the_migrated_tables() -> None:
     url = _app_role_url()
     if not url.startswith("postgresql"):
         reason = "set APP_ROLE_DATABASE_URL to the app role's URL of a migrated database"
-        if APP_ROLE:
-            _unavailable(reason)
+        if APP_ROLE and REQUIRE_ISOLATION_TEST and os.environ.get("REQUIRE_APP_ROLE_TEST") == "1":
+            pytest.fail(f"tenant isolation test cannot run: {reason}")
         pytest.skip(reason)
     from sqlalchemy.exc import DBAPIError, ProgrammingError  # noqa: PLC0415
 

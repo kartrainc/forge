@@ -14,7 +14,9 @@ keep a different strategy.
   on `up`. In Helm, set each workload's `migrateSecretEnv` (`DB_OWNER_URL`, the
   owner DB URL, `APP_DB_PASSWORD`) and put the same password in `secretEnv`'s DB
   URL; with `infra.inCluster` the pods' init containers migrate and create the
-  role, otherwise the pre-install migrate Job does. A deployment with its own non-bypassing role
+  role, otherwise the pre-install migrate Job does. The owner needs `CREATEROLE`
+  (not superuser) on Postgres 13 or newer, and `APP_DB_PASSWORD` must be
+  printable ASCII. A deployment with its own non-bypassing role
   sets `database.rls_app_role=false` and points the DB URL at it; the startup
   guard refuses a superuser either way. Check with
   `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`.
