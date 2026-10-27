@@ -1,0 +1,17 @@
+{{- /* Named after the service on the service's own port, so a sibling's INTERNAL_SERVICE_URL_<NAME>
+       (http://<name>:<port>) resolves in the cluster as in compose. */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "svc.name" . }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "svc.selector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP

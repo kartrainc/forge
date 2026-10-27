@@ -301,3 +301,63 @@ def test_notes_name_a_further_app_and_its_host_only_with_the_ingress(tmp_path: P
     notes = _notes(chart, tmp_path / "off", "--set", "ingress.enabled=false")
     assert "  - admin (nginx) on port 80" in notes
     assert "http(s)://" not in notes
+
+
+# deploy.helm_layout=per_service: every chart under deploy/helm/ lints, renders and validates, in every scenario.
+def _gen_service_charts(**kw) -> Path:
+    cfg = ProjectConfig(options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"}, **kw)
+    return generate(cfg, quiet=True, dry_run=True) / "deploy" / "helm"
+
+
+@pytest.mark.parametrize("name,kw", _scenarios(), ids=[s[0] for s in _scenarios()])
+@pytest.mark.parametrize("in_cluster", [False, True], ids=["external", "incluster"])
+def test_every_service_chart_lints_and_validates(name: str, kw: dict, in_cluster: bool) -> None:
+    helm = _gen_service_charts(**kw)
+    charts = sorted(p for p in helm.iterdir() if (p / "Chart.yaml").is_file())
+    backends = {b.name for b in kw["backends"]}
+    assert {c.name for c in charts} >= backends | {"platform"}
+    for chart in charts:
+        lint = subprocess.run(["helm", "lint", "--strict", str(chart)], capture_output=True, text=True)
+        assert lint.returncode == 0, f"helm lint {chart.name} failed:\n{lint.stdout}\n{lint.stderr}"
+        set_args = ("--set", "infra.inCluster=true") if in_cluster and chart.name == "platform" else ()
+        tmpl = subprocess.run(
+            ["helm", "template", chart.name, str(chart), *set_args], capture_output=True, text=True
+        )
+        assert tmpl.returncode == 0, f"helm template {chart.name} failed:\n{tmpl.stderr}"
+        docs = [doc for doc in yaml.safe_load_all(tmpl.stdout) if doc]
+        if chart.name in backends:
+            port = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))["containerPort"]
+            kinds = {(d["kind"], d["metadata"]["name"]) for d in docs}
+            for kind in ("Deployment", "Service", "HorizontalPodAutoscaler"):
+                assert (kind, chart.name) in kinds
+            (service,) = [d for d in docs if d["kind"] == "Service"]
+            assert service["spec"]["ports"][0]["port"] == port
+        if _KUBECONFORM:
+            kc = subprocess.run(
+                [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
+                input=tmpl.stdout,
+                capture_output=True,
+                text=True,
+            )
+            assert kc.returncode == 0, f"kubeconform {chart.name} failed:\n{kc.stdout}\n{kc.stderr}"
+
+
+def test_the_platform_routes_each_host_to_the_services() -> None:
+    helm = _gen_service_charts(**dict(_scenarios())["py_two_vue_keycloak"])
+    docs = _template(helm / "platform", *_GATEKEEPER_ON)
+    ingresses = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Ingress"}
+    routes = {
+        name: (rule["host"], [(p["backend"]["service"]["name"], p["backend"]["service"]["port"]["number"])
+                              for p in rule["http"]["paths"]])
+        for name, ing in ingresses.items()
+        for rule in ing["spec"]["rules"]
+    }
+    assert routes == {
+        "rel-frontend-api": ("shop.example.com", [("api", 8001)]),
+        "rel-frontend-web": ("shop.example.com", [("frontend", 80)]),
+        "rel-admin-api": ("admin.shop.example.com", [("api", 8001)]),
+        "rel-admin-web": ("admin.shop.example.com", [("admin", 80)]),
+    }
+    assert "rewrite-target" in str(ingresses["rel-admin-api"]["metadata"].get("annotations"))
+    assert "annotations" not in ingresses["rel-admin-web"]["metadata"]
+    assert _gatekeeper_env(docs)["GATEKEEPER_FRONTEND_HOST_LABELS"] == "admin"

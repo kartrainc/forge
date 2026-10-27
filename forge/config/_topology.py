@@ -188,6 +188,33 @@ def compute_topology(
     )
     from forge import frontend_csp  # noqa: PLC0415 — imports forge.config
 
+    # Every frontend, primary first, keyed by the DNS-safe name its per-service
+    # Helm chart and release take (deploy.helm_layout=per_service).
+    frontends = (
+        (
+            {
+                "name": _dns_label(config.frontend_slug or "frontend"),
+                "app": config.frontend_slug or "frontend",
+                "primary": True,
+                "host": "",
+                "security_headers": frontend_csp.security_headers(config),
+                "csp": frontend_csp.content_security_policy(config),
+            },
+        )
+        if has_frontend
+        else ()
+    ) + tuple(
+        {
+            "name": _dns_label(fe["dns_name"]),
+            "app": fe["name"],
+            "primary": False,
+            "host": "",
+            "security_headers": fe["security_headers"],
+            "csp": fe["csp"],
+        }
+        for fe in extra_frontends
+    )
+
     return {
         "project_slug": config.project_slug,
         "backends": backends,
@@ -220,4 +247,10 @@ def compute_topology(
         "frontend_security_headers": frontend_csp.security_headers(config),
         "frontend_csp": frontend_csp.content_security_policy(config),
         "extra_frontends": extra_frontends,
+        "frontends": frontends,
     }
+
+
+def _dns_label(name: str) -> str:
+    """A Kubernetes/Helm release name: lowercase, ``-`` for ``_`` and spaces."""
+    return name.lower().replace("_", "-").replace(" ", "-")

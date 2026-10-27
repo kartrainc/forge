@@ -1,0 +1,90 @@
+# Values of the platform chart of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED (re-rendered on `forge --update`, three-way merged).
+# Install it before the services (it may run their in-cluster Postgres):
+#
+#     helm upgrade --install platform deploy/helm/platform -f values-<env>.yaml
+
+# HTTP ingress. Each service is its own release, named after the service, so
+# the routes name each service's Service and port. The rewrite annotation is
+# nginx-ingress-specific; switch className + annotations for another
+# controller. Every frontend gets two Ingresses on its host: one for the
+# /api/<backend> paths with the annotations, one for / without them.
+ingress:
+  enabled: true
+  className: nginx
+  host: {{ topology.project_slug | replace("_", "-") }}.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /api/$2
+{%- if topology.backends %}
+  paths:
+{%- for be in topology.backends %}
+    - path: /api/{{ be.name }}(/|$)(.*)
+      pathType: ImplementationSpecific
+      service: {{ be.name }}
+      port: {{ be.port }}
+{%- endfor %}
+{%- else %}
+  paths: []
+{%- endif %}
+  # The primary frontend serves ingress.host; every other one
+  # <name>.<ingress.host> unless its host is set.
+{%- if topology.frontends %}
+  frontends:
+{%- for fe in topology.frontends %}
+    - name: {{ fe.name }}
+      primary: {{ "true" if fe.primary else "false" }}
+      host: ""
+      port: 80
+{%- endfor %}
+{%- else %}
+  frontends: []
+{%- endif %}
+
+# Datastores. EXTERNAL by default (production posture). There is no separate
+# "externalServices" host knob: each workload reaches its datastores through the
+# hosts baked into its env/secretEnv above (the DB URL host, AUTH server_url,
+# REDIS/GATEKEEPER URLs). To point at managed Postgres/Redis/Keycloak, override
+# those values in each service's release — e.g. its secretEnv.APP__DB__URL
+# (or DATABASE_URL) — with your managed Postgres DSN. Flip
+# infra.inCluster=true to spin up in-cluster stand-ins (kind/minikube only —
+# NOT production-grade), which the baked-in hosts already resolve.
+
+infra:
+  inCluster: false
+{%- if topology.render_postgres %}
+  # One DATABASE per backend, created on the in-cluster Postgres's first boot.
+  databases:
+{%- for be in topology.backends %}
+    - {{ be.db_name }}
+{%- endfor %}
+  postgres:
+    image: pgvector/pgvector:pg16
+    storage: 10Gi
+{%- endif %}
+{%- if topology.include_keycloak %}
+  redis:
+    image: redis:7-alpine
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    realm: forge
+  # In-cluster Gatekeeper (OIDC ForwardAuth + S2S token authority). OFF by
+  # default even with infra.inCluster — production uses an external/managed
+  # gatekeeper. Enable for a full in-cluster auth demo AFTER building+pushing
+  # the gatekeeper image from deploy/infra/gatekeeper/. A keygen initContainer
+  # mints signing keys; a post-install Job syncs the realm into Keycloak.
+  gatekeeper:
+    enabled: false
+    image:
+      repository: ghcr.io/example/{{ topology.project_slug }}-gatekeeper
+      tag: latest
+      pullPolicy: IfNotPresent
+    # S2S client secret — placeholder; override or wire an ExternalSecret.
+    clientSecret: "CHANGEME"
+{%- endif %}
+
+# Pod security: non-root by default (matches the raw-k8s + compose posture).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001

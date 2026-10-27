@@ -1,0 +1,124 @@
+# Values of the {{ service.name }} chart, one service of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED. It is re-rendered from the project's deployment
+# topology on every `forge --update` (a three-way merge keeps your edits or
+# drops a .forge-merge sidecar). Override per environment with a separate file
+# forge never touches; the release is named after the service:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+
+partOf: {{ topology.project_slug | replace("_", "-") }}
+language: {{ service.language }}
+image:
+  repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.name }}
+  tag: latest
+  pullPolicy: IfNotPresent
+replicaCount: 2
+containerPort: {{ service.port }}
+# The Postgres database this backend owns (matches the db_name in the DB URL
+# below); the platform chart's in-cluster Postgres creates it (infra.databases).
+dbName: {{ service.db_name }}
+# A migration runs as a pre-install/pre-upgrade Helm hook Job before the
+# Deployment rolls (templates/migrate-job.yaml).
+hasMigrations: {{ "true" if service.has_migrations else "false" }}
+migrateCommand:
+{%- if service.language == "python" %}
+  ["python", "-m", "app", "db", "upgrade"]
+{%- elif service.language == "node" %}
+  ["npx", "prisma", "migrate", "deploy"]
+{%- elif service.language in ("rust", "go") %}
+  ["/app/migrate"]
+{%- else %}
+  []
+{%- endif %}
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+# Non-secret env -> ConfigMap (templates/configmap.yaml).
+env:
+{%- if service.language == "python" %}
+  ENV: "production"
+  LOG_LEVEL: "info"
+  APP__SERVER__PORT: "{{ service.port }}"
+{%- elif service.language == "node" %}
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  APP__SERVER__PORT: "{{ service.port }}"
+{%- elif service.language == "rust" %}
+  PORT: "{{ service.port }}"
+  RUST_LOG: "info"
+{%- elif service.language == "go" %}
+  ENV: "production"
+  PORT: "{{ service.port }}"
+  APP__LOGGING__LEVEL: "info"
+{%- else %}
+  ENV: "production"
+{%- endif %}
+{%- if topology.include_keycloak %}
+  # Auth env mirrors docker-compose: the backend default is auth-OFF, so a
+  # keycloak project MUST carry these to deploy with authentication ON. In
+  # the gatekeeper sole-issuer model the backend validates gatekeeper's
+  # internal JWT (iss=gatekeeper, JWKS at <server_url>/auth/jwks), so
+  # server_url + audience point at the IN-CLUSTER gatekeeper Service, not
+  # Keycloak. For an EXTERNAL/managed gatekeeper, override via values-prod.yaml.
+  APP__SECURITY__AUTH__ENABLED: "true"
+  APP__SECURITY__AUTH__SERVER_URL: "http://gatekeeper:5000"
+  APP__SECURITY__AUTH__AUDIENCE: "forge-services"
+  # forge_core derives the JWKS URI from server_url + realm as the
+  # Keycloak-style /realms/<realm>/protocol/openid-connect/certs path unless
+  # pinned. Gatekeeper serves JWKS at /auth/jwks, so this pin is REQUIRED or
+  # the backend 404s on every verification and rejects all gatekeeper tokens.
+  APP__SECURITY__AUTH__JWKS_URI: "http://gatekeeper:5000/auth/jwks"
+  APP__SECURITY__AUTH__REALM: "{{ topology.keycloak_realm }}"
+  APP__SECURITY__AUTH__CLIENT_ID: "{{ topology.keycloak_client_id }}"
+  GATEKEEPER_ISSUER: "http://gatekeeper:5000"
+  SERVICE_AUDIENCE: "forge-services"
+{%- endif %}
+{%- if service.synthesis_env %}
+  # Inter-service (S2S) synthesis env — mirrors docker-compose.yml.j2's
+  # synthesis_env loop so a multi-service Helm deployment can mint S2S
+  # tokens + reach sibling services. Without this, Helm-deployed backends
+  # have no GATEKEEPER_CLIENT_*/INTERNAL_SERVICE_URL_*/BUS_URL and fail
+  # inter-service auth at runtime. Credentials here are placeholders;
+  # override the secret values via values-prod.yaml / an ExternalSecret.
+{%- for k, v in service.synthesis_env.items() %}
+  {{ k }}: "{{ v }}"
+{%- endfor %}
+{%- endif %}
+# Secret env -> Secret (templates/secret.yaml). Placeholders only: forge
+# NEVER bakes a real credential into the chart. Override per environment, or
+# set secretEnv: {} and wire an ExternalSecret (see templates/secret.yaml).
+secretEnv:
+{%- if service.language == "python" %}
+  APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- elif service.language == "node" %}
+  APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- elif service.language in ("rust", "go") %}
+  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- endif %}
+
+# The Service, named after the release on the service's own port: a sibling's
+# INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }} (http://{{ service.name }}:{{ service.port }}) resolves.
+service:
+  port: {{ service.port }}
+
+# The in-cluster Postgres host the migrate Job waits for (the platform chart's
+# "postgres" under infra.inCluster); empty for a managed database.
+waitForPostgres: ""
+postgresImage: pgvector/pgvector:pg16
+
+# Pod security: non-root by default (matches the compose posture).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001

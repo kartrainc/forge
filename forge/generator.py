@@ -876,7 +876,11 @@ def _apply_project_scope(
     if plan.option_values.get("deploy.target") == "kubernetes":
         _realm = project_root / "deploy" / "infra" / "keycloak-realm.json"
         if _realm.is_file():
-            _realm_dst = project_root / "deploy" / "helm" / "files" / "keycloak-realm.json"
+            # per_service: the in-cluster Keycloak lives in the platform chart
+            _chart = (
+                "platform" if plan.option_values.get("deploy.helm_layout") == "per_service" else ""
+            )
+            _realm_dst = project_root / "deploy" / "helm" / _chart / "files" / "keycloak-realm.json"
             _realm_dst.parent.mkdir(parents=True, exist_ok=True)
             _realm_dst.write_text(_realm.read_text(encoding="utf-8"), encoding="utf-8")
             collector.record(_realm_dst, origin="base-template")

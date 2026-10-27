@@ -1,0 +1,16 @@
+{{- /* Non-secret env. A pre-install/pre-upgrade hook at weight -10, before the migrate Job (-5), so the Job's envFrom
+       resolves on a first install; before-hook-creation keeps it for the Deployment. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "config") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  {{- range $k, $v := .Values.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

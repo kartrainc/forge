@@ -884,6 +884,14 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
             "and auth.provider=gatekeeper."
         )
     fragment_set = _collect_fragments(option_values)
+    # deploy.helm_layout picks how deploy.target=kubernetes packages the project: per_service puts one chart per
+    # service in place of the umbrella chart.
+    if (
+        "deploy_helm_chart" in fragment_set
+        and option_values.get("deploy.helm_layout") == "per_service"
+    ):
+        fragment_set.discard("deploy_helm_chart")
+        fragment_set.add("deploy_helm_service_charts")
     fragment_set |= _collect_component_fragments(config)
     fragment_set = _expand_deps(fragment_set)
     _check_fragment_ui_kits(config, fragment_set)

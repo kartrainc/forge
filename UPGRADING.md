@@ -4,6 +4,20 @@ This document lists breaking changes per version and the migration steps for eac
 
 ## 1.1 → 1.2
 
+### Per-service Helm charts (optional)
+
+`deploy.helm_layout: per_service` replaces the umbrella chart with one chart per service and `deploy/helm/platform/`.
+To switch an existing project:
+
+1. Set the option and run the update. The new charts appear under `deploy/helm/<service>/` and `deploy/helm/platform/`;
+   the umbrella's files (`deploy/helm/Chart.yaml`, `values.yaml`, `values-prod.yaml.example`, `templates/`, `files/`)
+   stay on disk, no longer recorded. Delete them once nothing installs them.
+2. Move environment values: what was under `workloads.<service>` goes to the top level of that service's chart, the
+   primary `frontend` and each `frontends.<name>` to their chart, `ingress` and `infra` to the platform's.
+3. Install `platform` first, then every service as a release named after it (`make helm-install`). The objects are
+   renamed (`<release>-<service>` becomes `<service>`), so uninstall the umbrella release after the services serve.
+   A Service now listens on the service's port, not 80: update anything that called `<release>-<service>:80`.
+
 ### Coordinated dependency refresh (unreleased)
 
 Regenerate a candidate and review its ownership-aware update before adopting

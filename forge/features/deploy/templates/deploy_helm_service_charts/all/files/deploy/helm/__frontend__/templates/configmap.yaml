@@ -1,0 +1,38 @@
+{{- /* nginx config for the SPA. Under security.csp it sends .Values.securityHeaders with every response and the
+       contentSecurityPolicy with index.html, whose nonce is nginx's $request_id written over the build's
+       __CSP_NONCE__ placeholder; index.html is never cached, so its nonce always matches its header. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "nginx") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+data:
+  default.conf: |
+{{- if .Values.nginxConf }}
+    {{- .Values.nginxConf | nindent 4 }}
+{{- else }}
+    server {
+        listen {{ .Values.port }};
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+{{- range $name, $value := .Values.securityHeaders }}
+        add_header {{ $name }} {{ $value | quote }} always;
+{{- end }}
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+{{- with .Values.contentSecurityPolicy }}
+        location = /index.html {
+{{- range $name, $value := $.Values.securityHeaders }}
+            add_header {{ $name }} {{ $value | quote }} always;
+{{- end }}
+            add_header Content-Security-Policy {{ . | quote }} always;
+            add_header Cache-Control "no-store" always;
+            sub_filter_once off;
+            sub_filter "__CSP_NONCE__" "$request_id";
+        }
+{{- end }}
+    }
+{{- end }}

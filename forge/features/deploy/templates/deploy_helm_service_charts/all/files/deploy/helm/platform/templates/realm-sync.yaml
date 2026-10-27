@@ -1,0 +1,63 @@
+{{- /* Keycloak realm-sync — in-cluster auth demo only (infra.inCluster +
+       infra.gatekeeper). A post-install Job syncs the realm into the running
+       Keycloak via its Admin API, reading the realm JSON bundled into the
+       chart (deploy/helm/files/keycloak-realm.json) as a ConfigMap. */ -}}
+{{- if and .Values.infra.inCluster .Values.infra.gatekeeper .Values.infra.gatekeeper.enabled }}
+{{- $realm := .Files.Get "files/keycloak-realm.json" }}
+{{- if $realm }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/name: realm-sync
+data:
+  keycloak-realm.json: |
+{{ $realm | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-realm-sync" .Release.Name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+    app.kubernetes.io/name: realm-sync
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/name: realm-sync
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: realm-sync
+          image: "{{ .Values.infra.gatekeeper.image.repository }}:{{ .Values.infra.gatekeeper.image.tag }}"
+          imagePullPolicy: {{ .Values.infra.gatekeeper.image.pullPolicy }}
+          command: ["python", "scripts/realm_sync.py"]
+          env:
+            - name: ENV
+              value: development
+            - name: KEYCLOAK_BASE_URL
+              value: http://keycloak:8080/realms
+            - name: KEYCLOAK_ADMIN_REALM
+              value: {{ .Values.infra.keycloak.realm | default "app" | quote }}
+            - name: REALM_JSON_PATH
+              value: /realm/keycloak-realm.json
+          volumeMounts:
+            - name: realm
+              mountPath: /realm
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ printf "%s-keycloak-realm" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}

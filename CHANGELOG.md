@@ -5,6 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Per-service Helm charts
+
+- `deploy.helm_layout` (`umbrella` by default, `per_service`): with `deploy.target=kubernetes`, `per_service` emits
+  one Helm chart per backend (`deploy/helm/<backend>/`) and per frontend (`deploy/helm/<frontend>/`), each installed as
+  its own release named after the service, plus `deploy/helm/platform/` for the Ingress and the optional in-cluster
+  datastores, Keycloak and gatekeeper. A service rolls out, fails its migration and rolls back alone. Its Service is
+  named after it on its own port, so the `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve in the
+  cluster as in compose. Each chart's values carry exactly its umbrella workload entry.
+- Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
+  entry exposed to their Jinja as `service`.
+
 ### Dependency compatibility
 
 - Require DOMPurify 3.4.17 in the canvas packages, their workspace lockfile and

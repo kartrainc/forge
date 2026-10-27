@@ -1,0 +1,43 @@
+# Values of the {{ service.name }} chart, the {{ service.app }} frontend of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED (re-rendered on `forge --update`, three-way merged).
+# Override per environment with a separate file; the release is named after
+# the frontend:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+
+partOf: {{ topology.project_slug | replace("_", "-") }}
+image:
+  repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.app }}
+  tag: latest
+  pullPolicy: IfNotPresent
+replicaCount: 2
+port: 80
+# nginx config, mounted as a ConfigMap. Empty = a SPA fallback (try_files ->
+# index.html); the platform chart's Ingress routes /api, so the pod doesn't
+# proxy backends.
+nginxConf: ""
+# security.csp: the headers the default nginx config sends with every response,
+# and the Content-Security-Policy it sends with index.html ($request_id stands
+# for each response's nonce). Empty when the option is off; unused when
+# nginxConf is set.
+{%- if service.security_headers %}
+securityHeaders:
+{%- for name, value in service.security_headers %}
+  {{ name }}: "{{ value }}"
+{%- endfor %}
+{%- else %}
+securityHeaders: {}
+{%- endif %}
+contentSecurityPolicy: "{{ service.csp }}"
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
