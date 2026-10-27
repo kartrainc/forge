@@ -5,7 +5,8 @@ the overlay with ``docker compose up --watch``, then drives Chromium through Tra
 an edit to a component on the host must reach the page without a reload, and nothing the
 container writes may be owned by anyone but the developer.
 
-Runtime coverage is npm, pnpm and yarn with the shadcn kit and sign-in off. Yarn needs a host
+Runtime coverage is npm, pnpm and yarn with the shadcn kit, and npm with Nuxt UI (which also
+generates src/components.d.ts), with sign-in off. Yarn needs a host
 Node that satisfies the project's engines (jsdom asks for 22.22.2, 24.15 or 26); a case is
 skipped when its package manager is not on PATH.
 
@@ -50,7 +51,7 @@ description: "dev server hot reload"
 include_keycloak: false
 backends:
   - { name: api, language: python, python_version: "3.13", app_template: crud-service, features: [items], server_port: 5010 }
-frontend: { framework: vue, include_auth: false, include_chat: false, package_manager: __PM__, server_port: 5173, dev_server: true }
+frontend: { framework: vue, include_auth: false, include_chat: false, package_manager: __PM__, ui_kit: __KIT__, server_port: 5173, dev_server: true }
 """
 
 # Runs in the generated app, so its own @playwright/test resolves. Prints one JSON line.
@@ -93,6 +94,16 @@ try {
 }
 console.log(JSON.stringify(result))
 """
+
+
+def _npx() -> str:
+    """npx as the OS names it: on Windows it is npx.cmd, which subprocess does not resolve."""
+    return shutil.which("npx") or "npx"
+
+
+def _owned_by_someone_else(path: Path) -> bool:
+    """Whether a file in the checkout belongs to another user. Windows has no uids to compare."""
+    return hasattr(os, "getuid") and path.lstat().st_uid != os.getuid()
 
 
 def _free_port() -> int:
@@ -155,9 +166,12 @@ def _wait(what: str, ready, log: Path, timeout: int) -> None:
     raise AssertionError(f"{what} not reached in {timeout}s:\n{log.read_text()[-3000:]}")
 
 
-@pytest.mark.parametrize("manager", ["npm", "pnpm", "yarn"])
+@pytest.mark.parametrize(
+    ("manager", "ui_kit"),
+    [("npm", "shadcn"), ("pnpm", "shadcn"), ("yarn", "shadcn"), ("npm", "nuxt-ui")],
+)
 def test_dev_server_hot_reloads_a_component_through_traefik(
-    tmp_path: Path, has_docker: bool, has_npm: bool, manager: str
+    tmp_path: Path, has_docker: bool, has_npm: bool, manager: str, ui_kit: str
 ) -> None:
     if not (has_docker and has_npm):
         pytest.skip("needs Docker and npm")
@@ -172,7 +186,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     )
 
     stack = tmp_path / "stack.yaml"
-    stack.write_text(_STACK.replace("__PM__", manager), encoding="utf-8")
+    stack.write_text(_STACK.replace("__PM__", manager).replace("__KIT__", ui_kit), encoding="utf-8")
     _run(
         [
             sys.executable,
@@ -190,12 +204,31 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
     root = tmp_path / "out" / "devhmr"
     app = root / "apps" / "frontend"
     assert (root / "docker-compose.dev.yaml").is_file()
-    # A project config that admits every host must not widen what the dev server admits.
+    # The default (nginx) target must still build with the option on: the production image
+    # type-checks and bundles the wrapper too, and must not carry a dev server.
+    prod_image = f"forgeprod{uuid.uuid4().hex[:8]}"
+    try:
+        _run(["docker", "build", "-q", "-t", prod_image, str(app)], app, _BUILD_TIMEOUT)
+        listing = _run(
+            ["docker", "run", "--rm", "--entrypoint", "sh", prod_image, "-c"]
+            + ["ls /usr/share/nginx/html/index.html; ls -d /app /usr/local/bin/node 2>&1; true"],
+            app,
+            120,
+        ).stdout
+        assert "/usr/share/nginx/html/index.html" in listing
+        assert "No such file" in listing, "the production image must hold no app and no Node"
+    finally:
+        subprocess.run(["docker", "image", "rm", prod_image], capture_output=True, check=False)
+
+    # A project config that admits every host must not widen what the dev server admits, and
+    # one that names another port must not move it off the port the router targets.
     vite_config = app / "vite.config.ts"
     original_config = vite_config.read_text(encoding="utf-8")
     widened = original_config.replace("  server: {\n", "  server: {\n    allowedHosts: true,\n", 1)
     assert widened != original_config, "the template's server block moved"
-    vite_config.write_text(widened, encoding="utf-8")
+    moved = widened.replace("port: 5173,", "port: 4000,", 1)
+    assert moved != widened, "the template's server port moved"
+    vite_config.write_text(moved, encoding="utf-8")
 
     project = f"forgedev{uuid.uuid4().hex[:8]}"
     port = _free_port()
@@ -245,7 +278,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         # A host another overlay routes here is admitted once it is named.
         assert _http_status(compose, root, "dev.example.test") == "200"
 
-        _run(["npx", "--no-install", "playwright", "install", "chromium"], app, 900)
+        _run([_npx(), "--no-install", "playwright", "install", "chromium"], app, 900)
         probe = tmp_path / "probe.mjs"
         probe.write_text(_PROBE, encoding="utf-8")
         ran = _run(
@@ -277,7 +310,7 @@ def test_dev_server_hot_reloads_a_component_through_traefik(
         foreign = [
             str(p.relative_to(root))
             for p in root.rglob("*")
-            if "node_modules" not in p.parts and p.lstat().st_uid != os.getuid()
+            if "node_modules" not in p.parts and _owned_by_someone_else(p)
         ]
         assert foreign == []
         assert (app / _HOME).read_text(encoding="utf-8").count("[HMR-PROBE]") == 0
@@ -386,7 +419,7 @@ def test_dev_server_hot_reloads_every_app_that_has_it(
             raise AssertionError(f"apps not healthy:\n{(tmp_path / 'up.log').read_text()[-3000:]}")
 
         app = root / "apps" / "frontend"
-        _run(["npx", "--no-install", "playwright", "install", "chromium"], app, 900)
+        _run([_npx(), "--no-install", "playwright", "install", "chromium"], app, 900)
         probe = tmp_path / "probe.mjs"
         probe.write_text(_PROBE, encoding="utf-8")
         for name, host in (("frontend", "app.localhost"), ("console", "console.localhost")):
