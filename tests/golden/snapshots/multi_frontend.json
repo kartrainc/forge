@@ -261,8 +261,8 @@
       "sha256": "078da64f2ee555a7"
     },
     "apps/admin/scripts/serve-csp.mjs": {
-      "size": 7087,
-      "sha256": "1299f04f59d3a6df"
+      "size": 8020,
+      "sha256": "c4946887ec1ee5c0"
     },
     "apps/admin/src/app/App.vue": {
       "size": 557,
@@ -797,8 +797,8 @@
       "sha256": "078da64f2ee555a7"
     },
     "apps/frontend/scripts/serve-csp.mjs": {
-      "size": 7087,
-      "sha256": "1299f04f59d3a6df"
+      "size": 8020,
+      "sha256": "c4946887ec1ee5c0"
     },
     "apps/frontend/src/app/App.vue": {
       "size": 462,

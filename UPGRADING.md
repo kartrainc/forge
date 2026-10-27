@@ -415,7 +415,10 @@ kit it uses, unless the project has the AI chat:
   recipe writes them only when absent). Give the config the specs, projects
   and builds a production run can serve (a development-only route or a second
   build is the project's to arrange). A serve script older than the canary
-  makes the check warn, not fail, until you take the current one.
+  makes the check warn, not fail, until you take the current one. The current
+  script answers a body that is no report, and a path with a malformed
+  percent-escape, with 400 and keeps serving; it records such a body as
+  unreadable, which fails the check.
 - A project that keeps its own policy and adopts the nonce rewrites the
   placeholder in `index.html` wherever the page is served: in `nginx.conf` and
   in the Helm chart's server block, or every script is blocked.
