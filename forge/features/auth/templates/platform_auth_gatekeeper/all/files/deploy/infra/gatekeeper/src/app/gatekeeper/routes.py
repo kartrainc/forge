@@ -31,7 +31,9 @@ from app.gatekeeper.config import get_settings
 from app.gatekeeper.internal_token import TENANT_SLUG_CLAIM, AuthMethod
 from app.gatekeeper.keycloak_admin import GatekeeperKeycloakAdmin
 from app.gatekeeper.helpers import (
+    _delete_login_cookie,
     _delete_session_id_cookie,
+    _set_login_cookie,
     _set_session_id_cookie,
     build_login_url,
     build_logout_url,
@@ -39,6 +41,7 @@ from app.gatekeeper.helpers import (
     create_machine_success_response,
     create_success_response,
     extract_tenant,
+    login_cookie_name,
     validate_state,
 )
 from app.gatekeeper.jwks import verify_token
@@ -164,12 +167,14 @@ async def _store_auth_state(
     nonce: str,
     code_verifier: str,
     login_uri: str,
+    binding: str,
 ) -> None:
     """Persist the Authorization-Code-flow envelope server-side.
 
     Keyed by the opaque ``state`` and given a bounded TTL so a leaked
     ``state`` cannot be replayed indefinitely. Atomic set-with-TTL via
-    ``setex``.
+    ``setex``. ``binding`` is the value of the browser's login cookie
+    (see :func:`_set_login_cookie`).
     """
     cfg = get_settings()
     envelope = {
@@ -177,6 +182,7 @@ async def _store_auth_state(
         "nonce": nonce,
         "code_verifier": code_verifier,
         "login_uri": login_uri,
+        "binding": binding,
         "issued_at": int(time.time()),
     }
     redis = get_redis()
@@ -382,7 +388,8 @@ async def _begin_oidc_login(
     the bound-state envelope server-side (carrying the validated return URI,
     so open-redirect protection lives in the envelope rather than the raw
     ``state``), and sends the S256 challenge + nonce on the authorization
-    request. Both :func:`auth_login` (explicit login) and
+    request. The ``state`` is bound to the browser by a login cookie that
+    ``/callback`` checks. Both :func:`auth_login` (explicit login) and
     :func:`_redirect_to_login` (session miss/expiry) funnel through here so
     neither can ever build a login URL that ``/callback`` would then reject
     for a missing envelope.
@@ -400,12 +407,14 @@ async def _begin_oidc_login(
     nonce = generate_nonce()
     code_verifier = generate_pkce_verifier()
     code_challenge = pkce_challenge_s256(code_verifier)
+    binding = secrets.token_urlsafe(32)
     try:
         await _store_auth_state(
             state=random_state,
             nonce=nonce,
             code_verifier=code_verifier,
             login_uri=safe_redirect,
+            binding=binding,
         )
     except Exception as exc:  # noqa: BLE001 — fail closed on any store error
         logger.error("Could not persist OIDC bound-state envelope: %s", exc)
@@ -423,7 +432,9 @@ async def _begin_oidc_login(
         scope=login_scope(organization, managed=tc.managed if tc else False),
         idp_hint=idp_hint,
     )
-    return RedirectResponse(url=login_url, status_code=302)
+    response = RedirectResponse(url=login_url, status_code=302)
+    _set_login_cookie(response, state=random_state, binding=binding)
+    return response
 
 
 @router.get("/auth/login")
@@ -992,6 +1003,19 @@ async def callback(
     except ValueError as exc:
         logger.warning("Malformed bound-state envelope on /callback: %s", exc)
         return Response(status_code=400, content="Invalid auth state")
+    # The flow must come back to the browser that started it: a sign-in
+    # link handed to someone else would otherwise open the starter's
+    # session (and organization) in their browser.
+    binding = envelope.get("binding")
+    cookie = request.cookies.get(login_cookie_name(state))
+    if not (
+        isinstance(binding, str)
+        and binding
+        and cookie
+        and hmac.compare_digest(binding, cookie)
+    ):
+        logger.warning("OIDC state on /callback was not started by this browser")
+        return Response(status_code=400, content="Sign-in was started elsewhere")
     safe_state = validate_state(envelope.get("login_uri", "/"))
 
     # 3. Build the redirect_uri that matches what we sent to Keycloak
@@ -1027,8 +1051,9 @@ async def callback(
     # value we bound to this flow. The id_token arrives over the TLS back-
     # channel directly from the IdP token endpoint, so an unverified decode
     # to READ the nonce is sufficient here (it mirrors the existing unverified
-    # decode of the access token below); PKCE + bound-state already defeat
-    # code injection/CSRF. Fail closed on a missing or mismatched nonce.
+    # decode of the access token below); PKCE, the bound-state envelope and
+    # its login cookie defeat code injection and login CSRF. Fail closed on a
+    # missing or mismatched nonce.
     id_token = token_data.get("id_token", "")
     if not id_token:
         logger.error("Token response missing id_token — cannot verify nonce")
@@ -1095,7 +1120,7 @@ async def callback(
                 await _end_keycloak_session(tenant, refresh_token, tc)
                 return Response(status_code=502, content="Organization creation failed")
             if alias is not None:
-                return await _begin_oidc_login(
+                again = await _begin_oidc_login(
                     request,
                     tenant,
                     forwarded_host,
@@ -1103,6 +1128,8 @@ async def callback(
                     tc=tc,
                     organization=alias,
                 )
+                _delete_login_cookie(again, state=state)
+                return again
         logger.warning(
             "Sign-in without an active organization for sub=%s", claims.get("sub")
         )
@@ -1204,6 +1231,7 @@ async def callback(
         tc.absolute_timeout_seconds if tc.absolute_timeout_seconds > 0 else None
     )
     _set_session_id_cookie(response, value=session_id, max_age=cookie_max_age)
+    _delete_login_cookie(response, state=state)
     return response
 
 

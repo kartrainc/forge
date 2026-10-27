@@ -5,6 +5,7 @@ Shared helpers used across the Gatekeeper routes.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import urllib.parse
 from typing import TypedDict
@@ -294,6 +295,50 @@ def _delete_session_id_cookie(response: Response) -> None:
     response.delete_cookie(
         key=cfg.session_id_cookie_name,
         path="/",
+        httponly=True,
+        samesite="lax",
+        secure=cfg.cookie_secure,
+    )
+
+
+# A sign-in is bound to the browser that started it: ``/auth/login`` sets a
+# per-flow cookie whose value the bound-state envelope also holds, and
+# ``/callback`` only accepts the flow's ``state`` alongside it. Without it,
+# anyone could start a sign-in, stop before ``/callback`` and hand the link to
+# a victim, whose browser would then hold the attacker's session. One cookie
+# per flow (named after the state) so sign-ins in several tabs do not clash.
+_LOGIN_COOKIE_PREFIX = "gk_login_"
+
+
+def login_cookie_name(state: str) -> str:
+    """Name of the cookie that binds the sign-in *state* to its browser."""
+    return _LOGIN_COOKIE_PREFIX + hashlib.sha256(state.encode()).hexdigest()[:16]
+
+
+def _set_login_cookie(response: Response, *, state: str, binding: str) -> None:
+    """Bind the sign-in *state* to this browser until ``/callback``.
+
+    Scoped to ``/callback`` and to the envelope's lifetime. SameSite=Lax is
+    sent on the top-level redirect back from Keycloak.
+    """
+    cfg = get_settings()
+    response.set_cookie(
+        key=login_cookie_name(state),
+        value=binding,
+        httponly=True,
+        samesite="lax",
+        secure=cfg.cookie_secure,
+        path="/callback",
+        max_age=cfg.oidc_state_envelope_ttl_seconds,
+    )
+
+
+def _delete_login_cookie(response: Response, *, state: str) -> None:
+    """Expire the cookie of a consumed sign-in."""
+    cfg = get_settings()
+    response.delete_cookie(
+        key=login_cookie_name(state),
+        path="/callback",
         httponly=True,
         samesite="lax",
         secure=cfg.cookie_secure,

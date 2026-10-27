@@ -499,6 +499,18 @@ async def test_user_delegation_preserves_scope_expiry_and_grant_binding(runtime)
     assert 0 < await r.redis.ttl(redis_key) <= ttl
 
 
+async def _begin(r, state, nonce, login_uri="/"):
+    """Store a sign-in envelope and bind it to the test client's browser."""
+    await routes._store_auth_state(
+        state=state,
+        nonce=nonce,
+        code_verifier="v" * 43,
+        login_uri=login_uri,
+        binding=f"binding-{state}",
+    )
+    r.client.cookies.set(routes.login_cookie_name(state), f"binding-{state}")
+
+
 @pytest.mark.parametrize(
     "mode,expected",
     [("normal", 302), ("assign", 302), ("wrong-tenant", 403), ("wrong-issuer", 401)],
@@ -514,9 +526,7 @@ async def test_callback_binds_verified_tenant(runtime, monkeypatch, mode, expect
     r.client.cookies.clear()
     nonce = "contract-nonce"
     id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
-    await routes._store_auth_state(
-        state="callback-state", nonce=nonce, code_verifier="v" * 43, login_uri="/"
-    )
+    await _begin(r, "callback-state", nonce)
     assigned = []
 
     async def exchange(*args, **kwargs):
@@ -648,6 +658,63 @@ async def test_refresh_cannot_switch_subject_or_tenant(runtime, monkeypatch, pat
 # ── Keycloak organizations, realm, logout and session expiry ────────────────
 
 
+async def test_a_sign_in_completes_only_in_the_browser_that_started_it(runtime, monkeypatch):
+    """Login CSRF: an attacker's /callback link must not sign a victim in."""
+    r = runtime
+    token = await r.login()
+    exchanged = []
+
+    async def exchange(*args, **kwargs):
+        exchanged.append(kwargs)
+        id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
+        return {"access_token": token, "refresh_token": "refresh", "id_token": id_token}
+
+    monkeypatch.setattr(routes, "exchange_code", exchange)
+
+    async def start():
+        r.client.cookies.clear()
+        login = await r.client.get("/auth/login")
+        assert login.status_code == 302
+        params = httpx.URL(login.headers["location"]).params
+        state = params["state"]
+        cookie = login.headers["set-cookie"]
+        assert cookie.startswith(routes.login_cookie_name(state) + "=")
+        lowered = cookie.lower()
+        assert "httponly" in lowered and "samesite=lax" in lowered
+        assert "path=/callback" in lowered and "max-age=300" in lowered
+        return state, params["nonce"]
+
+    # The victim's browser holds no login cookie for the attacker's flow.
+    state, nonce = await start()
+    r.client.cookies.clear()
+    victim = await r.client.get("/callback", params={"code": "code", "state": state})
+    assert victim.status_code == 400 and "tenant_session_id" not in victim.cookies
+    assert exchanged == []
+    # Nor does a cookie of another flow's value do.
+    state, nonce = await start()
+    r.client.cookies.set(routes.login_cookie_name(state), "forged")
+    forged = await r.client.get("/callback", params={"code": "code", "state": state})
+    assert forged.status_code == 400 and exchanged == []
+
+    # The browser that started the flow signs in, and its login cookie expires.
+    state, nonce = await start()
+    own = await r.client.get("/callback", params={"code": "code", "state": state})
+    assert own.status_code == 302, own.text
+    assert own.cookies["tenant_session_id"]
+    expired = [c for c in own.headers.get_list("set-cookie") if c.startswith("gk_login_")]
+    assert len(expired) == 1 and "max-age=0" in expired[0].lower()
+
+
+async def test_concurrent_sign_ins_keep_their_own_login_cookies(runtime):
+    r = runtime
+    r.client.cookies.clear()
+    first = await r.client.get("/auth/login")
+    second = await r.client.get("/auth/login")
+    states = [httpx.URL(x.headers["location"]).params["state"] for x in (first, second)]
+    names = {routes.login_cookie_name(s) for s in states}
+    assert len(names) == 2 and names <= set(r.client.cookies.keys())
+
+
 def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
     """A Keycloak access token carrying the organization-id mapper claim."""
     payload = {
@@ -666,9 +733,7 @@ def _org_token(r, *, organizations, subject="admin", tenant_attribute=None):
 async def _callback(r, monkeypatch, access_token):
     nonce = "org-nonce"
     id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
-    await routes._store_auth_state(
-        state="org-state", nonce=nonce, code_verifier="v" * 43, login_uri="/"
-    )
+    await _begin(r, "org-state", nonce)
 
     async def exchange(*args, **kwargs):
         return {"access_token": access_token, "refresh_token": "refresh", "id_token": id_token}
@@ -935,15 +1000,13 @@ async def test_tms_host_takes_its_tenant_from_tms_with_organizations(organizatio
     token = await r.login(tenant=TENANT)
     nonce = "tms-nonce"
     id_token = jwt.encode({"nonce": nonce}, r.rsa_key, algorithm="RS256")
-    await routes._store_auth_state(
-        state="tms-state", nonce=nonce, code_verifier="v" * 43, login_uri="/"
-    )
 
     async def exchange(*args, **kwargs):
         return {"access_token": token, "refresh_token": "refresh", "id_token": id_token}
 
     monkeypatch.setattr(routes, "exchange_code", exchange)
     r.client.cookies.clear()
+    await _begin(r, "tms-state", nonce)
     callback = await r.client.get(
         "/callback", headers=tms, params={"code": "code", "state": "tms-state"}
     )

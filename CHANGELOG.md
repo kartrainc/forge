@@ -285,6 +285,11 @@ Each safeguard below is an option, so a project can choose another strategy.
   redirects only from the apps' origins: every frontend's local host in
   Compose, and in Helm `ingress.host` and each frontend's host, filled in at
   install.
+- A sign-in completes only in the browser that started it: `/auth/login` sets
+  a short-lived HttpOnly, SameSite=Lax cookie (path `/callback`) whose value
+  the OIDC state envelope holds, and `/callback` refuses the state without it.
+  A `/callback` link from someone else's sign-in can no longer open their
+  session, and their organization, in another browser.
 - `POST /auth/session` no longer revives a session that expired from inactivity,
   even when it expires during the call (`SET … XX`).
 - The gatekeeper rate-limits by the session's (or API key's) tenant, not the
