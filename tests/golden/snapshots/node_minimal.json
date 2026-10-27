@@ -117,12 +117,12 @@
       "sha256": "850f3272a17446e4"
     },
     "services/api/docker-compose.fragment.yaml": {
-      "size": 1940,
-      "sha256": "02d623a23a7a5b8a"
+      "size": 1953,
+      "sha256": "df00a3432c3443ff"
     },
     "services/api/docker-compose.yaml": {
-      "size": 838,
-      "sha256": "b911e189c11239d5"
+      "size": 851,
+      "sha256": "bd0b60c4564fa83c"
     },
     "services/api/entrypoint.sh": {
       "size": 301,

@@ -415,7 +415,7 @@ Node backends can take the `http-service` app template
 (`app_template: http-service`, [ADR-014](docs/architecture-decisions/ADR-014-a-node-http-service-without-a-database.md)):
 the Node template without a database, its migrate step, the sample `items`
 entity, or the queue and cache fragments. Every Node service also gains a
-`.dockerignore`, more tests and two fixes.
+`.dockerignore`, more tests and three fixes.
 
 - Each Node service gains a `.dockerignore` and
   `tests/integration/setup-env.ts`.
@@ -427,6 +427,9 @@ entity, or the queue and cache fragments. Every Node service also gains a
   gets a `.forge-merge` sidecar: fold the new setup file or case into yours.
 - The circuit breaker now adds `@types/opossum` to `dependencies`. If you added
   it yourself under `devDependencies`, keep one of the two.
+- Each service's `docker-compose.yaml` and `docker-compose.fragment.yaml` set
+  `APP__SERVER__PORT` in place of `PORT`, which the config never read. One you
+  edited gets a `.forge-merge` sidecar.
 
 ### Frontend content-security policy (unreleased)
 

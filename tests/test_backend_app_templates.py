@@ -476,6 +476,13 @@ def test_node_http_service_renders_without_database(tmp_path: Path):
     assert (svc / "tests" / "e2e" / "entrypoint.test.ts").is_file()
     assert '"/api/v1/"' in (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
 
+    # The config reads APP__SERVER__PORT: a plain PORT would leave every Node service on 5000.
+    for name, port in (("capture", 5100), ("store", 5101)):
+        for compose_file in ("docker-compose.yaml", "docker-compose.fragment.yaml"):
+            text = (root / "services" / name / compose_file).read_text(encoding="utf-8")
+            assert f'APP__SERVER__PORT: "{port}"' in text, (name, compose_file)
+            assert "\n      PORT:" not in text, (name, compose_file)
+
     # forge --update rebuilds each backend as the template that rendered it.
     from forge.sync.forge_to_project.updater import _infer_backends
 
