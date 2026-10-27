@@ -276,6 +276,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   it, read back from its `.copier-answers.yml`. It rebuilt every backend as
   `crud-service`, so fragments that skip a `worker` or an `http-service` were
   planned for it.
+- The single `backend:` table of a stack file reads `app_template`; it was
+  ignored.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

@@ -17,7 +17,7 @@ import argparse
 import difflib
 import sys
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from forge.config import (
     DEFAULT_REALM,
@@ -109,7 +109,11 @@ class _Resolver:
         return node if node is not None else default
 
 
-def _features_of(raw: Any) -> dict[str, list[str]]:
+class _FeaturesKeyword(TypedDict, total=False):
+    features: list[str]
+
+
+def _features_of(raw: Any) -> _FeaturesKeyword:
     """A ``features`` keyword when the configuration names some, else none (the backend's default)."""
     return {} if raw is None else {"features": _normalize_features(raw)}
 
@@ -217,15 +221,14 @@ def _build_backends_from_cfg(
             project_name=project_name,
             language=language,
             description=description,
-            features=_normalize_features(
-                r.get("features", "backend", "features", default=None),
-                default=["items"],
-            ),
+            # Omitted, the backend's own default: ["items"], or none without a database.
+            **_features_of(r.get("features", "backend", "features", default=None)),
             python_version=r.get("python_version", "backend", "python_version", default="3.13"),
             node_version=r.get("node_version", "backend", "node_version", default="22"),
             rust_edition=r.get("rust_edition", "backend", "rust_edition", default="2024"),
             go_version=str(r.get("go_version", "backend", "go_version", default="1.27")),
             server_port=r.get("backend_port", "backend", "server_port", default=5000),
+            app_template=r.get("app_template", "backend", "app_template", default="crud-service"),
         )
     ]
 

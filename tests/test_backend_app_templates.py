@@ -542,6 +542,23 @@ def test_a_stack_file_backend_without_features_gets_its_templates_default():
     assert [b.features for b in config.backends] == [[], ["items"]]
 
 
+def test_a_single_backend_table_selects_its_app_template():
+    import argparse
+
+    from forge.cli.builder import _build_config
+
+    stack = {
+        "project_name": "http_demo",
+        "backend": {"name": "capture", "language": "node", "app_template": "http-service"},
+        "frontend": {"framework": "none"},
+    }
+
+    [backend] = _build_config(argparse.Namespace(), stack).backends
+
+    assert backend.app_template == "http-service"
+    assert backend.features == []
+
+
 def test_authenticated_e2e_verifies_a_minted_token(tmp_path: Path):
     """Behind the gatekeeper, the E2E suite serves its own keys, expects the verifier's 401 for an
     anonymous request and routes an authenticated one; without auth it routes directly."""
