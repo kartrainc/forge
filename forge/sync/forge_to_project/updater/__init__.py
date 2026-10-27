@@ -1173,6 +1173,7 @@ def _recorded_frontends(
             # The recorded Vue UI kit selects fragments' files-<kit>/ trees.
             if entry.ui_kit:
                 frontend.ui_kit = entry.ui_kit
+            frontend.dev_server = entry.dev_server
             # A Vue app with the chat is served without the content-security
             # policy (forge.frontend_csp), which the Helm chart's values carry.
             frontend.include_chat = _recorded_include_chat(app_dir)

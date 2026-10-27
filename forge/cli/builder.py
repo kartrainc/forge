@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import sys
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -138,6 +139,7 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "generate_e2e_tests": "generate_e2e_tests",
     "layout": "layout",
     "ui_kit": "ui_kit",
+    "dev_server": "dev_server",
 }
 
 
@@ -304,6 +306,7 @@ def _frontend_config(
         generate_e2e_tests=get("generate_e2e_tests", True),
         layout=get("layout", "sidebar"),
         ui_kit=get("ui_kit", "shadcn"),
+        dev_server=get("dev_server", False),
         name=name,
     )
 
@@ -315,6 +318,9 @@ def _build_frontend_from_cfg(
     fw_str = r.get("frontend", "frontend", "framework", default="none")
     framework = _frontend_framework(fw_str)
     if framework == FrontendFramework.NONE:
+        if r.get("dev_server", "frontend", "dev_server", default=False):
+            # Not a silent no-op: there is no frontend to run as a dev server.
+            raise ValueError("dev_server needs a Vue frontend: pass --frontend vue.")
         return None, False
 
     def get(key: str, default: Any) -> Any:
@@ -343,6 +349,12 @@ def _build_frontends_from_cfg(
     """
     frontends_raw = r.cfg.get("frontends")
     if isinstance(frontends_raw, list):
+        if getattr(r.args, "dev_server", None):
+            print(
+                "warning: --dev-server has no effect beside a frontends: list; "
+                "set dev_server: true on the entries that want it.",
+                file=sys.stderr,
+            )
         frontends: list[FrontendConfig] = []
         for i, raw in enumerate(frontends_raw):
             # Unlike a backend entry, a frontend's position matters (index 0 is

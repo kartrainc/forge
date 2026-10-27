@@ -274,8 +274,10 @@ class TestEntryPoints:
             asked.append(message)
             return next(picks)
 
-        # backend, auth, chat, openapi, go
-        answers = iter(confirms if confirms is not None else [False, True, False, False, True])
+        # backend, auth, chat, openapi, dev server, go
+        answers = iter(
+            confirms if confirms is not None else [False, True, False, False, False, True]
+        )
 
         def confirm(message, *_, **__):
             asked.append(message)
@@ -302,11 +304,11 @@ class TestEntryPoints:
     def test_the_prompt_offers_the_kit_and_filters_by_it(self, monkeypatch) -> None:
         label = ui_kits.UI_KITS["nuxt-ui"].display_label
         # No layout question: sidebar is the only layout listing nuxt-ui. No chat
-        # question either: the kit has no chat UI. Confirms: backend, auth, openapi, go.
+        # question either: the kit has no chat UI. Confirms: backend, auth, openapi, dev server, go.
         config, asked = self._interactive(
             monkeypatch,
             ["Python (FastAPI)", "3.13", "Vue 3", "npm", label, "violet"],
-            confirms=[False, True, False, True],
+            confirms=[False, True, False, False, True],
         )
         assert "Enable AI chat panel?" not in asked
         order = ["UI kit:", "Enable OpenAPI code generation?", "Default color scheme:"]

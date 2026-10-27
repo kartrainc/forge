@@ -9,6 +9,7 @@
 - [Agent workflow](agentic-usage.md): Codex and Claude use of the shared skill.
 - [Customize and upgrade](customization.md): public extension points and safe updates.
 - [Frontend layouts](frontend-layouts.md): choose or add an application shell.
+- [Hot reload for the Compose frontend](frontend-dev-server.md): run the Vue frontend as a Vite dev server.
 - [Test generated backends](testing-backends.md): native service test commands.
 - [Windows development](windows.md): toolchain and filesystem guidance.
 

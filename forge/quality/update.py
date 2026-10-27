@@ -9,6 +9,7 @@ from pathlib import Path
 import tomlkit
 
 from forge.config import BackendLanguage
+from forge.docker_manager import is_dev_server_file
 from forge.errors import ForgeError
 from forge.quality.model import RECIPE, digest, ownership, project_path, read_recipe
 from forge.sync.manifest import read_forge_toml
@@ -113,10 +114,33 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         for rel, record in old.provenance.items():
             if record.get("ownership") == "generated" and rel not in new.provenance:
                 writes[rel] = None
+        left_in_place: list[str] = []
+        for rel, record in old.provenance.items():
+            if not is_dev_server_file(rel) or rel in new.provenance:
+                continue
+            # Only what forge wrote. A project's own file under one of these names is recorded
+            # as the project's (origin "user") and is never taken back.
+            if record.get("origin") == "user":
+                continue
+            # Forge no longer writes this overlay or wrapper (the option is off, for this app
+            # or for all). One left behind would name a Dockerfile target that is gone, so
+            # take back what is unchanged; a file the project edited stays and is reported.
+            # This runs on every update, not only the one that turned the option off: a kept
+            # file is recorded again each time, so turning the option on later never meets
+            # it as an unknown file.
+            path = project_path(root, rel)
+            if path.is_file() and digest(path) == record["sha256"]:
+                writes[rel] = None
+            elif path.is_file():
+                left_in_place.append(rel)
         if not conflicts:
             for rel, record in old.provenance.items():
                 if record.get("origin") == "user" and rel not in new.provenance:
                     new.provenance[rel] = record
+            # A file left in place stays recorded as forge's own, edited: turning the option back
+            # on then proposes the new version as a sidecar instead of colliding with it.
+            for rel in left_in_place:
+                new.provenance[rel] = dict(old.provenance[rel])
             manifest = tomlkit.parse((candidate / "forge.toml").read_text(encoding="utf-8"))
             manifest["forge"]["provenance"] = dict(sorted(new.provenance.items()))
             writes["forge.toml"] = tomlkit.dumps(manifest).encode()
@@ -135,6 +159,7 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             "update_mode": "merge",
             "file_conflicts": len(conflicts),
             "conflicts": conflicts,
+            "left_in_place": left_in_place,
             "changes": [
                 {"path": rel, "action": "delete" if body is None else "write"}
                 for rel, body in sorted(writes.items())

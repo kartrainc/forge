@@ -268,6 +268,13 @@ def test_content_security_fails_on_any_other_report(tmp_path, monkeypatch):
     assert [v["blocked-uri"] for v in result["violations"]] == [_ICON_FETCH["blocked-uri"]]
 
 
+def test_content_security_fails_on_a_report_the_collector_could_not_read(tmp_path, monkeypatch):
+    unreadable = {"unreadable-report": "{truncated"}
+    result = _content_security(tmp_path, monkeypatch, [unreadable], ui_kit="shadcn")
+    assert result["passed"] is False
+    assert result["violations"] == [unreadable]
+
+
 def test_content_security_fails_when_a_suite_fails(tmp_path, monkeypatch):
     stats = {"expected": 1, "unexpected": 1, "flaky": 0}
     result = _content_security(tmp_path, monkeypatch, [], stats, exit_code=1)

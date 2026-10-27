@@ -223,6 +223,10 @@ class FrontendConfig:
     generate_e2e_tests: bool = True
     layout: str = "sidebar"  # UI app-shell layout; see forge.layout_variants
     ui_kit: str = "shadcn"  # Vue only: component library; see forge.ui_kits
+    # Run the Compose frontend as a Vite dev server with hot reload (ADR-013):
+    # a ``dev`` Dockerfile stage plus docker-compose.dev.yaml. Vue only for now.
+    dev_server: bool = False
+
     # The app's name: its ``apps/<name>`` folder and package name. The primary
     # frontend's default is the name every single-frontend project uses.
     name: str = PRIMARY_FRONTEND_NAME
@@ -292,11 +296,13 @@ class FrontendConfig:
                 conflicting.append("include_chat")
             if self.include_openapi:
                 conflicting.append("include_openapi")
+            if self.dev_server:
+                conflicting.append("dev_server")
             if conflicting:
                 raise ValueError(
                     f"Frontend feature flags ({', '.join(conflicting)}) require "
                     "a frontend framework. Either pick --frontend vue/svelte/flutter "
-                    "or drop the --include-* flag."
+                    "or drop the flag."
                 )
             return
         # Flutter's home_repository binds against the retrofit-generated api
@@ -310,6 +316,14 @@ class FrontendConfig:
             )
         self._validate_name()
         validate_port(self.server_port, "Frontend port")
+        if not isinstance(self.dev_server, bool):
+            raise ValueError(
+                f"dev_server must be true or false, got {type(self.dev_server).__name__}"
+            )
+        if self.dev_server and self.framework != FrontendFramework.VUE:
+            raise ValueError(
+                f"dev_server is only available for the Vue template, not {self.framework.value}."
+            )
         validate_features(self.features or [])
         for f in self.features or ():
             if f in FRONTEND_RESERVED:

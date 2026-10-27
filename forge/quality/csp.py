@@ -15,7 +15,8 @@ The check also proves that reports reach it, since an empty report file
 would otherwise pass: the script opens a canary page of its own once, under a
 fixed policy that blocks the page's one script, whatever the project's policy
 admits. The app's pages are served untouched. Without the canary's report the
-check fails.
+check fails. A body the collector could not read as a report is recorded as
+unreadable and fails the check like any other violation.
 
 Two reports are admitted for a ``nuxt-ui`` project, each a ``<style>`` element a
 Nuxt UI 4.12 dependency inserts without the nonce in Vue mode. The browser
@@ -46,6 +47,9 @@ ADMITTED_STYLE_SAMPLES = {
 
 #: The script of the canary page ``serve-csp.mjs`` opens to prove reporting.
 CANARY = "/__csp-canary.js"
+
+#: The key ``serve-csp.mjs`` records a body under when it is no report.
+UNREADABLE = "unreadable-report"
 
 
 def admitted(report: dict, ui_kit: str) -> str | None:
@@ -132,6 +136,9 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
     canary = 0
     for line in lines:
         report = json.loads(line)
+        if UNREADABLE in report:
+            violations.append({UNREADABLE: report[UNREADABLE]})
+            continue
         if is_canary(report):
             canary += 1
             continue

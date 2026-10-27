@@ -1,11 +1,31 @@
+{% if dev_server %}
+# -- Dependencies stage --
+FROM node:22-slim AS deps
+{% else %}
 # -- Build stage --
 FROM node:22-slim AS builder
+{% endif %}
 WORKDIR /app
 
+{% if package_manager in ("pnpm", "yarn") and dev_server %}
+# The dev stage runs as an unprivileged user, which cannot read root's corepack cache and
+# would download the package manager again at every container start: keep it where every
+# user can.
+ENV COREPACK_HOME=/usr/local/share/corepack
+{% endif %}
 {% if package_manager == "pnpm" %}
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# The lockfile is written on the host by the pnpm that is installed there, and a newer major
+# refuses a lockfile that names versions younger than its minimumReleaseAge. forge records
+# the host's pnpm in package.json's `packageManager`, which corepack reads, so the image
+# installs with the pnpm that wrote the lockfile. This is only the default for a project
+# without that field: pnpm 10, not `latest`.
+RUN corepack enable && corepack prepare pnpm@10 --activate
 {% elif package_manager == "yarn" %}
+{% if dev_server %}
+RUN corepack enable && corepack prepare yarn@1 --activate
+{% else %}
 RUN corepack enable
+{% endif %}
 {% elif package_manager == "bun" %}
 RUN npm install -g bun
 {% endif %}
@@ -27,8 +47,36 @@ COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 {% endif %}
 
+{% if dev_server %}
+# The dev server writes Vite's cache and its bundled config into node_modules
+# at startup; those directories (and /app) belong to the unprivileged user, the
+# installed packages stay root's.
+RUN mkdir -p node_modules/.vite node_modules/.vite-temp \
+ && chown node:node /app node_modules node_modules/.vite node_modules/.vite-temp
+
+# -- Source stage --
+# The one place the application is copied, so the dev and production images
+# cannot differ in what they hold.
+FROM deps AS source
+COPY --chown=node:node . .
+
+# -- Dev stage --
+# docker-compose.dev.yaml builds this target; sync keeps /app in step with the
+# project (docker compose up --watch).
+FROM source AS dev
+USER node
+EXPOSE {{ server_port }}
+# The vite binary, not the project's `dev` script: a flag in that script (--port, --host)
+# would win over the wrapper's settings and leave the router with nothing to reach.
+CMD ["node_modules/.bin/vite", "--host", "0.0.0.0", "--config", "vite.dev.config.ts"]
+
+# -- Build stage --
+FROM source AS builder
+RUN {{ package_manager }} run build
+{% else %}
 COPY . .
 RUN {{ package_manager }} run build
+{% endif %}
 
 # -- Runtime stage --
 FROM nginx:alpine
