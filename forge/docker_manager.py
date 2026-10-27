@@ -370,8 +370,10 @@ _LOCKFILES = {
     "npm": "package-lock.json",
     "pnpm": "pnpm-lock.yaml",
     "yarn": "yarn.lock",
-    "bun": "bun.lockb",
+    # Bun 1.2 writes a text bun.lock; older versions wrote the binary bun.lockb.
+    "bun": "bun.lock",
 }
+_LOCKFILE_ALIASES = {"bun": ("bun.lock", "bun.lockb")}
 
 
 _DEV_SERVER_README = """
@@ -442,6 +444,10 @@ def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
             "name": fc.name,
             "port": fc.server_port,
             "lockfile": _LOCKFILES.get(fc.package_manager, "package-lock.json"),
+            # Every name the package manager has used for its lockfile stays out of the sync.
+            "ignore_lockfiles": _LOCKFILE_ALIASES.get(
+                fc.package_manager, (_LOCKFILES.get(fc.package_manager, "package-lock.json"),)
+            ),
         }
         for fc in config.active_frontends
         if fc.dev_server

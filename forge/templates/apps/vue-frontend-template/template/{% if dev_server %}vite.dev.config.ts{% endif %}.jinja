@@ -29,7 +29,9 @@ export default async (env: ConfigEnv): Promise<UserConfig> => {
       ...resolved.server,
       // Reachable from the Traefik container, not only from loopback.
       host: '0.0.0.0',
-      // The port is the one the router targets: fail rather than move.
+      // The port the router and the health check target, whatever the project's own
+      // config says; and fail rather than move off it.
+      port: {{ server_port }},
       strictPort: true,
       // The host Traefik routes to this app, plus any named above; other
       // external names are refused (Vite also always admits localhost, *.localhost

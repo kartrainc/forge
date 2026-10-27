@@ -215,6 +215,13 @@ class TestWrapper:
         assert "allowedHosts: ['app.localhost', ...extraHosts]" in wrapper
         assert "process.env.FORGE_DEV_ALLOWED_HOSTS" in wrapper
         assert "is not a host name" in wrapper
+
+    def test_the_port_is_set_to_the_routers_after_the_project_config(self, on: Path) -> None:
+        # A project's own server.port must not move the dev server off the port the router
+        # and the health check target; strictPort alone would only stop a fallback.
+        wrapper = (on / "apps/frontend/vite.dev.config.ts").read_text(encoding="utf-8")
+        assert "port: 5173," in wrapper
+        assert wrapper.index("...resolved.server") < wrapper.index("port: 5173,")
         assert "allowedHosts: true" not in wrapper
         assert "strictPort: true" in wrapper
         assert "host: '0.0.0.0'" in wrapper
@@ -381,3 +388,32 @@ def test_the_merged_compose_file_overrides_every_enabled_app(tmp_path: Path) -> 
             assert labels[f"traefik.http.routers.{service}.rule"] == f"Host(`{host}`)"
     finally:
         shutil.rmtree(root.parent, ignore_errors=True)
+
+
+class TestLockfiles:
+    @pytest.mark.parametrize(
+        ("manager", "rebuilds", "ignored"),
+        [
+            ("npm", "package-lock.json", {"package-lock.json"}),
+            ("yarn", "yarn.lock", {"yarn.lock"}),
+            ("bun", "bun.lock", {"bun.lock", "bun.lockb"}),
+        ],
+    )
+    def test_every_name_a_lockfile_has_had_stays_out_of_the_sync(
+        self, tmp_path: Path, manager: str, rebuilds: str, ignored: set[str]
+    ) -> None:
+        from forge.docker_manager import render_dev_overlay
+
+        fc = FrontendConfig(
+            framework=FrontendFramework.VUE,
+            project_name="web",
+            package_manager=manager,
+            include_chat=False,
+            dev_server=True,
+        )
+        config = ProjectConfig(
+            project_name="web", backends=[BackendConfig(project_name="web")], frontends=[fc]
+        )
+        watch = _frontend(_load(render_dev_overlay(config, tmp_path)))["develop"]["watch"]
+        assert ignored <= set(watch[0]["ignore"])
+        assert watch[-1] == {"action": "rebuild", "path": f"./apps/frontend/{rebuilds}"}
