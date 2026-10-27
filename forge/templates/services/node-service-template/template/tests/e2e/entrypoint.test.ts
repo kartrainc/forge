@@ -11,12 +11,13 @@ async function freePort(): Promise<number> {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 it("listens on the configured port and drains on SIGTERM", async () => {
   const port = await freePort();
-  process.env.APP__SERVER__HOST = "127.0.0.1";
-  process.env.APP__SERVER__PORT = String(port);
+  vi.stubEnv("APP__SERVER__HOST", "127.0.0.1");
+  vi.stubEnv("APP__SERVER__PORT", String(port));
   const exited = new Promise<number | undefined>((resolve) => {
     vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       resolve(code);

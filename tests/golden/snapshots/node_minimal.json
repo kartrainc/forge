@@ -269,8 +269,8 @@
       "sha256": "13617898a495428a"
     },
     "services/api/tests/e2e/entrypoint.test.ts": {
-      "size": 1393,
-      "sha256": "65e44b01af2ebc63"
+      "size": 1417,
+      "sha256": "ee604d9ccb56d427"
     },
     "services/api/tests/e2e/network.test.ts": {
       "size": 617,
