@@ -126,8 +126,16 @@ def test_the_platform_routes_every_service_and_creates_every_database(per_servic
     platform = _values(per_service / "deploy" / "helm" / "platform" / "values.yaml")
     # each route names the Service and takes its port by name
     assert platform["ingress"]["paths"] == [
-        {"path": "/api/user-api(/|$)(.*)", "pathType": "ImplementationSpecific", "service": "user-api"},
-        {"path": "/api/billing(/|$)(.*)", "pathType": "ImplementationSpecific", "service": "billing"},
+        {
+            "path": "/api/user-api(/|$)(.*)",
+            "pathType": "ImplementationSpecific",
+            "service": "user-api",
+        },
+        {
+            "path": "/api/billing(/|$)(.*)",
+            "pathType": "ImplementationSpecific",
+            "service": "billing",
+        },
     ]
     assert [(f["name"], f["primary"]) for f in platform["ingress"]["frontends"]] == [
         ("frontend", True),
@@ -153,16 +161,18 @@ def test_the_resolver_swaps_the_umbrella_for_the_service_charts() -> None:
 def test_placeholder_directories_expand_per_topology_entry(tmp_path: Path) -> None:
     src = tmp_path / "src"
     (src / "charts" / "__backend__").mkdir(parents=True)
-    (src / "charts" / "__backend__" / "values.yaml.jinja").write_text("port: {{ service.port }}\n")
-    (src / "charts" / "__backend__" / "static.txt").write_text("same\n")
-    (src / "README.md").write_text("one\n")
+    (src / "charts" / "__backend__" / "values.yaml.jinja").write_text(
+        "port: {{ service.port }}\n", encoding="utf-8"
+    )
+    (src / "charts" / "__backend__" / "static.txt").write_text("same\n", encoding="utf-8")
+    (src / "README.md").write_text("one\n", encoding="utf-8")
     topology = {"backends": ({"name": "a", "port": 1}, {"name": "b", "port": 2}), "frontends": ()}
     copy_files(src, tmp_path / "out", render_context={"topology": topology})
     out = tmp_path / "out"
-    assert (out / "charts" / "a" / "values.yaml").read_text() == "port: 1\n"
-    assert (out / "charts" / "b" / "values.yaml").read_text() == "port: 2\n"
-    assert (out / "charts" / "b" / "static.txt").read_text() == "same\n"
-    assert (out / "README.md").read_text() == "one\n"
+    assert (out / "charts" / "a" / "values.yaml").read_text(encoding="utf-8") == "port: 1\n"
+    assert (out / "charts" / "b" / "values.yaml").read_text(encoding="utf-8") == "port: 2\n"
+    assert (out / "charts" / "b" / "static.txt").read_text(encoding="utf-8") == "same\n"
+    assert (out / "README.md").read_text(encoding="utf-8") == "one\n"
     assert not (out / "charts" / "__backend__").exists()
     # without a topology there is nothing to expand them over
     with pytest.raises(FragmentError):
@@ -224,8 +234,8 @@ def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) ->
     src = tmp_path / "src"
     for kind in ("__backend__", "__frontend__"):
         (src / kind).mkdir(parents=True)
-        (src / kind / "values.yaml.jinja").write_text(
-            (_TEMPLATES / "deploy/helm" / kind / "values.yaml.jinja").read_text(encoding="utf-8")
+        (src / kind / "values.yaml.jinja").write_bytes(
+            (_TEMPLATES / "deploy/helm" / kind / "values.yaml.jinja").read_bytes()
         )
     topology = {
         "project_slug": "shop",
@@ -254,8 +264,8 @@ def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) ->
         ),
     }
     copy_files(src, tmp_path / "out", render_context={"topology": topology})
-    backend = yaml.safe_load((tmp_path / "out/api/values.yaml").read_text())
-    frontend = yaml.safe_load((tmp_path / "out/frontend/values.yaml").read_text())
+    backend = yaml.safe_load((tmp_path / "out/api/values.yaml").read_text(encoding="utf-8"))
+    frontend = yaml.safe_load((tmp_path / "out/frontend/values.yaml").read_text(encoding="utf-8"))
     assert backend["env"]["X_AWKWARD"] == awkward
     assert backend["secretEnv"]["X_SECRET"] == awkward
     assert "X_SECRET" not in backend["env"]
