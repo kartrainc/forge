@@ -24,7 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `values-$(ENV).yaml` when present.
 - A backend's migration Job, while `migration.waitForPostgres` (`postgres-rw`) resolves, waits until its own DB URL
   (`migration.databaseUrlEnv`) connects and, with a managed runtime role, until that role exists, for at most
-  `migration.waitTimeoutSeconds` (300). Under `database.rls_app_role` it migrates as the owner, then grants the role
+  `migration.waitTimeoutSeconds` (180). Under `database.rls_app_role` it migrates as the owner, then grants the role
   the backend serves as its tables. `migration.dbAppRoleManaged` is `true` with the postgres chart, which creates that
   role; against another Postgres set it `false`, and `db-app-role.sh` creates the role with `migration.ownerSecret`'s
   `APP_DB_PASSWORD`.
@@ -35,10 +35,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   or Argo CD, makes new ones each time, so set them there); it refuses the compose dev keys and values that are not
   Fernet keys. It runs `ENV=development`, the dev posture: any other `ENV` refuses `SVC_AUTH_BACKEND=preshared`, the
   only S2S authentication the backends' clients have. The Middlewares the backends' routes name (`gatekeeper-auth`,
-  `-strip-api-key`, `-untrusted-headers`) render by default (`authMiddlewares.enabled`), so the chart needs Traefik's
-  CRDs; while a keygen init container generates the signing keys, its Deployment uses `Recreate`. The keycloak chart's
-  `mode: production` imports only the realm's service-account users, with `sslRequired: external`, and refuses an
-  empty or `CHANGEME` admin password or client secret.
+  `-strip-api-key`, `-untrusted-headers`) render by default (`authMiddlewares.enabled`) wherever Traefik's
+  Middleware CRD exists or a route is enabled (`authMiddlewares.force` otherwise). The ES256 signing key lives in the
+  `gatekeeper-signing` Secret, generated once and kept across upgrades, so the Deployment rolls with `RollingUpdate`
+  and scales past one replica. The keycloak chart's `mode: production` imports only the realm's service-account users,
+  with `sslRequired: external`, and refuses an empty or `CHANGEME` admin password or secret of any confidential
+  client.
 - The gatekeeper takes an optional `KEYCLOAK_PUBLIC_BASE_URL`, the realms URL browsers reach Keycloak at: sign-in and
   sign-out redirects use it, and a token's `iss` must then be the public realm URL, as Keycloak issues it under
   `KC_HOSTNAME`; token, JWKS and Admin API calls keep `KEYCLOAK_BASE_URL`. Unset, nothing changes (compose). The
