@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 
@@ -38,4 +39,10 @@ func tenantRLS() middleware.Middleware {
 
 func tenantScope(pool *pgxpool.Pool) repositories.Scope {
 	return tenancy.Scope(pool, tenantResolver())
+}
+
+// CheckTenantRole refuses a pool whose role would bypass RLS; see
+// tenancy.AssertRLSEnforced.
+func CheckTenantRole(ctx context.Context, pool *pgxpool.Pool) error {
+	return tenancy.AssertRLSEnforced(ctx, pool)
 }

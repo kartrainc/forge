@@ -4,13 +4,14 @@ Tiny Keycloak Admin REST client for the gatekeeper.
 
 Used by ``/callback`` to assign a default ``tenant_id`` attribute to
 self-registered users whose access tokens lack the
-``https://forge/tenant_id`` claim. Authenticates via the
+``https://forge/tenant_id`` claim, and (``SELF_REGISTRATION=own_organization``)
+to give a user in no organization one of their own. Authenticates via the
 ``client_credentials`` grant on the same confidential client the
 gatekeeper already uses for the OIDC flow (now with
 ``serviceAccountsEnabled=true`` and a ``manage-users`` role).
 
 Design:
-- Single class, three public methods.
+- Single class: users and organizations.
 - Reuses the gatekeeper's shared :class:`httpx.AsyncClient` so requests
   go through the same connection pool, retry decorator (where applied),
   and ``MockTransport`` in tests.
@@ -32,8 +33,11 @@ logger = logging.getLogger(__name__)
 
 
 class GatekeeperKeycloakAdmin:
-    """Async client for the Keycloak Admin REST API, scoped to the
-    ``manage-users`` role on a single realm.
+    """Async client for the Keycloak Admin REST API on a single realm.
+
+    User calls need ``manage-users``; organization calls need
+    ``manage-realm``, which the realm grants the gatekeeper only with
+    ``SELF_REGISTRATION=own_organization``.
     """
 
     def __init__(
@@ -109,5 +113,44 @@ class GatekeeperKeycloakAdmin:
             self._user_url(user_id),
             headers=await self._headers(),
             json=user,
+        )
+        resp.raise_for_status()
+
+    def _organizations_url(self) -> str:
+        return f"{self._server_url}/admin/realms/{self._realm}/organizations"
+
+    async def user_organizations(self, user_id: str) -> list[dict[str, Any]]:
+        """The organizations *user_id* is a member of."""
+        resp = await self._client().get(
+            f"{self._organizations_url()}/members/{user_id}/organizations",
+            headers=await self._headers(),
+        )
+        resp.raise_for_status()
+        return list(resp.json())
+
+    async def create_organization(self, *, name: str, alias: str) -> str:
+        """Create an enabled organization; return its id."""
+        resp = await self._client().post(
+            self._organizations_url(),
+            headers=await self._headers(),
+            json={"name": name, "alias": alias, "enabled": True},
+        )
+        resp.raise_for_status()
+        return resp.headers["location"].rstrip("/").rsplit("/", 1)[-1]
+
+    async def delete_organization(self, organization_id: str) -> None:
+        """Delete the organization *organization_id*."""
+        resp = await self._client().delete(
+            f"{self._organizations_url()}/{organization_id}",
+            headers=await self._headers(),
+        )
+        resp.raise_for_status()
+
+    async def add_organization_member(self, organization_id: str, user_id: str) -> None:
+        """Make the existing user *user_id* a member of the organization."""
+        resp = await self._client().post(
+            f"{self._organizations_url()}/{organization_id}/members",
+            headers=await self._headers(),
+            json=user_id,
         )
         resp.raise_for_status()

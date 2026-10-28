@@ -19,6 +19,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   wait otherwise. `secretEnv: null`, not `{}`, drops a chart's Secret for an external one.
 - Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
   entry exposed to their Jinja as `service`.
+### Tenant isolation and Keycloak strategies
+
+Each safeguard below is an option, so a project can choose another strategy.
+
+- `database.rls_app_role` (default `true`): `shared_rls` Python and Go services
+  run as `<db_name>_app` (`NOSUPERUSER NOBYPASSRLS`, owns no tables). Migrations
+  keep the owner; `deploy/compose/db-app-role.sh` creates the role and refreshes
+  its grants after every migration: in Compose, in the Helm pre-install migrate
+  Job, or with `infra.inCluster` in each pod's init containers, so the role exists
+  before the service starts. The service skips its own migration
+  (`MIGRATE_ON_START=false`). The script needs an owner with `CREATEROLE`, not
+  a superuser: the role gets its attributes when created, and an existing one
+  is altered only when an attribute is unsafe. The password never reaches SQL
+  text that Postgres could log: it arrives as a startup option and the role
+  stores the SCRAM-SHA-256 verifier computed from it; a failure to set it (on
+  Postgres 16+, a role this owner did not create) reports neither. The generated CI gets a
+  `tenant-isolation` job that migrates a Postgres service container, runs the
+  script and runs the isolation tests as that role (`REQUIRE_APP_ROLE_TEST=1`,
+  so they fail there rather than skip, and skip in other jobs).
+- `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
+  startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
+  through a role it belongs to (temporary tables do not count). The isolation
+  tests run as a role RLS applies to and, under CI, fail instead of skipping.
+- `database.allow_unverified_tenant` (default `false`): generation refuses
+  `shared_rls`/`schema_per_tenant` with a header or subdomain tenant and
+  `auth.mode=none`, which let any caller choose the tenant. With authentication,
+  a header or subdomain tenant must be the verified identity's (403 otherwise),
+  in Python (`shared_rls` and `schema_per_tenant`) and Go: a UUID its tenant
+  id, a slug such as `acme` its tenant slug, ignoring case. A bearer token that
+  does not verify answers 401 (503 when it cannot be verified now) instead of
+  leaving the header's tenant bound, and an unverified slug binds no tenant.
+  Go rate-limits by tenant only when the token is verified.
+- `auth.keycloak_tenant_source` (default `organization`): the gatekeeper takes
+  the tenant from the active Keycloak organization, requests the `organization`
+  scope, adds a form `POST /auth/organization` (`alias`, same-origin only) as
+  the only way to choose one (`GET /auth/login` takes no organization), and
+  passes `/auth/login?idp=` as `kc_idp_hint`. A host with a TMS
+  `tenant-route` keeps the TMS tenant. `user_attribute` keeps the `tenant_id`
+  attribute. Keycloak moves to 26.6, which Organizations require. The
+  gatekeeper refuses to start when its realm has Organizations disabled or the
+  `gatekeeper` client lacks the organization mapper, as a realm imported before
+  the upgrade does.
+- `auth.keycloak_self_registration` (default `off`): `off` closes the realm's
+  registration, and a user without a tenant (in no organization, or without a
+  `tenant_id` attribute) is refused with their Keycloak session ended.
+  `own_organization` (organizations) keeps registration and gives each new
+  user an organization of their own through the Admin API, once their email
+  is verified (the realm turns on `verifyEmail`); a concurrent first sign-in
+  waits for it, or gets a retryable 503, an organization whose member cannot
+  be added is deleted again, and a user whose only organizations are disabled
+  is refused rather than given a new one.
+  `default_tenant` (`user_attribute`) keeps the previous behaviour: every
+  self-registered user gets the default tenant, and so shares its data.
 
 ### Dependency compatibility
 
@@ -275,6 +328,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- One realm name (the project's) in the realm JSON, the gatekeeper, realm sync,
+  service auth env and Helm, which used `app`, `forge` and the host label. The
+  in-cluster Keycloak now imports the realm. `REALM_PER_HOST=true` restores
+  realm-per-subdomain without a TMS route.
+- Logout ends the Keycloak session: a back-channel call with the refresh token,
+  then the end-session redirect with `id_token_hint`, `client_id` and
+  `post_logout_redirect_uri` (over the request's own scheme without
+  `X-Forwarded-Proto`). The gatekeeper client accepts callbacks and logout
+  redirects only from the apps' origins: every frontend's local host in
+  Compose, and in Helm `ingress.host` and each frontend's host, filled in at
+  install.
+- With a header or subdomain tenant that matches the verified identity by
+  slug, Python services bind the identity's tenant id for RLS, not the slug.
+- A sign-in completes only in the browser that started it: `/auth/login` sets
+  a short-lived HttpOnly, SameSite=Lax cookie (path `/callback`) whose value
+  the OIDC state envelope holds, and `/callback` refuses the state without it.
+  A `/callback` link from someone else's sign-in can no longer open their
+  session, and their organization, in another browser.
+- `POST /auth/session` no longer revives a session that expired from inactivity,
+  even when it expires during the call (`SET … XX`).
+- The gatekeeper rate-limits by the session's (or API key's) tenant, not the
+  host label, so `tenant_tier:<tenant id>` applies.
+- Vue `useSessionTimeout` no longer attaches listeners after unmount, cancels the
+  pending debounce on a manual extend, and starts listening when `reload()`
+  finds a live session.
 - Template updates re-render every app of a framework and every backend of a
   language, not only the first match; a recorded app that is gone is skipped
   instead of being replaced by another app. A template's recorded version
@@ -296,6 +374,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - A Node service's `docker-compose.yaml` and `docker-compose.fragment.yaml`
   set `APP__SERVER__PORT`, which its config reads. With `PORT`, a service on a
   port other than 5000 still listened on 5000.
+- Ignore Finder's `.DS_Store` in the generator fingerprint and the quality
+  scans, as the built package does. Opening an installed generator in Finder
+  made it fail "generator differs from recorded source".
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

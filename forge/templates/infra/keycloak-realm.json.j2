@@ -1,10 +1,12 @@
 {
   "realm": "{{ keycloak_realm }}",
+  "organizationsEnabled": {{ "true" if organizations else "false" }},
   "enabled": true,
   "displayName": "{{ project_name }}",
   "displayNameHtml": "<strong>{{ project_name }}</strong>",
   "sslRequired": "none",
-  "registrationAllowed": true,
+  "registrationAllowed": {{ "false" if self_registration == "off" else "true" }},
+  "verifyEmail": {{ "true" if self_registration == "own_organization" else "false" }},
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -108,9 +110,12 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": true,
-      "redirectUris": ["*"],
-      "webOrigins": ["*"],
+      "redirectUris": [{% for origin in app_origins %}"{{ origin }}/callback"{{ ", " if not loop.last }}{% endfor %}],
+      "webOrigins": [{% for origin in app_origins %}"{{ origin }}"{{ ", " if not loop.last }}{% endfor %}],
       "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "{% for origin in app_origins %}{{ origin }}/*{{ '##' if not loop.last }}{% endfor %}"
+      },
       "protocolMappers": [
         {
           "name": "audience-mapper",
@@ -124,6 +129,24 @@
             "introspection.token.claim": "true"
           }
         },
+{% if organizations %}
+        {
+          "name": "organization-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-organization-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "https://forge/organization",
+            "addOrganizationId": "true",
+            "multivalued": "true",
+            "jsonType.label": "JSON",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+{% else %}
         {
           "name": "tenant-id",
           "protocol": "openid-connect",
@@ -138,6 +161,7 @@
             "userinfo.token.claim": "true"
           }
         }
+{% endif %}
       ]
     }
 {% for sc in service_clients %}
@@ -163,7 +187,7 @@
       "enabled": true,
       "serviceAccountClientId": "gatekeeper",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users"]
+        "realm-management": ["manage-users", "view-users"{% if organizations and self_registration == "own_organization" %}, "manage-realm"{% endif %}]
       }
     },
     {
@@ -185,5 +209,14 @@
       },
       "realmRoles": ["admin", "user"]
     }
-  ]
+  ]{% if organizations %},
+  "organizations": [
+    {
+      "id": "{{ default_tenant_id }}",
+      "name": "{{ project_name }}",
+      "alias": "default",
+      "enabled": true,
+      "members": [{"username": "dev@localhost"}]
+    }
+  ]{% endif %}
 }

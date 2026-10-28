@@ -15,8 +15,8 @@ func TestServiceBinaryVerifiesPlatformTokens(t *testing.T) {
 	issuer := authtest.NewIssuer()
 	defer issuer.Close()
 	port := freePort(t)
-	server := command(t, "server", "ENV=testing", "PORT="+strconv.Itoa(port), "APP__SECURITY__AUTH__ENABLED=true",
-		"GATEKEEPER_ISSUER="+issuer.URL(), "SERVICE_AUDIENCE=svc-e2e", "TENANT_ID_CLAIM=")
+	server := command(t, "server", append(serverEnv(t), "ENV=testing", "PORT="+strconv.Itoa(port), "APP__SECURITY__AUTH__ENABLED=true",
+		"GATEKEEPER_ISSUER="+issuer.URL(), "SERVICE_AUDIENCE=svc-e2e", "TENANT_ID_CLAIM=")...)
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}

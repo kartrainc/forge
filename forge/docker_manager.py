@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,7 +13,6 @@ from jinja2 import Environment, FileSystemLoader
 
 from forge.backend_app_templates import backend_uses_database
 from forge.config import (
-    DEFAULT_REALM,
     TRAEFIK_DASHBOARD_PORT,
     BackendLanguage,
     FrontendConfig,
@@ -26,6 +26,8 @@ from forge.config._topology import (
     database_backends,
     frontend_host_rule,
     frontend_topology_entry,
+    option_value,
+    project_keycloak_realm,
 )
 from forge.errors import GeneratorError
 from forge.services.registry import get_services_for_capabilities
@@ -43,6 +45,55 @@ BUILD_DIR = {
 
 
 # -- Rendering ----------------------------------------------------------------
+
+# The tenant the dev user and self-registered users start in; the gatekeeper's
+# DEFAULT_TENANT_ID and the backends' dev identity use the same value.
+DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def keycloak_tenant_source(options: Mapping[str, object]) -> str:
+    """``auth.keycloak_tenant_source``, defaulted."""
+    return str(option_value(options, "auth.keycloak_tenant_source"))
+
+
+def keycloak_self_registration(options: Mapping[str, object]) -> str:
+    """``auth.keycloak_self_registration``, defaulted."""
+    return str(option_value(options, "auth.keycloak_self_registration"))
+
+
+def app_origins(config: ProjectConfig) -> list[str]:
+    """Origins the apps are served from in Compose: the primary on Traefik's
+    ``app.localhost``, every further frontend on ``<label>.localhost``."""
+    return [
+        "http://app.localhost",
+        *(f"http://{label}.localhost" for label in config.frontend_host_labels),
+    ]
+
+
+# Placeholders for the chart's hosts in its copy of the realm; templates/infra.yaml
+# replaces them with ingress.host and each further frontend's host at install.
+HELM_APP_HOST = "__APP_HOST__"
+
+
+def helm_realm_json(config: ProjectConfig, realm_json: str) -> str:
+    """The realm for the Helm chart: the gatekeeper client also accepts the
+    ingress origins, as placeholders the chart fills from its values."""
+    import json  # noqa: PLC0415
+
+    realm = json.loads(realm_json)
+    origins = [
+        f"https://{HELM_APP_HOST}",
+        *(f"https://__APP_HOST_{label}__" for label in config.frontend_host_labels),
+    ]
+    for client in realm.get("clients", []):
+        if client.get("clientId") != "gatekeeper":
+            continue
+        client["redirectUris"] = [*client["redirectUris"], *(f"{o}/callback" for o in origins)]
+        client["webOrigins"] = [*client["webOrigins"], *origins]
+        attributes = client.setdefault("attributes", {})
+        logout = [u for u in attributes.get("post.logout.redirect.uris", "").split("##") if u]
+        attributes["post.logout.redirect.uris"] = "##".join([*logout, *(f"{o}/*" for o in origins)])
+    return json.dumps(realm, indent=2) + "\n"
 
 
 def _jinja_env() -> Environment:
@@ -78,6 +129,7 @@ def render_compose(
     env = _jinja_env()
     template = env.get_template("deploy/docker-compose.yml.j2")
 
+    keycloak_realm = project_keycloak_realm(config)
     extra_services: list[dict[str, object]] = []
     extra_volumes: list[str] = []
     if plan is not None:
@@ -89,15 +141,22 @@ def render_compose(
         for svc in get_services_for_capabilities(sorted(plan.capabilities)):
             block = svc.as_compose_dict()
             if svc.name == "gatekeeper":
-                block.setdefault("environment", {})["API_KEYS_ENABLED"] = (
+                env = block.setdefault("environment", {})
+                env["API_KEYS_ENABLED"] = (
                     "true" if plan.option_values.get("auth.api_keys") else "false"
                 )
+                env["TENANT_SOURCE"] = keycloak_tenant_source(plan.option_values)
+                env["SELF_REGISTRATION"] = keycloak_self_registration(plan.option_values)
                 if config.frontend_host_labels:
                     # Hosts of the frontends beside the primary, which the
                     # gatekeeper resolves to the project's realm and tenant.
                     block["environment"]["GATEKEEPER_FRONTEND_HOST_LABELS"] = ",".join(
                         config.frontend_host_labels
                     )
+            if svc.name in {"gatekeeper", "keycloak-realm-sync"}:
+                # One realm name everywhere: the realm JSON, the gatekeeper and
+                # the realm sync all read it from the project config.
+                block.setdefault("environment", {})["KEYCLOAK_ADMIN_REALM"] = keycloak_realm
             extra_services.append({"name": svc.name, "block": block})
             for vol in svc.named_volumes:
                 if vol not in seen_volumes:
@@ -155,7 +214,13 @@ def render_compose(
         extra_service_names=tuple(str(svc["name"]) for svc in extra_services),
     )
 
-    backends_ctx = [backend_topology_entry(bc, synthesis, rendered_infra) for bc in config.backends]
+    options = plan.option_values if plan is not None else config.options
+    backends_ctx = [
+        backend_topology_entry(
+            bc, synthesis, rendered_infra, options=options, database_mode=database_mode
+        )
+        for bc in config.backends
+    ]
 
     # Primary backend (first) for backward-compat references
     primary = config.backend
@@ -181,13 +246,7 @@ def render_compose(
         "traefik_dashboard_port": TRAEFIK_DASHBOARD_PORT,
         "database_mode": database_mode,
         "render_postgres": render_postgres,
-        "keycloak_realm": (
-            config.frontend.keycloak_realm
-            if config.frontend
-            and config.include_keycloak
-            and config.frontend.keycloak_realm != "master"
-            else DEFAULT_REALM
-        ),
+        "keycloak_realm": keycloak_realm,
         "keycloak_client_id": (
             config.frontend.keycloak_client_id
             if config.frontend and config.include_keycloak
@@ -522,11 +581,16 @@ def render_keycloak_realm(
     )
     context = {
         "project_name": config.project_name,
-        "keycloak_realm": (
-            fc.keycloak_realm
-            if fc and fc.keycloak_realm and fc.keycloak_realm != "master"
-            else DEFAULT_REALM
-        ),
+        "keycloak_realm": project_keycloak_realm(config),
+        # auth.keycloak_tenant_source=organization: enable organizations, seed
+        # the dev organization and map the active one's id into the token.
+        "organizations": keycloak_tenant_source(config.options) == "organization",
+        # auth.keycloak_self_registration: off closes registration;
+        # own_organization lets the gatekeeper create organizations.
+        "self_registration": keycloak_self_registration(config.options),
+        # The gatekeeper's logout returns to the app's own origin only.
+        "app_origins": app_origins(config),
+        "default_tenant_id": DEFAULT_TENANT_ID,
         "keycloak_client_id": (
             fc.keycloak_client_id if fc and fc.keycloak_client_id else config.project_slug
         ),
@@ -605,6 +669,21 @@ def render_init_db(
     # POSTGRES_DB was created there. On Windows, chmod only clears read-only.
     init_path.chmod(0o755)
     return init_path
+
+
+def render_db_app_role_script(config: ProjectConfig, project_root: Path) -> Path:
+    """Write the ``database.rls_app_role`` provisioning script.
+
+    One source for the Compose ``<backend>-db-role`` job and the Helm migrate
+    Job (the generator copies it into the chart's ``files/``).
+    """
+    del config  # same script for every project; the role comes from env
+    script = project_root / "deploy" / "compose" / "db-app-role.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    source = TEMPLATES_DIR / "deploy" / "db-app-role.sh"
+    script.write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+    script.chmod(0o755)
+    return script
 
 
 def render_service_registry(

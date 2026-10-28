@@ -26,6 +26,64 @@ To switch an existing project:
    routes are down until `platform` is ready. In-cluster Postgres keeps its data, since the `data-postgres-0` volume
    outlives the umbrella and the platform's `postgres` mounts it again. From then on `make helm-install` installs
    `platform`, then every service.
+### Tenant isolation and Keycloak strategies (unreleased)
+
+The new safeguards are options with safe defaults. Set them in `forge.toml` to
+keep a different strategy.
+
+- **`shared_rls` projects:** services now connect as `<db_name>_app` and no
+  longer migrate on start (`MIGRATE_ON_START=false`). Compose creates the role
+  on `up`. In Helm, set each workload's `migrateSecretEnv` (`DB_OWNER_URL`, the
+  owner DB URL, `APP_DB_PASSWORD`) and put the same password in `secretEnv`'s DB
+  URL; with `infra.inCluster` the pods' init containers migrate and create the
+  role, otherwise the pre-install migrate Job does. The owner needs `CREATEROLE`
+  (not superuser) on Postgres 13 or newer, and `APP_DB_PASSWORD` must be
+  printable ASCII. A deployment with its own non-bypassing role
+  sets `database.rls_app_role=false` and points the DB URL at it; the startup
+  guard refuses a superuser either way. Check with
+  `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`.
+- **Header or subdomain tenant without auth:** generation now fails. Enable
+  authentication, use `token_claim`, or set `database.allow_unverified_tenant=true`
+  when a trusted gateway owns the tenant header. With authentication, a request
+  whose header or subdomain names another tenant than its token now gets 403
+  (`shared_rls` and `schema_per_tenant`), and one with a bearer token that does
+  not verify gets 401, even on a route that needs no sign-in.
+- **Keycloak projects:** Keycloak moves to 26.6 and the admin variables to
+  `KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD`. The default
+  `auth.keycloak_tenant_source=organization` takes the tenant from Keycloak
+  Organizations. Keycloak imports the realm only into an empty database, so an
+  existing realm needs organizations enabled, an organization per tenant (its id
+  is the tenant id), the `organization-id` mapper on the `gatekeeper` client
+  (see `deploy/infra/keycloak-realm.json`) and `post.logout.redirect.uris` set
+  to the app's origin (`http://app.localhost/*` in Compose); the gatekeeper
+  refuses to start until the first two are in place. Registration is
+  closed unless `auth.keycloak_self_registration="own_organization"`, which
+  also needs `manage-realm` for `service-account-gatekeeper`, "Verify email"
+  on the realm and an SMTP server: only a verified email gets an organization.
+  To keep the `tenant_id` attribute instead, set
+  `auth.keycloak_tenant_source="user_attribute"`.
+- **Self-registration with `user_attribute`:** registration is closed too, and
+  a user without a `tenant_id` attribute is refused at sign-in instead of being
+  given the default tenant (which put every self-registered user in the same
+  tenant). For a single-tenant application that wants open sign-up, set
+  `auth.keycloak_self_registration="default_tenant"`. An existing realm keeps
+  `registrationAllowed` until changed in Keycloak.
+- **Organization switch:** `/auth/organization` is now a form `POST` (`alias`,
+  optional `redirect_uri`) from the app's own origin; a `GET` link no longer
+  switches, and `/auth/login` ignores an `organization` parameter.
+- **Gatekeeper client origins:** the realm's `gatekeeper` client accepts
+  `redirectUris`, `webOrigins` and `post.logout.redirect.uris` only for the
+  apps' origins instead of `*`/`+`. Helm fills them from `ingress.host` and
+  `frontends.<name>.host` when Keycloak first imports the realm; Keycloak keeps
+  an existing realm, so after changing those hosts update the client's URIs in
+  the admin console (or the realm export) too.
+- **Subdomain tenants with authentication:** a subdomain or header tenant that
+  is not a UUID must be the token's `https://forge/tenant_slug` (any case),
+  else 403, in Go too (which ignored such subdomains). Without a verified token
+  a slug binds no tenant.
+- **Realm per subdomain:** without a TMS `tenant-route`, the gatekeeper now signs
+  users in to the project's realm. Set `REALM_PER_HOST=true` on the gatekeeper to
+  keep deriving the realm from the host.
 
 ### Coordinated dependency refresh (unreleased)
 

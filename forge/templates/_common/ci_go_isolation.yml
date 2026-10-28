@@ -1,0 +1,53 @@
+
+  # database.rls_app_role: the tenant isolation tests run as the role the
+  # service runs as, created by deploy/compose/db-app-role.sh over the real
+  # migrations, against a Postgres service container.
+  tenant-isolation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: __FORGE_ISOLATION_MATRIX__
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ${{ matrix.db_name }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      OWNER_URL: postgresql://postgres:postgres@localhost:5432/${{ matrix.db_name }}?sslmode=disable
+      APP_ROLE_URL: postgresql://${{ matrix.app_role }}:ci-app-role@localhost:5432/${{ matrix.db_name }}?sslmode=disable
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.path }}/go.mod
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+      - name: Migrate as the owner
+        env:
+          ENV: development
+          DATABASE_URL: ${{ env.OWNER_URL }}
+        run: go run ./cmd/migrate up
+      - name: Create the app role
+        env:
+          DB_OWNER_URL: ${{ env.OWNER_URL }}
+          APP_DB_ROLE: ${{ matrix.app_role }}
+          APP_DB_PASSWORD: ci-app-role
+        run: sh "$GITHUB_WORKSPACE/deploy/compose/db-app-role.sh"
+      - name: Tenant isolation as the app role
+        env:
+          DATABASE_URL: ${{ env.OWNER_URL }}
+          APP_ROLE_DATABASE_URL: ${{ env.APP_ROLE_URL }}
+          REQUIRE_APP_ROLE_TEST: "1"
+        run: go test -count=1 -run '^TestRLS' -v ./tests/integration/...

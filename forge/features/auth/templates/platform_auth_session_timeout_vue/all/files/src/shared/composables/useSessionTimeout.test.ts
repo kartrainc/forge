@@ -124,6 +124,31 @@ describe('bootstrap', () => {
     expect(fetchMock).toHaveBeenLastCalledWith('/bff/session', { credentials: 'include' })
     expect(session.enabled.value).toBe(true)
     expect(session.idleRemaining.value).toBe(300)
+    // The session went live on reload, so activity now extends it.
+    expect(FakeChannel.instances.map((c) => c.name)).toEqual(['tabs'])
+    await session.reload()
+    expect(FakeChannel.instances).toHaveLength(1)
+  })
+
+  it('does not listen when unmounted before the bootstrap answers', async () => {
+    let answer!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { answer = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const addListener = vi.spyOn(window, 'addEventListener')
+    const wrapper = mount(defineComponent({
+      setup() {
+        useSessionTimeout()
+        return () => h('div')
+      },
+    }))
+    wrapper.unmount()
+    answer(respond(SESSION))
+    await flushPromises()
+
+    expect(FakeChannel.instances).toHaveLength(0)
+    expect(addListener.mock.calls.filter(([event]) => event === 'mousemove')).toHaveLength(0)
+    await activityBurst()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -215,6 +240,23 @@ describe('activity', () => {
 })
 
 describe('extend', () => {
+  it('cancels the activity extension still waiting out the debounce', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(SESSION))
+    vi.stubGlobal('fetch', fetchMock)
+    const { session } = await mountSession()
+
+    window.dispatchEvent(new Event('mousemove'))
+    await session.extend()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(30_100)
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // Activity after the manual extension starts a new debounce window.
+    await activityBurst()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('disables the countdown when the session already expired', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(respond(SESSION))

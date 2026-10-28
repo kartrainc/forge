@@ -737,12 +737,12 @@
       "sha256": "415a5a1d58b41e87"
     },
     "apps/frontend/src/shared/composables/useSessionTimeout.test.ts": {
-      "size": 9217,
-      "sha256": "83b2c4af4f8b9d13"
+      "size": 10817,
+      "sha256": "3c7fd796299612f2"
     },
     "apps/frontend/src/shared/composables/useSessionTimeout.ts": {
-      "size": 9925,
-      "sha256": "35a26e80e20a90bb"
+      "size": 10333,
+      "sha256": "bfcfc14f694b4fd9"
     },
     "apps/frontend/src/shared/composables/useSidebarShortcut.test.ts": {
       "size": 1441,
@@ -1345,8 +1345,8 @@
       "sha256": "8ee9220daf14615a"
     },
     "deploy/infra/gatekeeper/config/production.yaml": {
-      "size": 1184,
-      "sha256": "96b81110decce336"
+      "size": 1239,
+      "sha256": "0cfb0924f44de20b"
     },
     "deploy/infra/gatekeeper/config/secrets.production.yaml.example": {
       "size": 280,
@@ -1453,8 +1453,8 @@
       "sha256": "c286523002cca398"
     },
     "deploy/infra/gatekeeper/src/app/core/lifecycle.py": {
-      "size": 9589,
-      "sha256": "a98d40091689a57e"
+      "size": 9742,
+      "sha256": "dbea3dd748d0f004"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/__init__.py": {
       "size": 697,
@@ -1465,24 +1465,24 @@
       "sha256": "b192fd702de61396"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/apikeys_api.py": {
-      "size": 12618,
-      "sha256": "97fff7148e9cbbf9"
+      "size": 12649,
+      "sha256": "5d07d23479c5e9e2"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/authz.py": {
       "size": 2901,
       "sha256": "0d031823b3226dd2"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/config.py": {
-      "size": 18261,
-      "sha256": "112aa7d57b5dee43"
+      "size": 20281,
+      "sha256": "46ebfe898cee3d90"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/delegation_grant.py": {
       "size": 7041,
       "sha256": "2c7322a606f0fcb5"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/helpers.py": {
-      "size": 11176,
-      "sha256": "550b68fe9ec298bd"
+      "size": 13924,
+      "sha256": "71f9cfdd7ded1dd9"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/http_client.py": {
       "size": 4803,
@@ -1497,60 +1497,64 @@
       "sha256": "fc3074e3a2111eb6"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/jwks.py": {
-      "size": 5508,
-      "sha256": "fc54102cfcf19458"
+      "size": 6001,
+      "sha256": "5a8d03b081705010"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/key_store.py": {
       "size": 8629,
       "sha256": "5d560ac4905cd9b7"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/keycloak_admin.py": {
-      "size": 3877,
-      "sha256": "ed1916c3f4369498"
+      "size": 5754,
+      "sha256": "a4dd2c7e240c9c3c"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/metrics.py": {
       "size": 4897,
       "sha256": "7b3deae1cb54bd9e"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/oidc.py": {
-      "size": 4359,
-      "sha256": "e5153f781070d1a1"
+      "size": 5332,
+      "sha256": "7145f4f588d1c31b"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/oidc_pkce.py": {
       "size": 4901,
       "sha256": "7600958719f667d7"
+    },
+    "deploy/infra/gatekeeper/src/app/gatekeeper/organizations.py": {
+      "size": 3622,
+      "sha256": "8e269461e528fde0"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/ratelimit.py": {
       "size": 2766,
       "sha256": "27019929bb1db31d"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/realm_invariants.py": {
-      "size": 7408,
-      "sha256": "5dcfb41fc0592d61"
+      "size": 9688,
+      "sha256": "3a101af1fea7e572"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/redis.py": {
-      "size": 24989,
-      "sha256": "bebbec570db9b36e"
+      "size": 25566,
+      "sha256": "6bcd0424245f4160"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes.py": {
-      "size": 41357,
-      "sha256": "5de9958fd346872b"
+      "size": 56212,
+      "sha256": "d53329f9b0aa047d"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes_jwks.py": {
       "size": 1839,
       "sha256": "a291d21841b463ae"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/routes_session.py": {
-      "size": 9103,
-      "sha256": "198b4e60cbf9e241"
+      "size": 9101,
+      "sha256": "a5a0472e9a565e78"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/scopes.py": {
       "size": 1718,
       "sha256": "9c78204cea910aa0"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/server_session.py": {
-      "size": 14896,
-      "sha256": "52c90aac44694e93"
+      "size": 15249,
+      "sha256": "8b3aa508d7322b5b"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/service_registry.py": {
       "size": 5998,
@@ -1565,8 +1569,8 @@
       "sha256": "57ac8f8bd6d5c3fe"
     },
     "deploy/infra/gatekeeper/src/app/gatekeeper/tenant_config.py": {
-      "size": 5480,
-      "sha256": "22f0589261f4851a"
+      "size": 6323,
+      "sha256": "4c355667e56ebabf"
     },
     "deploy/infra/gatekeeper/src/app/main.py": {
       "size": 4090,
@@ -1618,7 +1622,7 @@
     },
     "deploy/infra/keycloak/Dockerfile": {
       "size": 368,
-      "sha256": "173308d6bc79f077"
+      "sha256": "325b8047b6e09533"
     },
     "deploy/infra/keycloak/themes/vscode/login/resources/css/styles.css": {
       "size": 23365,
@@ -1629,12 +1633,12 @@
       "sha256": "b0d710cd06b5c9d2"
     },
     "deploy/infra/keycloak-realm.json": {
-      "size": 6098,
-      "sha256": "73cf666d9f036dd9"
+      "size": 6601,
+      "sha256": "684a4f0133ff177e"
     },
     "docker-compose.yml": {
-      "size": 13275,
-      "sha256": "1382f086b4a75dde"
+      "size": 13362,
+      "sha256": "27ab0d81aa29dbb1"
     },
     "forge.toml": {
       "size": 184179,
@@ -1853,8 +1857,8 @@
       "sha256": "66de67c35887d2bb"
     },
     "services/api/entrypoint.sh": {
-      "size": 506,
-      "sha256": "df2a39103908a6ed"
+      "size": 880,
+      "sha256": "621f211454b2f7c1"
     },
     "services/api/pyproject.toml": {
       "size": 4168,

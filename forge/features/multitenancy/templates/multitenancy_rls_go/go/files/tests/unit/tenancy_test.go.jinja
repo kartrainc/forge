@@ -204,11 +204,67 @@ func TestAttachGivesTheRequestTenantToAnUnverifiedIdentity(t *testing.T) {
 	account := identity.New(uuid.New(), "account")
 	verified := platformauth.WithIdentity(identity.WithContext(context.Background(), account),
 		platformauth.IdentityContext{TenantID: account.TenantID, Subject: account.Subject})
-	for _, tenant := range []string{chosen.String(), "acme"} {
+	for _, tenant := range []string{chosen.String(), "acme", uuid.Nil.String()} {
+		if _, err := attach(verified, tenant); !errors.Is(err, tenancy.ErrTenantMismatch) {
+			t.Fatalf("another tenant than the verified token's, %q: %v", tenant, err)
+		}
+	}
+	for _, tenant := range []string{account.TenantID.String(), strings.ToUpper(account.TenantID.String())} {
 		ctx, err := attach(verified, tenant)
 		if ident, _ := identity.FromContext(ctx); err != nil || ident.TenantID != account.TenantID {
-			t.Fatalf("the verified token's tenant wins over %q: %+v %v", tenant, ident, err)
+			t.Fatalf("the verified token's own tenant %q passes: %+v %v", tenant, ident, err)
 		}
+	}
+	slugged := account
+	slugged.TenantSlug = "acme"
+	withSlug := platformauth.WithIdentity(identity.WithContext(context.Background(), slugged),
+		platformauth.IdentityContext{TenantID: slugged.TenantID, Subject: slugged.Subject})
+	if _, err := attach(withSlug, "acme"); err != nil {
+		t.Fatalf("a slug names the verified token's tenant by its slug: %v", err)
+	}
+	if _, err := attach(withSlug, "beta"); !errors.Is(err, tenancy.ErrTenantMismatch) {
+		t.Fatalf("another slug than the token's: %v", err)
+	}
+	if _, err := attach(withSlug, "ACME"); err != nil {
+		t.Fatalf("a slug compares ignoring case: %v", err)
+	}
+	bySubdomain := tenancy.DefaultSettings()
+	bySubdomain.Resolution = tenancy.ResolutionSubdomain
+	onHost := func(ctx context.Context, host string) (context.Context, error) {
+		request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+		request.Host = host
+		return tenancy.NewResolver(bySubdomain, tenancy.VerifiedClaims).Attach(request)
+	}
+	for host, want := range map[string]error{
+		"acme.example.com": nil, "ACME.example.com:8443": nil, "beta.example.com": tenancy.ErrTenantMismatch,
+	} {
+		ctx, err := onHost(withSlug, host)
+		if !errors.Is(err, want) {
+			t.Fatalf("subdomain %q: %v, want %v", host, err, want)
+		}
+		if err != nil {
+			continue
+		}
+		if stored, _ := tenancy.FromContext(ctx); stored != slugged.TenantID.String() {
+			t.Fatalf("subdomain %q binds the token's tenant id, not the slug: %q", host, stored)
+		}
+	}
+	for _, host := range []string{"127.0.0.1:8080", "[::1]:8080", "localhost"} {
+		if _, err := onHost(withSlug, host); err != nil {
+			t.Fatalf("%q names no tenant: %v", host, err)
+		}
+	}
+	if ctx, err := onHost(context.Background(), "acme.example.com"); err != nil {
+		t.Fatalf("an unverified slug: %v", err)
+	} else if _, ok := tenancy.FromContext(ctx); ok {
+		t.Fatal("an unverified slug resolves no tenant")
+	}
+	tokenClaim := tenancy.DefaultSettings()
+	tokenClaim.Resolution = tenancy.ResolutionTokenClaim
+	request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(verified)
+	request.Header.Set(settings.HeaderName, chosen.String())
+	if _, err := tenancy.NewResolver(tokenClaim, tenancy.VerifiedClaims).Attach(request); err != nil {
+		t.Fatalf("token_claim resolution reads no header: %v", err)
 	}
 	ctx, err = attach(context.Background(), chosen.String())
 	if _, bound := identity.FromContext(ctx); err != nil || bound {
@@ -258,6 +314,33 @@ func TestTenantRLSMiddlewareRejectsATenantThatIsNotAUUID(t *testing.T) {
 		t.Fatalf("a tenant that is not a UUID: %d %s", rejected.Code, rejected.Body.String())
 	}
 }
+{%- if options['auth.mode'] == 'generate' %}
+
+func TestTenantRLSMiddlewareRefusesAnotherTenantThanTheTokens(t *testing.T) {
+	settings := tenancy.DefaultSettings()
+	settings.Resolution = tenancy.ResolutionHeader
+	account := identity.New(uuid.New(), "account")
+	reached := false
+	tenantRLS := middleware.TenantRLS(tenancy.NewResolver(settings, tenancy.VerifiedClaims))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler := middleware.Correlation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := platformauth.WithIdentity(identity.WithContext(r.Context(), account),
+			platformauth.IdentityContext{TenantID: account.TenantID, Subject: account.Subject})
+		tenantRLS.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set(settings.HeaderName, uuid.NewString())
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	var envelope testutil.Envelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil || recorder.Code != http.StatusForbidden ||
+		envelope.Error.Code != "PERMISSION_DENIED" || envelope.Error.Message != tenancy.ErrTenantMismatch.Error() || reached {
+		t.Fatalf("another tenant than the token's: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+{%- endif %}
 
 type recordingTx struct {
 	pgx.Tx

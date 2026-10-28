@@ -43,6 +43,7 @@ func run() int {
 		return 1
 	}
 	defer pool.Close()
+	// FORGE:POOL_READY
 
 	listener, err := app.Listen(cfg.Server.Port)
 	if err != nil {

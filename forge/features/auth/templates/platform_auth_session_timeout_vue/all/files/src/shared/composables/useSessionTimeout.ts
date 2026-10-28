@@ -120,7 +120,15 @@ export function useSessionTimeout(
   let channel: BroadcastChannel | null = null
   let lastSeenActivity = 0
   let pendingDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let listening = false
   let unmounted = false
+
+  function cancelPendingExtension(): void {
+    if (pendingDebounceTimer !== null) {
+      clearTimeout(pendingDebounceTimer)
+      pendingDebounceTimer = null
+    }
+  }
 
   /** Apply a fresh server response to local state. */
   function applyState(state: SessionState): void {
@@ -158,6 +166,8 @@ export function useSessionTimeout(
     if (!enabled.value) {
       return
     }
+    // This extension covers any activity still waiting out the debounce.
+    cancelPendingExtension()
     try {
       const res = await fetch(endpoint, { method: 'POST', credentials: 'include' })
       if (!res.ok) {
@@ -235,9 +245,10 @@ export function useSessionTimeout(
   }
 
   function attachListeners(): void {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || listening || unmounted) {
       return
     }
+    listening = true
     if (typeof BroadcastChannel !== 'undefined') {
       channel = new BroadcastChannel(channelName)
       channel.onmessage = onChannelMessage
@@ -261,20 +272,21 @@ export function useSessionTimeout(
       clearInterval(tickInterval)
       tickInterval = null
     }
-    if (pendingDebounceTimer !== null) {
-      clearTimeout(pendingDebounceTimer)
-      pendingDebounceTimer = null
-    }
+    cancelPendingExtension()
     channel?.close()
     channel = null
+    listening = false
   }
 
-  onMounted(async () => {
+  /** Bootstrap, then listen once the session is live — unless unmounted meanwhile. */
+  async function start(): Promise<void> {
     await bootstrap()
-    if (enabled.value) {
+    if (enabled.value && !unmounted) {
       attachListeners()
     }
-  })
+  }
+
+  onMounted(start)
 
   onUnmounted(() => {
     unmounted = true
@@ -287,6 +299,6 @@ export function useSessionTimeout(
     absoluteRemaining,
     warnAtSeconds: readonly(warnAtSeconds),
     extend,
-    reload: bootstrap,
+    reload: start,
   }
 }

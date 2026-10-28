@@ -5,6 +5,7 @@ Shared helpers used across the Gatekeeper routes.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import urllib.parse
 from typing import TypedDict
@@ -75,6 +76,8 @@ def build_login_url(
     nonce: str | None = None,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    scope: str = "openid email profile",
+    idp_hint: str | None = None,
 ) -> str:
     """
     Construct the Keycloak Authorization Endpoint URL for the given tenant.
@@ -107,6 +110,12 @@ def build_login_url(
         only emitted when **both** ``code_challenge`` and this method are
         provided (so a challenge is never sent without a declared method, and
         a method is never sent without a challenge).
+    scope:
+        Requested scopes; ``organizations.login_scope`` adds the
+        ``organization`` scope when the tenant comes from organizations.
+    idp_hint:
+        Keycloak ``kc_idp_hint``: send the user straight to that identity
+        provider (an organization's IdP, for instance). Omitted when ``None``.
     """
     cfg = get_settings()
     base_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
@@ -116,9 +125,11 @@ def build_login_url(
         "response_type": "code",
         "client_id": cid,
         "redirect_uri": redirect_uri,
-        "scope": "openid email profile",
+        "scope": scope,
         "state": state,
     }
+    if idp_hint is not None:
+        params_dict["kc_idp_hint"] = idp_hint
     if nonce is not None:
         params_dict["nonce"] = nonce
     if code_challenge is not None and code_challenge_method is not None:
@@ -128,13 +139,34 @@ def build_login_url(
     return f"{base}?{params}"
 
 
-def build_logout_url(tenant: str, *, issuer_url: str | None = None) -> str:
+def build_logout_url(
+    tenant: str,
+    *,
+    issuer_url: str | None = None,
+    client_id: str | None = None,
+    id_token_hint: str | None = None,
+    post_logout_redirect_uri: str | None = None,
+) -> str:
     """
     Construct the Keycloak end-session endpoint URL for the given tenant.
+
+    With ``id_token_hint`` Keycloak ends the session without asking the user
+    to confirm, and with ``client_id`` + ``post_logout_redirect_uri`` (one of
+    the client's ``post.logout.redirect.uris``) it sends the browser back.
     """
     cfg = get_settings()
     base_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
-    return f"{base_url}/protocol/openid-connect/logout"
+    url = f"{base_url}/protocol/openid-connect/logout"
+    params = {
+        name: value
+        for name, value in (
+            ("client_id", client_id or cfg.gatekeeper_client_id),
+            ("id_token_hint", id_token_hint),
+            ("post_logout_redirect_uri", post_logout_redirect_uri),
+        )
+        if value
+    }
+    return f"{url}?{urllib.parse.urlencode(params)}"
 
 
 # ── Response builders ──────────────────────────────────────────────────────
@@ -263,6 +295,50 @@ def _delete_session_id_cookie(response: Response) -> None:
     response.delete_cookie(
         key=cfg.session_id_cookie_name,
         path="/",
+        httponly=True,
+        samesite="lax",
+        secure=cfg.cookie_secure,
+    )
+
+
+# A sign-in is bound to the browser that started it: ``/auth/login`` sets a
+# per-flow cookie whose value the bound-state envelope also holds, and
+# ``/callback`` only accepts the flow's ``state`` alongside it. Without it,
+# anyone could start a sign-in, stop before ``/callback`` and hand the link to
+# a victim, whose browser would then hold the attacker's session. One cookie
+# per flow (named after the state) so sign-ins in several tabs do not clash.
+_LOGIN_COOKIE_PREFIX = "gk_login_"
+
+
+def login_cookie_name(state: str) -> str:
+    """Name of the cookie that binds the sign-in *state* to its browser."""
+    return _LOGIN_COOKIE_PREFIX + hashlib.sha256(state.encode()).hexdigest()[:16]
+
+
+def _set_login_cookie(response: Response, *, state: str, binding: str) -> None:
+    """Bind the sign-in *state* to this browser until ``/callback``.
+
+    Scoped to ``/callback`` and to the envelope's lifetime. SameSite=Lax is
+    sent on the top-level redirect back from Keycloak.
+    """
+    cfg = get_settings()
+    response.set_cookie(
+        key=login_cookie_name(state),
+        value=binding,
+        httponly=True,
+        samesite="lax",
+        secure=cfg.cookie_secure,
+        path="/callback",
+        max_age=cfg.oidc_state_envelope_ttl_seconds,
+    )
+
+
+def _delete_login_cookie(response: Response, *, state: str) -> None:
+    """Expire the cookie of a consumed sign-in."""
+    cfg = get_settings()
+    response.delete_cookie(
+        key=login_cookie_name(state),
+        path="/callback",
         httponly=True,
         samesite="lax",
         secure=cfg.cookie_secure,

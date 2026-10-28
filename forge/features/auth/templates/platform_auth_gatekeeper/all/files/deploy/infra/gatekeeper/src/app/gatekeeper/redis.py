@@ -85,11 +85,23 @@ class InMemoryStore:
             self._expiry.pop(key, None)
         return value
 
-    async def set(self, key: str, value: str, **kwargs: Any) -> None:  # noqa: A003
+    async def set(self, key: str, value: str, **kwargs: Any) -> bool | None:  # noqa: A003
+        """SET with ``ex``, ``nx`` (only if absent) and ``xx`` (only if present).
+
+        Returns ``True`` when written and ``None`` when ``nx``/``xx`` refused,
+        as redis-py does.
+        """
+        self._evict_if_expired(key)
+        if (kwargs.get("nx") and key in self._data) or (
+            kwargs.get("xx") and key not in self._data
+        ):
+            return None
         self._data[key] = value
+        self._expiry.pop(key, None)
         ex = kwargs.get("ex")
         if ex is not None:
             self._expiry[key] = time.time() + int(ex)
+        return True
 
     async def setex(self, key: str, seconds: int, value: str) -> None:
         """SET key value EX seconds — atomic set-with-expiry."""
@@ -537,8 +549,9 @@ class ResilientRedis:
         """
         return await self._exec("getdel", key)  # type: ignore[return-value]
 
-    async def set(self, key: str, value: str, **kwargs: Any) -> None:  # noqa: A003
-        await self._exec("set", key, value, **kwargs)
+    async def set(self, key: str, value: str, **kwargs: Any) -> bool | None:  # noqa: A003
+        """SET; returns ``True`` when written, ``None`` when ``nx``/``xx`` refused."""
+        return await self._exec("set", key, value, **kwargs)  # type: ignore[return-value]
 
     async def setex(self, key: str, seconds: int, value: str) -> None:
         await self._exec("setex", key, seconds, value)

@@ -27,6 +27,50 @@ spec:
     spec:
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- if and $w.dbAppRole $.Values.infra.inCluster }}
+      {{- /* database.rls_app_role with the in-cluster Postgres: the database
+             exists only once the release is installed, after pre-install
+             hooks, and a post-install Job would run after `helm install
+             --wait` waits for these pods. So each pod migrates as the owner
+             and creates its role before the service starts as that role.
+             Both steps are idempotent and serialize on advisory locks. */}}
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ $.Values.infra.postgres.image | quote }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -p 5432 -U postgres; do echo "waiting for postgres"; sleep 2; done
+        - name: migrate
+          image: "{{ $w.image.repository }}:{{ $w.image.tag }}"
+          imagePullPolicy: {{ $w.image.pullPolicy }}
+          command: {{ toJson $w.migrateCommand }}
+          envFrom:
+            - configMapRef:
+                name: {{ printf "%s-%s-config" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+            - secretRef:
+                name: {{ printf "%s-%s-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+                optional: true
+            - secretRef:
+                name: {{ printf "%s-%s-migrate-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+        - name: db-role
+          image: {{ $.Values.infra.postgres.image | quote }}
+          command: ["sh", "/scripts/db-app-role.sh"]
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $w.dbAppRole | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ printf "%s-%s-migrate-secret" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
+          volumeMounts:
+            - name: db-app-role
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: db-app-role
+          configMap:
+            name: {{ printf "%s-db-app-role" $.Release.Name | trunc 63 | trimSuffix "-" }}
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: "{{ $w.image.repository }}:{{ $w.image.tag }}"

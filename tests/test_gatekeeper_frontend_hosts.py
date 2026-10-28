@@ -1,8 +1,9 @@
 """The gatekeeper resolves every frontend's host to the project's realm.
 
-A project with several frontends serves each on its own host; without a
-``tenant-route:<host>`` record, ``get_fallback_config`` takes the host's first
-label as the realm, except for the admin realm's label and the labels listed in
+A project with several frontends serves each on its own host. Without a
+``tenant-route:<host>`` record, ``get_fallback_config`` signs every host in to
+the admin realm; with ``REALM_PER_HOST`` it takes the host's first label as the
+realm, except for the admin realm's label and the labels listed in
 ``GATEKEEPER_FRONTEND_HOST_LABELS``. ``tenant_config.py`` is loaded from the
 template with a stub for its one import, the settings; the rendered module is
 exercised against the real settings by ``tests/runtime/gatekeeper_contract.py``.
@@ -26,9 +27,10 @@ _GATEKEEPER = (
 _DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
 
 
-def _fallback(monkeypatch: pytest.MonkeyPatch, labels: str):
+def _fallback(monkeypatch: pytest.MonkeyPatch, labels: str, *, realm_per_host: bool = True):
     settings = SimpleNamespace(
         gatekeeper_frontend_host_labels=labels,
+        realm_per_host=realm_per_host,
         keycloak_admin_realm="app",
         default_tenant_id=_DEFAULT_TENANT,
         keycloak_base_url="http://keycloak:8080/realms",
@@ -73,6 +75,14 @@ def test_host_labels_resolve_to_the_admin_realm(
     resolved = _fallback(monkeypatch, labels)(host)
     assert (resolved.realm_name, resolved.tenant_id) == (realm, tenant)
     assert resolved.issuer_url == f"http://keycloak:8080/realms/{realm}"
+
+
+@pytest.mark.parametrize("host", ["app", "admin", "acme"])
+def test_without_realm_per_host_every_host_uses_the_admin_realm(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    resolved = _fallback(monkeypatch, "admin", realm_per_host=False)(host)
+    assert (resolved.realm_name, resolved.tenant_id) == ("app", _DEFAULT_TENANT)
 
 
 def test_the_setting_is_declared_with_an_empty_default() -> None:

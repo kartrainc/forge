@@ -46,10 +46,19 @@
         header_name="{{ options['database.tenant_header_name'] }}",
     )
 
+# database.rls_startup_guard: refuse to serve when the connected role would
+# bypass RLS (superuser, BYPASSRLS, or owner of tables).
 - target: src/app/core/lifecycle.py
   marker: FORGE:LIFESPAN_STARTUP
   position: before
+  render: true
   snippet: |-
     from app.core.tenancy.rls import register_rls_listener
 
     register_rls_listener(db.engine)
+    {%- if options['database.rls_startup_guard'] %}
+
+    from app.core.tenancy.guard import assert_rls_enforced
+
+    await assert_rls_enforced(db.engine)
+    {%- endif %}
