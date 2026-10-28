@@ -459,14 +459,6 @@ def _env_refs(container: dict) -> list[tuple[str, bool | None]]:
     return refs
 
 
-def _wait_url(wait: dict) -> tuple[str, str, str, bool | None]:
-    """The wait container's single env var from a Secret: (env, Secret, key, optional); it gets no other source."""
-    assert "envFrom" not in wait
-    (url,) = [e for e in wait["env"] if "valueFrom" in e]
-    ref = url["valueFrom"]["secretKeyRef"]
-    return url["name"], ref["name"], ref["key"], ref.get("optional")
-
-
 @pytest.fixture(scope="module")
 def user_api() -> Path:
     return _gen_service_charts(**dict(_scenarios())["multi_py_node_vue_keycloak"]) / "user-api"
@@ -538,14 +530,9 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
     # the in-cluster Postgres when postgres-rw resolves, through the migration's own env
     assert "getent hosts postgres-rw" in wait["command"][-1]
     assert '"$APP__DB__URL"' in wait["command"][-1]
-    # a third-party image: the one URL it connects with, none of the service's other secrets
-    assert _wait_url(wait) == (
-        "APP__DB__URL",
-        "user-api-migrate-secret",
-        "APP__DB__URL",
-        True,
-    )
-    assert len(wait["env"]) == 1
+    # the migration's own env, wherever the URL comes from
+    assert _env_refs(wait) == _env_refs(migrate)
+    assert "env" not in wait
     assert wait["image"] == "pgvector/pgvector:pg16"
     assert "initContainers" not in job("--set", "migration.waitForPostgres=")
 
@@ -556,7 +543,7 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
     pod = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
     (migrate,) = pod["containers"]
     assert _env_refs(migrate) == [("user-api-migrate-config", None), ("user-api-secret", True)]
-    assert _wait_url(pod["initContainers"][0])[1:] == ("user-api-secret", "APP__DB__URL", True)
+    assert _env_refs(pod["initContainers"][0]) == _env_refs(migrate)
 
     # the chart's ExternalSecret: the release's, and a hook copy the migration waits for
     docs = _render_named(
@@ -585,11 +572,7 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
         ("user-api-migrate-config", None),
         ("user-api-migrate-secret", False),
     ]
-    assert _wait_url(pod["initContainers"][0])[1:] == (
-        "user-api-migrate-secret",
-        "APP__DB__URL",
-        False,
-    )
+    assert _env_refs(pod["initContainers"][0]) == _env_refs(migrate)
     # the service itself reads the release's, and waits for it
     (service,) = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]["containers"]
     assert _env_refs(service) == [("user-api-config", None), ("user-api-secret", False)]
@@ -656,7 +639,7 @@ def test_the_migration_waits_until_its_own_url_reaches_its_database(
         ]
         return container
 
-    assert "is not ready after 180s" in wait()["command"][-1]
+    assert "is not ready after 120s" in wait()["command"][-1]
     env = {
         "APP__DB__URL": "postgresql+asyncpg://user_api:hunter2@postgres-rw:5432/user_api?ssl=require"
     }
@@ -870,8 +853,8 @@ def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role(
     }
     # the operator creates the runtime role after the primary too: the wait covers it, as the owner
     wait = pod["initContainers"][0]
-    assert _wait_url(wait) == ("APP__DB__URL", "api-migrate-owner", "APP__DB__URL", None)
-    assert wait["env"][1:] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
+    assert _env_refs(wait)[-1] == ("api-migrate-owner", None)
+    assert wait["env"] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
     run, calls = _run_wait(
         wait,
         tmp_path / "managed",
@@ -940,8 +923,8 @@ def test_without_the_postgres_chart_the_migration_creates_the_app_role(tmp_path:
     assert _env_refs(role) == [("api-migrate-owner", None)]
     assert docs[("Secret", "api-migrate-owner")]["stringData"]["APP_DB_PASSWORD"] == "CHANGEME"
     # nothing creates the role before the Job: the wait does not look for it
-    assert _wait_url(pod["initContainers"][0])[1] == "api-migrate-owner"
-    assert len(pod["initContainers"][0]["env"]) == 1
+    assert _env_refs(pod["initContainers"][0])[-1] == ("api-migrate-owner", None)
+    assert "env" not in pod["initContainers"][0]
     _kubeconform(_helm("template", "api", str(chart)).stdout, "api creating its app role")
 
     # the same switch on the generated values: the chart wants the password

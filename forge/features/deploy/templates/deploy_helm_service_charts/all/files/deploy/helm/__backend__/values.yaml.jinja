@@ -242,11 +242,12 @@ migration:
 {%- set url_env = "APP__DB__URL" if service.language == "python" else "DATABASE_URL" %}
   # While this host resolves (the postgres chart's Service), the Job first waits until the migration's DB URL, the
   # key databaseUrlEnv of its Secret (ownerSecret's under dbAppRole), connects: the operator creates the database and
-  # its roles after the primary. It fails after waitTimeoutSeconds, well within helm's hook timeout (`make
-  # helm-install` passes --timeout 10m); "" never waits.
+  # its roles after the primary. It fails after waitTimeoutSeconds; "" never waits. The Job retries once and
+  # stops at activeDeadlineSeconds, within the default 5m hook timeout of helm and Flux.
   waitForPostgres: postgres-rw
   databaseUrlEnv: {{ url_env }}
-  waitTimeoutSeconds: 180
+  waitTimeoutSeconds: 120
+  activeDeadlineSeconds: 280
   postgresImage: pgvector/pgvector:pg16
 {%- if service.db_app_role %}
   # database.rls_app_role: the service connects as this role, which cannot bypass RLS. The migration runs as the

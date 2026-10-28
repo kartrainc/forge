@@ -125,7 +125,20 @@ def test_both_secrets_share_each_generated_value(helm: Path) -> None:
 
 
 def test_the_migration_wait_ends_before_the_hook_timeout(helm: Path) -> None:
-    # helm's default --timeout of 5m bounds the whole hook: the wait must fail first, with its own message
+    # helm's and Flux's default 5m bounds the whole hook, retries included: the Job must stop first
     for release in ("api", "mail"):
         values = yaml.safe_load((helm / release / "values.yaml").read_text(encoding="utf-8"))
-        assert values["migration"]["waitTimeoutSeconds"] <= 180, release
+        job = _one(_render(helm / release), "Job", f"{release}-migrate")["spec"]
+        assert job["activeDeadlineSeconds"] < 300, release
+        assert values["migration"]["waitTimeoutSeconds"] < job["activeDeadlineSeconds"], release
+
+
+def test_the_migration_wait_sees_a_url_from_the_containers_env_sources(helm: Path) -> None:
+    docs = _render(
+        helm / "api", "--set-json", 'container.envFrom=[{"secretRef":{"name":"db-url"}}]'
+    )
+    pod = _one(docs, "Job", "api-migrate")["spec"]["template"]["spec"]
+    (wait,) = pod["initContainers"]
+    (migrate,) = pod["containers"]
+    assert {"secretRef": {"name": "db-url"}} in wait["envFrom"]
+    assert wait["envFrom"] == migrate["envFrom"]

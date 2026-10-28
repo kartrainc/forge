@@ -8,7 +8,9 @@ This document lists breaking changes per version and the migration steps for eac
 
 `deploy.helm_layout: per_service` replaces the umbrella chart with one chart per component: one per backend and
 per frontend, plus `postgres`, `redis`, `keycloak` and `gatekeeper` when the project has them. The cluster needs the
-CloudNativePG operator and Traefik (their CRDs). To switch an existing project:
+CloudNativePG operator and Traefik (their CRDs). The gatekeeper chart runs `ENV=development`: any other `ENV`
+refuses `SVC_AUTH_BACKEND=preshared`, the only S2S authentication the backends' clients have, so these charts are a
+development setup, not production-ready, until S2S supports another backend. To switch an existing project:
 
 1. Set `"deploy.helm_layout" = "per_service"` under `[forge.options]` in `forge.toml` and `"deploy.helm_layout" =
    "user"` under `[forge.option_origins]`, then update: the update takes options from `forge.toml`, not from the
