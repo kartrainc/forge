@@ -48,7 +48,7 @@ func CheckRedis(ctx context.Context, rawURL string) DependencyCheck {
 	start := time.Now()
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Hostname() == "" {
-		return deepHealthDown(start, fmt.Sprintf("invalid REDIS_URL %q", rawURL))
+		return deepHealthDown(start, "invalid REDIS_URL")
 	}
 	address := parsed.Host
 	if parsed.Port() == "" {

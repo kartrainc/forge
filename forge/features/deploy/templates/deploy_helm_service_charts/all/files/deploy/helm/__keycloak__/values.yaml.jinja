@@ -59,7 +59,8 @@ realm:
   frontendHosts: {}
 {%- endif %}
   # Secrets of the realm's confidential clients, by clientId. gatekeeper must equal the gatekeeper chart's
-  # GATEKEEPER_CLIENT_SECRET. Mode production refuses CHANGEME.
+  # GATEKEEPER_CLIENT_SECRET. Mode production needs one for every confidential client (the svc-<backend> S2S
+  # clients too: their dev secrets are derivable) and refuses CHANGEME.
   clientSecrets:
     gatekeeper: CHANGEME
   # A post-install/post-upgrade Job that applies the realm file's User-Profile to an existing realm, run with the

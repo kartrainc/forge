@@ -201,9 +201,13 @@ secret:
 {%- endif %}
 {%- if service.language == "python" %}
   # Filled with a random value when stringData leaves them out, kept across upgrades: the service refuses
-  # placeholders outside ENV=development.
+  # placeholders outside ENV=development. Kept through lookup of the installed Secret, so rendering with
+  # `helm template` (Argo CD, kubectl apply of rendered output) draws new ones each time: set them in stringData or
+  # use externalSecret there. Flux's helm-controller installs as helm does.
   generate:
     - APP__SECURITY__SECRET_KEY
+    # nothing reads it but the placeholder check: the backend validates the gatekeeper's JWTs, S2S uses
+    # GATEKEEPER_CLIENT_SECRET
     - APP__SECURITY__AUTH__CLIENT_SECRET
 {%- else %}
   generate: []
@@ -237,11 +241,12 @@ migration:
 {%- endif %}
 {%- set url_env = "APP__DB__URL" if service.language == "python" else "DATABASE_URL" %}
   # While this host resolves (the postgres chart's Service), the Job first waits until the migration's DB URL, the
-  # env var databaseUrlEnv, connects: the operator creates the database and its roles after the primary. It fails
-  # after waitTimeoutSeconds; "" never waits.
+  # key databaseUrlEnv of its Secret (ownerSecret's under dbAppRole), connects: the operator creates the database and
+  # its roles after the primary. It fails after waitTimeoutSeconds, well within helm's hook timeout (`make
+  # helm-install` passes --timeout 10m); "" never waits.
   waitForPostgres: postgres-rw
   databaseUrlEnv: {{ url_env }}
-  waitTimeoutSeconds: 300
+  waitTimeoutSeconds: 180
   postgresImage: pgvector/pgvector:pg16
 {%- if service.db_app_role %}
   # database.rls_app_role: the service connects as this role, which cannot bypass RLS. The migration runs as the

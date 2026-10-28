@@ -65,7 +65,7 @@ Takes (dict "root" $ "image" <the image values> "field" <their values path>).
 
 {{/*
 The realm to import: files/keycloak-realm.json with the app hosts filled in and the confidential clients' secrets
-from realm.clientSecrets; in mode production without the dev users (service accounts only) and HTTPS required
+from realm.clientSecrets; in mode production every confidential client's from there, without the dev users (service accounts only) and HTTPS required
 outside private networks. "" when the chart has no realm file.
 */}}
 {{- define "keycloak.realmJson" -}}
@@ -89,6 +89,16 @@ outside private networks. "" when the chart has no realm file.
 {{- end -}}
 {{- end -}}
 {{- if eq .Values.mode "production" -}}
+{{- $missing := list -}}
+{{- range $client := $realm.clients | default list -}}
+{{- $secret := toString (index $secrets $client.clientId | default "") -}}
+{{- if and (not (dig "publicClient" false $client)) (or (not $secret) (eq $secret "CHANGEME")) -}}
+{{- $missing = append $missing (printf "realm.clientSecrets.%s" $client.clientId) -}}
+{{- end -}}
+{{- end -}}
+{{- with $missing -}}
+{{- fail (printf "keycloak: mode production needs %s set (the realm's confidential clients), not empty or CHANGEME" (join ", " .)) -}}
+{{- end -}}
 {{- $users := list -}}
 {{- $usernames := list -}}
 {{- range $user := dig "users" (list) $realm -}}

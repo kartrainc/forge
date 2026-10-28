@@ -53,8 +53,3 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "gatekeeper.registryPath" -}}
 {{- dig "SERVICE_REGISTRY_PATH" "/run/secrets/gatekeeper-service-registry/service_registry.yaml" (.Values.configMap.data | default dict) -}}
 {{- end -}}
-
-{{/* "true" when the keygen init container writes the signing keys. */}}
-{{- define "gatekeeper.keygen" -}}
-{{- if and .Values.signingKeys.generate (not .Values.signingKeys.existingSecret) }}true{{ end -}}
-{{- end -}}

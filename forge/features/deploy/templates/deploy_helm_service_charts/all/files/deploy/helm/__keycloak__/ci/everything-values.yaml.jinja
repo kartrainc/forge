@@ -12,6 +12,9 @@ admin:
 realm:
   clientSecrets:
     gatekeeper: ci-gatekeeper-secret
+{%- for be in topology.backends if be.synthesis_env.get("GATEKEEPER_CLIENT_ID") %}
+    "{{ be.synthesis_env.GATEKEEPER_CLIENT_ID }}": ci-{{ be.name }}-secret
+{%- endfor %}
   sync:
     enabled: true
     image:

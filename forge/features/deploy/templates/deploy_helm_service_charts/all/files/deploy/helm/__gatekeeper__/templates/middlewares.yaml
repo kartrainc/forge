@@ -1,6 +1,7 @@
 {{- /* The Middlewares the backend charts' routes name: with the release gatekeeper, gatekeeper-auth,
        gatekeeper-strip-api-key and gatekeeper-untrusted-headers. */ -}}
-{{- if .Values.authMiddlewares.enabled }}
+{{- $traefik := or (.Capabilities.APIVersions.Has "traefik.io/v1alpha1/Middleware") .Values.ingressRoute.enabled .Values.authMiddlewares.force }}
+{{- if and .Values.authMiddlewares.enabled $traefik }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

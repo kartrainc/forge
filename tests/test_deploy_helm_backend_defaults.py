@@ -114,3 +114,18 @@ def test_the_liveness_probe_waits_for_a_startup_probe(helm: Path) -> None:
         probe = pod["containers"][0]["startupProbe"]
         assert probe["httpGet"]["path"] == "/api/v1/health/live"
         assert probe["periodSeconds"] * probe["failureThreshold"] >= 120
+
+
+def test_both_secrets_share_each_generated_value(helm: Path) -> None:
+    docs = _render(helm / "api")
+    runtime = _one(docs, "Secret", "api-secret")["stringData"]
+    migrate = _one(docs, "Secret", "api-migrate-secret")["stringData"]
+    for key in _GENERATED:
+        assert runtime[key] == migrate[key], key
+
+
+def test_the_migration_wait_ends_before_the_hook_timeout(helm: Path) -> None:
+    # helm's default --timeout of 5m bounds the whole hook: the wait must fail first, with its own message
+    for release in ("api", "mail"):
+        values = yaml.safe_load((helm / release / "values.yaml").read_text(encoding="utf-8"))
+        assert values["migration"]["waitTimeoutSeconds"] <= 180, release

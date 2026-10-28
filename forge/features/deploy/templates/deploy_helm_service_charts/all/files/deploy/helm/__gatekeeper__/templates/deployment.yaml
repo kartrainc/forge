@@ -1,10 +1,5 @@
 {{- $keyDir := include "gatekeeper.signingKeyDir" . }}
 {{- $registryPath := include "gatekeeper.registryPath" . }}
-{{- $keygen := include "gatekeeper.keygen" . }}
-{{- $keys := or $keygen .Values.signingKeys.existingSecret }}
-{{- if and $keygen (gt (int .Values.deployment.replicas) 1) }}
-{{- fail "gatekeeper: each replica would generate its own signing key; set signingKeys.existingSecret for deployment.replicas > 1" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,15 +8,9 @@ metadata:
     {{- include "gatekeeper.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.deployment.replicas }}
-  {{- if $keygen }}
-  # Each pod generates its own signing key: never two behind the Service.
-  strategy:
-    type: Recreate
-  {{- else }}
   {{- with .Values.deployment.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
-  {{- end }}
   {{- end }}
   selector:
     matchLabels:
@@ -32,7 +21,7 @@ spec:
         {{- include "gatekeeper.labels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- /* The values, not the Secret: the Fernet keys it generates hold for the release. */}}
+        {{- /* The values, not the Secrets: the keys they generate hold for the release. */}}
         checksum/secret: {{ .Values.secret | toJson | sha256sum }}
         checksum/registry: {{ include (print $.Template.BasePath "/registry-secret.yaml") . | sha256sum }}
         {{- with .Values.deployment.podAnnotations }}
@@ -48,24 +37,6 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.deployment.terminationGracePeriodSeconds }}
-      {{- if $keygen }}
-      initContainers:
-        # Writes active.pem if absent (the compose gatekeeper-keygen one-shot).
-        - name: keygen
-          image: {{ include "gatekeeper.image" . | quote }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["python", "scripts/keygen.py"]
-          env:
-            - name: SIGNING_KEY_DIR
-              value: {{ $keyDir | quote }}
-          resources:
-            {{- toYaml .Values.container.resources | nindent 12 }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          volumeMounts:
-            - name: signing-keys
-              mountPath: {{ $keyDir }}
-      {{- end }}
       containers:
         - name: gatekeeper
           image: {{ include "gatekeeper.image" . | quote }}
@@ -100,23 +71,16 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
-            {{- if $keys }}
             - name: signing-keys
               mountPath: {{ $keyDir }}
               readOnly: true
-            {{- end }}
             - name: service-registry
               mountPath: {{ dir $registryPath }}
               readOnly: true
       volumes:
-        {{- if .Values.signingKeys.existingSecret }}
         - name: signing-keys
           secret:
-            secretName: {{ .Values.signingKeys.existingSecret }}
-        {{- else if $keygen }}
-        - name: signing-keys
-          emptyDir: {}
-        {{- end }}
+            secretName: {{ .Values.signingKeys.existingSecret | default (include "gatekeeper.child" (dict "root" . "suffix" "signing")) }}
         - name: service-registry
           secret:
             secretName: {{ .Values.serviceRegistry.existingSecret | default (include "gatekeeper.child" (dict "root" . "suffix" "registry")) }}

@@ -177,9 +177,11 @@ def test_gatekeeper_values_come_from_the_topology(project: Path) -> None:
     assert data["INTERNAL_TOKEN_AUDIENCE"] == "forge-services"
     assert all(isinstance(v, str) for v in data.values())
     assert values["container"]["port"] == 5000
-    assert values["signingKeys"] == {"generate": True, "existingSecret": ""}
-    # the backend charts' routes name these Middlewares
+    # the chart's Secret holds the signing key unless an existing one is named
+    assert values["signingKeys"] == {"existingSecret": ""}
+    # the backend charts' routes name these Middlewares; rendered once Traefik's CRDs are there
     assert values["authMiddlewares"]["enabled"] is True
+    assert values["authMiddlewares"]["force"] is False
     (route,) = values["ingressRoute"]["routes"]
     hosts, paths = route["match"].split(" && ")
     assert hosts == "(Host(`shop.example.com`) || Host(`admin.shop.example.com`))"

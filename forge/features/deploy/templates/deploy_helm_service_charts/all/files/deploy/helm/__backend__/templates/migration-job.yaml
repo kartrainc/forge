@@ -78,13 +78,23 @@ spec:
                 echo "waiting for the database of {{ $urlEnv }}"
                 sleep 2
               done
-          {{- if $role }}
+          {{- /* a third-party image: only the URL it connects with, the owner's under migration.dbAppRole */}}
           env:
+            - name: {{ $urlEnv }}
+              valueFrom:
+                secretKeyRef:
+                  {{- if $m.dbAppRole }}
+                  name: {{ include "svc.child" (dict "root" $ "suffix" "migrate-owner") }}
+                  key: {{ $urlEnv }}
+                  {{- else }}
+                  name: {{ include "svc.migrateSecretName" $ }}
+                  key: {{ $urlEnv }}
+                  optional: {{ not $.Values.externalSecret.enabled }}
+                  {{- end }}
+            {{- if $role }}
             - name: APP_DB_ROLE
               value: {{ $m.dbAppRole | quote }}
-          {{- end }}
-          envFrom:
-            {{- include "svc.migrateEnvFrom" $ | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- toYaml $.Values.securityContext | nindent 12 }}
         {{- end }}

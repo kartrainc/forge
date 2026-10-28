@@ -46,9 +46,8 @@ securityContext:
       - ALL
 
 deployment:
-  # More than one needs signingKeys.existingSecret: generated keys differ per pod.
+  # Every replica signs with the same key (signingKeys).
   replicas: 1
-  # Recreate instead while the keys are generated, so two pods never sign with different keys.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -138,7 +137,8 @@ secret:
     KC_ADMIN_USER: "admin"
     KC_ADMIN_PASSWORD: "CHANGEME"
     # Fernet keys (32 bytes, URL-safe base64). "" generates one at install and keeps it across upgrades; the compose
-    # dev keys are refused.
+    # dev keys are refused. Kept through lookup: a render without cluster access (helm template, Argo CD) generates
+    # new ones each time, so set them there (Flux installs for real).
     SESSION_FERNET_KEY: ""
     DELEGATION_GRANT_FERNET_KEY: ""
 
@@ -152,11 +152,11 @@ externalSecret:
   data: []
   dataFrom: []
 
-# The ES256 keys internal tokens are signed with, at SIGNING_KEY_DIR. generate: a keygen init container writes one
-# per pod into an emptyDir. existingSecret: a Secret holding active.pem (and retiring.pem, pending.pem when
-# rotating), shared by every replica.
+# The ES256 keys internal tokens are signed with, mounted at SIGNING_KEY_DIR by every replica: the Secret
+# {{ service.name }}-signing, its active.pem generated at install and kept across upgrades (like the Fernet keys, so set
+# existingSecret where the chart renders without cluster access), or existingSecret: a Secret of yours holding active.pem
+# (and retiring.pem, pending.pem when rotating).
 signingKeys:
-  generate: true
   existingSecret: ""
 
 # The S2S client registry at SERVICE_REGISTRY_PATH: files/service_registry.yaml, or a Secret of yours with the key
@@ -165,9 +165,12 @@ serviceRegistry:
   existingSecret: ""
 
 # The Traefik Middlewares the backend charts' routes use: {{ service.name }}-auth (ForwardAuth to /auth),
-# {{ service.name }}-strip-api-key and {{ service.name }}-untrusted-headers.
+# {{ service.name }}-strip-api-key and {{ service.name }}-untrusted-headers. Rendered when the cluster has Traefik's
+# Middleware CRD, with this chart's ingressRoute, or with force (helm template without --api-versions
+# traefik.io/v1alpha1/Middleware).
 authMiddlewares:
   enabled: true
+  force: false
   clusterDomain: cluster.local
   # What /auth sets on the forwarded request.
   authResponseHeaders:

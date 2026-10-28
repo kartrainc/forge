@@ -29,6 +29,11 @@ type RedisResponseCacheStore struct {
 func NewRedisResponseCacheStore(rawURL string) (*RedisResponseCacheStore, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
+		// url.Error quotes the whole url, password included
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return nil, fmt.Errorf("invalid redis url: %w", urlErr.Err)
+		}
 		return nil, err
 	}
 	options, err := redis.ParseURL(rawURL)

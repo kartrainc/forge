@@ -23,3 +23,13 @@ supported = true
 # The TMS outbox relay opens a Redis connection at startup (lifecycle.py),
 # so the service must wait for Redis to be healthy or it crash-loops on boot.
 requires_services = ["redis"]
+
+# What config/production.yaml reads through ${REDIS_URL} and ${KEYCLOAK_ADMIN_*}, which APP__TMS__* override, from
+# the redis and keycloak charts of the per-service Helm layout: their Services and placeholder credentials.
+[template.infra_env.redis]
+APP__TMS__REDIS_URL = "redis://redis:6379"
+
+[template.infra_env.keycloak]
+APP__TMS__KEYCLOAK_ADMIN_URL = "http://keycloak:8080"
+APP__TMS__KEYCLOAK_ADMIN_USER = "admin"
+APP__TMS__KEYCLOAK_ADMIN_PASSWORD = "CHANGEME"

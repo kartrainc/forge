@@ -107,9 +107,12 @@ def test_switching_to_service_charts_on_update_brings_their_files(
 
         helm = root / "deploy" / "helm"
         role_script = (root / "deploy" / "compose" / "db-app-role.sh").read_bytes()
+        # the bytes the chart mounts: read_text would turn Windows' CRLF into LF
         registry = (
-            root / "deploy" / "infra" / "gatekeeper" / "secrets" / "service_registry.yaml"
-        ).read_text(encoding="utf-8")
+            (root / "deploy" / "infra" / "gatekeeper" / "secrets" / "service_registry.yaml")
+            .read_bytes()
+            .decode()
+        )
         charts = sorted(p.name for p in helm.iterdir() if (p / "Chart.yaml").is_file())
         rendered = {chart: _render(helm / chart) for chart in charts}
         for backend in ("api", "orders"):

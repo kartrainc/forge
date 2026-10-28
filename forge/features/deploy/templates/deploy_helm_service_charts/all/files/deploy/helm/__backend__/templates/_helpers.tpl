@@ -12,8 +12,10 @@
 {{- end -}}
 
 {{/* secret.stringData plus a random value for each secret.generate key it leaves out, the installed release's value
-     when there is one. As JSON. */}}
+     when there is one. As JSON. Computed once per render, kept on the root context: the release's Secret and the
+     migration's copy carry the same values. */}}
 {{- define "svc.secretData" -}}
+{{- if not (hasKey . "svcSecretData") -}}
 {{- $data := deepCopy (.Values.secret.stringData | default dict) -}}
 {{- $existing := dig "data" (dict) (lookup "v1" "Secret" .Release.Namespace (include "svc.child" (dict "root" . "suffix" "secret"))) -}}
 {{- range $key := .Values.secret.generate | default list -}}
@@ -21,7 +23,9 @@
 {{- $_ := set $data $key (index $existing $key | default "" | b64dec | default (randAlphaNum 64)) -}}
 {{- end -}}
 {{- end -}}
-{{- toJson $data -}}
+{{- $_ := set . "svcSecretData" (toJson $data) -}}
+{{- end -}}
+{{- index . "svcSecretData" -}}
 {{- end -}}
 
 {{- define "svc.selectorLabels" -}}
@@ -140,18 +144,23 @@ dataFrom:
 {{- end }}
 {{- end -}}
 
+{{/* The Secret the migration reads the service's env from: the hook copy, or, with secret.enabled false and no
+     externalSecret, the Secret of the release's name provided outside the chart. */}}
+{{- define "svc.migrateSecretName" -}}
+{{- if or .Values.secret.enabled .Values.externalSecret.enabled -}}
+{{- include "svc.child" (dict "root" . "suffix" "migrate-secret") -}}
+{{- else -}}
+{{- include "svc.child" (dict "root" . "suffix" "secret") -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The migration's env sources: the service's env from the hook copies, and, under migration.dbAppRole, the
      owner's credentials over the runtime role's. */}}
 {{- define "svc.migrateEnvFrom" -}}
 - configMapRef:
     name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
 - secretRef:
-    {{- if or .Values.secret.enabled .Values.externalSecret.enabled }}
-    name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
-    {{- else }}
-    # secret.enabled false: the Secret of that name provided outside the chart
-    name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
-    {{- end }}
+    name: {{ include "svc.migrateSecretName" . }}
     {{- /* an ExternalSecret's copy appears once synced: the pod waits for it */}}
     optional: {{ not .Values.externalSecret.enabled }}
 {{- with .Values.container.envFrom }}

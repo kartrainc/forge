@@ -905,23 +905,20 @@ def _apply_project_scope(
         ) from exc
 
 
-def copy_helm_chart_files(
-    config: ProjectConfig,
-    option_values: dict[str, Any],
-    project_root: Path,
-    collector: ProvenanceCollector,
-) -> None:
-    """Copy what the Helm charts read with ``.Files.Get`` from where compose has it.
+def helm_chart_files(
+    config: ProjectConfig, option_values: dict[str, Any], project_root: Path
+) -> dict[str, bytes]:
+    """What the Helm charts read with ``.Files.Get``, by project path, from where compose has it.
 
     The umbrella chart takes the Keycloak realm and the runtime-role script
     under ``deploy/helm/files/``; deploy.helm_layout=per_service puts the realm
     in the keycloak chart, the script in each backend chart whose migration
     creates a runtime role, and the S2S client registry in the gatekeeper chart.
-    Run once the realm and the registry are rendered, by generation and by the
+    Read once the realm and the registry are rendered, by generation and by the
     update.
     """
     if option_values.get("deploy.target") != "kubernetes":
-        return
+        return {}
     from forge.config._topology import db_app_role  # noqa: PLC0415
 
     per_service = option_values.get("deploy.helm_layout") == "per_service"
@@ -943,19 +940,32 @@ def copy_helm_chart_files(
             ["gatekeeper"] if per_service else [],
         ),
     )
+    files: dict[str, bytes] = {}
     for src, charts in copies:
         if not src.is_file():
             continue
+        body = (
+            helm_realm_json(config, src.read_text(encoding="utf-8")).encode()
+            if src.suffix == ".json"
+            else src.read_bytes()
+        )
         for chart in charts:
-            dst = project_root / "deploy" / "helm" / chart / "files" / src.name
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if src.suffix == ".json":
-                dst.write_text(
-                    helm_realm_json(config, src.read_text(encoding="utf-8")), encoding="utf-8"
-                )
-            else:
-                dst.write_bytes(src.read_bytes())
-            collector.record(dst, origin="base-template")
+            files[(Path("deploy") / "helm" / chart / "files" / src.name).as_posix()] = body
+    return files
+
+
+def copy_helm_chart_files(
+    config: ProjectConfig,
+    option_values: dict[str, Any],
+    project_root: Path,
+    collector: ProvenanceCollector,
+) -> None:
+    """Write :func:`helm_chart_files` into a freshly generated project."""
+    for rel, body in helm_chart_files(config, option_values, project_root).items():
+        dst = project_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(body)
+        collector.record(dst, origin="base-template")
 
 
 def _finalize(

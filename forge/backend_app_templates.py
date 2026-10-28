@@ -36,7 +36,8 @@ self-contained render). Plugins can also register at runtime via
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,6 +88,10 @@ class BackendApplicationTemplate:
             own (e.g. Node ``http-service``): no database, migrate step or
             DB URL is wired for it, and its template renders with
             ``use_database=false``.
+        infra_env: The env the variant reads from an infra chart of the
+            per-service Helm layout, per chart (``redis``, ``keycloak``):
+            env name to its value against that chart's Service, credentials
+            as ``CHANGEME``. A ``redis`` URL gets the chart's password.
     """
 
     language: LanguageKey
@@ -97,6 +102,7 @@ class BackendApplicationTemplate:
     base_template_dir: str = ""
     requires_services: tuple[str, ...] = ()
     uses_database: bool = True
+    infra_env: Mapping[str, Mapping[str, str]] = field(default_factory=dict, hash=False)
 
 
 BACKEND_APPLICATION_TEMPLATES: dict[tuple[LanguageKey, str], BackendApplicationTemplate] = {}
@@ -225,6 +231,9 @@ def _discover_manifests() -> None:
             # A string such as "false" would read as true and wire a database: skip the
             # manifest like any other malformed one rather than guess.
             continue
+        infra_env = template.get("infra_env", {})
+        if not _is_infra_env(infra_env):
+            continue
         register_backend_application_template(
             BackendApplicationTemplate(
                 language=language,
@@ -235,8 +244,17 @@ def _discover_manifests() -> None:
                 base_template_dir=str(template.get("base", "")),
                 requires_services=requires_services,
                 uses_database=uses_database,
+                infra_env=infra_env,
             )
         )
+
+
+def _is_infra_env(value: object) -> bool:
+    """Whether a manifest's ``infra_env`` maps each chart to a table of string env values."""
+    return isinstance(value, dict) and all(
+        isinstance(env, dict) and all(isinstance(v, str) for v in env.values())
+        for env in value.values()
+    )
 
 
 def _discover() -> None:

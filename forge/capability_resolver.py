@@ -932,6 +932,7 @@ _INFRA_CHART_NAMES = {
             "gatekeeper-ratelimit",
             "gatekeeper-registry",
             "gatekeeper-secret",
+            "gatekeeper-signing",
             "gatekeeper-strip-api-key",
             "gatekeeper-untrusted-headers",
         ),

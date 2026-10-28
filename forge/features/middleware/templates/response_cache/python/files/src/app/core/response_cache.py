@@ -14,8 +14,19 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+
+def _redacted(url: str) -> str:
+    """``url`` with its password masked, for logs."""
+    parts = urlsplit(url)
+    if parts.password is None:
+        return url
+    userinfo, host = parts.netloc.rsplit("@", 1)
+    user = userinfo.split(":", 1)[0]
+    return parts._replace(netloc=f"{user}:***@{host}").geturl()
 
 
 def setup_response_cache() -> None:
@@ -39,7 +50,7 @@ def setup_response_cache() -> None:
 
             client = from_url(url, encoding="utf-8", decode_responses=True)
             FastAPICache.init(RedisBackend(client), prefix=prefix)
-            logger.info("response cache initialized (redis @ %s)", url)
+            logger.info("response cache initialized (redis @ %s)", _redacted(url))
             return
         except ImportError as e:
             logger.warning("redis backend unavailable (%s); falling back to in-memory", e)

@@ -71,9 +71,9 @@ secret checks.
 | --- | --- | --- |
 | `GATEKEEPER_CLIENT_SECRET` | Random string, 32+ chars | Must not be empty or `super-secret-string` |
 | `COOKIE_SECURE` | `true` | Defaults to `true`; set `false` only for non-HTTPS dev envs |
-| `SESSION_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Required for BFF session encryption. The per-service `gatekeeper` chart generates it when left empty and keeps it across upgrades, except when rendered without cluster access (`helm template`, Argo CD) |
+| `SESSION_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Required for BFF session encryption. The per-service `gatekeeper` chart generates it when left empty and keeps it across upgrades through `lookup`. Rendered without cluster access (`helm template`, Argo CD), it is regenerated on every render and sessions are lost: set it there (Flux's helm-controller installs for real, so `lookup` works) |
 | `DELEGATION_GRANT_FERNET_KEY` | Same as above | Required for delegation grants. Generated like `SESSION_FERNET_KEY` |
-| `SIGNING_KEY_DIR` | Path to directory containing `.pem` files | Gatekeeper keygen init-container creates these |
+| `SIGNING_KEY_DIR` | Path to directory containing `.pem` files | Compose: the keygen one-shot creates `active.pem`. The per-service `gatekeeper` chart mounts its `gatekeeper-signing` Secret there (an ES256 `active.pem` generated at install and kept like the Fernet keys, so every replica signs with one key) or `signingKeys.existingSecret`; set the latter where the chart renders without cluster access |
 
 ### MCP-enabled projects
 

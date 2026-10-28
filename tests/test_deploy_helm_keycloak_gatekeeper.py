@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 import forge
 from forge.config import BackendConfig, BackendLanguage, FrontendConfig, ProjectConfig
@@ -305,7 +307,7 @@ def test_the_admin_console_stays_off_the_public_route(helm: Path) -> None:
         assert not admin.search(public), public
 
 
-_PRODUCTION = (
+_PRODUCTION_BASE = (
     "--set",
     "mode=production",
     "--set",
@@ -315,12 +317,42 @@ _PRODUCTION = (
     "--set",
     "realm.clientSecrets.gatekeeper=gk-s3cret",
 )
+# the S2S clients of auth.service_discovery
+_SERVICE_CLIENT_SECRETS = {"svc-api": "api-s3cret", "svc-billing": "billing-s3cret"}
+_PRODUCTION = (
+    *_PRODUCTION_BASE,
+    *[
+        arg
+        for client, secret in _SERVICE_CLIENT_SECRETS.items()
+        for arg in ("--set", f"realm.clientSecrets.{client}={secret}")
+    ],
+)
+
+
+def test_production_mode_needs_every_confidential_clients_secret(helm: Path) -> None:
+    chart = helm / "keycloak"
+    dev = _realm(_render(chart))
+    confidential = {c["clientId"] for c in dev["clients"] if not c.get("publicClient")}
+    assert confidential == {"gatekeeper", *_SERVICE_CLIENT_SECRETS}
+    # their dev secrets are derivable: never imported in production
+    err = _refused(chart, *_PRODUCTION_BASE)
+    assert (
+        "keycloak: mode production needs realm.clientSecrets.svc-api, "
+        "realm.clientSecrets.svc-billing set" in err
+    )
+    err = _refused(chart, *_PRODUCTION, "--set", "realm.clientSecrets.svc-billing=CHANGEME")
+    assert "keycloak: mode production needs realm.clientSecrets.svc-billing set" in err
+    realm = _realm(_render(chart, *_PRODUCTION))
+    assert {c: _client(realm, c)["secret"] for c in confidential} == {
+        "gatekeeper": "gk-s3cret",
+        **_SERVICE_CLIENT_SECRETS,
+    }
 
 
 def test_production_mode_needs_a_hostname(helm: Path) -> None:
     chart = helm / "keycloak"
     assert "hostname is required in mode production" in _refused(
-        chart, "--set", "mode=production", "--set", "hostname="
+        chart, *_PRODUCTION, "--set", "hostname="
     )
     assert "mode must be development or production" in _refused(chart, "--set", "mode=prod")
     container = _container(_render(chart, *_PRODUCTION), "keycloak")
@@ -478,17 +510,32 @@ def _compose_auth_response_headers() -> list[str]:
     return label.removeprefix(prefix).split(",")
 
 
+# What a cluster with Traefik's CRDs reports; helm template has no cluster to ask.
+_TRAEFIK = ("--api-versions", "traefik.io/v1alpha1/Middleware")
+_AUTH_MIDDLEWARES = {"gatekeeper-auth", "gatekeeper-strip-api-key", "gatekeeper-untrusted-headers"}
+
+
+def _middlewares(docs: list[dict]) -> set[str]:
+    return {d["metadata"]["name"] for d in docs if d["kind"] == "Middleware"}
+
+
+def test_the_auth_middlewares_need_traefik(helm: Path) -> None:
+    chart = helm / "gatekeeper"
+    # a cluster without Traefik's CRDs would refuse the install
+    assert not _middlewares(_render(chart))
+    assert _middlewares(_render(chart, *_TRAEFIK)) == _AUTH_MIDDLEWARES
+    # this chart's own route needs Traefik anyway
+    assert _middlewares(_render(chart, "--set", "ingressRoute.enabled=true")) >= _AUTH_MIDDLEWARES
+    assert _middlewares(_render(chart, "--set", "authMiddlewares.force=true")) == _AUTH_MIDDLEWARES
+    for args in (_TRAEFIK, ("--set", "authMiddlewares.force=true")):
+        assert not _middlewares(_render(chart, *args, "--set", "authMiddlewares.enabled=false"))
+
+
 def test_the_auth_middlewares(helm: Path) -> None:
     chart = helm / "gatekeeper"
-    off = _render(chart, "--set", "authMiddlewares.enabled=false")
-    assert not [d for d in off if d["kind"] == "Middleware"]
-    docs = _render(chart, namespace="platform")
+    docs = _render(chart, *_TRAEFIK, namespace="platform")
     middlewares = {d["metadata"]["name"]: d["spec"] for d in docs if d["kind"] == "Middleware"}
-    assert set(middlewares) == {
-        "gatekeeper-auth",
-        "gatekeeper-strip-api-key",
-        "gatekeeper-untrusted-headers",
-    }
+    assert set(middlewares) == _AUTH_MIDDLEWARES
     headers = _compose_auth_response_headers()
     assert middlewares["gatekeeper-auth"] == {
         "forwardAuth": {
@@ -513,8 +560,15 @@ def test_every_middleware_a_route_names_is_rendered(helm: Path) -> None:
     rendered: set[tuple[str, str]] = set()
     referenced: dict[tuple[str, str], str] = {}
     routers: set[str] = set()
+    # the gatekeeper's Middlewares with its own route off, as installed on a cluster with Traefik
+    for doc in _render(helm / "gatekeeper", *_TRAEFIK, namespace=namespace):
+        if doc["kind"] == "Middleware":
+            rendered.add((doc["metadata"].get("namespace", namespace), doc["metadata"]["name"]))
+    assert {name for _, name in rendered} == _AUTH_MIDDLEWARES
     for chart in sorted(p for p in helm.iterdir() if (p / "Chart.yaml").is_file()):
-        for doc in _render(chart, "--set", "ingressRoute.enabled=true", namespace=namespace):
+        for doc in _render(
+            chart, *_TRAEFIK, "--set", "ingressRoute.enabled=true", namespace=namespace
+        ):
             meta = doc["metadata"]
             if doc["kind"] == "Middleware":
                 rendered.add((meta.get("namespace", namespace), meta["name"]))
@@ -552,60 +606,72 @@ def test_the_browser_endpoints_are_routed_on_the_app_hosts(helm: Path) -> None:
     ]
 
 
-def test_signing_keys_from_an_existing_secret_replace_the_keygen(helm: Path) -> None:
+_SIGNING_MOUNT = {
+    "name": "signing-keys",
+    "mountPath": "/run/secrets/gatekeeper-signing",
+    "readOnly": True,
+}
+
+
+def _signing_key(docs: list[dict]) -> str:
+    secret = _get(docs, "Secret", "gatekeeper-signing")
+    assert set(secret["data"]) == {"active.pem"}
+    return base64.b64decode(secret["data"]["active.pem"]).decode()
+
+
+def test_the_signing_key_is_a_chart_secret_every_replica_mounts(helm: Path) -> None:
     chart = helm / "gatekeeper"
-    mount = {
-        "name": "signing-keys",
-        "mountPath": "/run/secrets/gatekeeper-signing",
-        "readOnly": True,
-    }
-    pod = _pod(_render(chart), "gatekeeper")
-    (keygen,) = pod["initContainers"]
-    assert keygen["command"] == ["python", "scripts/keygen.py"]
-    assert keygen["volumeMounts"] == [
-        {"name": "signing-keys", "mountPath": "/run/secrets/gatekeeper-signing"}
-    ]
+    docs = _render(chart)
+    pem = _signing_key(docs)
+    # what the gatekeeper's FileKeyRing loads: an unencrypted ECDSA P-256 private key
+    key = serialization.load_pem_private_key(pem.encode(), password=None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    assert isinstance(key.curve, ec.SECP256R1)
+    pod = _pod(docs, "gatekeeper")
+    assert "initContainers" not in pod
     volumes = {v["name"]: v for v in pod["volumes"]}
-    assert volumes["signing-keys"] == {"name": "signing-keys", "emptyDir": {}}
-    assert mount in pod["containers"][0]["volumeMounts"]
-    assert "each replica would generate its own signing key" in _refused(
-        chart, "--set", "deployment.replicas=2"
+    assert volumes["signing-keys"] == {
+        "name": "signing-keys",
+        "secret": {"secretName": "gatekeeper-signing"},
+    }
+    assert _SIGNING_MOUNT in pod["containers"][0]["volumeMounts"]
+    data = _get(docs, "ConfigMap", "gatekeeper-config")["data"]
+    assert data["SIGNING_KEY_DIR"] == _SIGNING_MOUNT["mountPath"]
+    # without a release to keep it from, every render generates another; the pods never roll for it
+    again = _render(chart)
+    assert _signing_key(again) != pem
+    assert (
+        _get(docs, "Deployment", "gatekeeper")["spec"]["template"]["metadata"]["annotations"]
+        == _get(again, "Deployment", "gatekeeper")["spec"]["template"]["metadata"]["annotations"]
     )
 
-    pod = _pod(
-        _render(
-            chart,
-            "--set",
-            "signingKeys.existingSecret=gatekeeper-keys",
-            "--set",
-            "deployment.replicas=2",
-        ),
-        "gatekeeper",
-    )
+
+def test_signing_keys_from_an_existing_secret(helm: Path) -> None:
+    docs = _render(helm / "gatekeeper", "--set", "signingKeys.existingSecret=gatekeeper-keys")
+    assert ("Secret", "gatekeeper-signing") not in _kinds(docs)
+    pod = _pod(docs, "gatekeeper")
     assert "initContainers" not in pod
     volumes = {v["name"]: v for v in pod["volumes"]}
     assert volumes["signing-keys"] == {
         "name": "signing-keys",
         "secret": {"secretName": "gatekeeper-keys"},
     }
-    assert mount in pod["containers"][0]["volumeMounts"]
+    assert _SIGNING_MOUNT in pod["containers"][0]["volumeMounts"]
 
 
-def test_generated_signing_keys_never_run_two_pods_at_once(helm: Path) -> None:
+def test_the_pods_roll_and_scale_with_one_signing_key(helm: Path) -> None:
     chart = helm / "gatekeeper"
-
-    def strategy(*args: str) -> dict:
-        return _get(_render(chart, *args), "Deployment", "gatekeeper")["spec"]["strategy"]
-
-    # two pods with different keys behind one Service: a token from one fails on the other
-    assert strategy() == {"type": "Recreate"}
-    assert strategy("--set", "deployment.strategy.type=RollingUpdate") == {"type": "Recreate"}
     configured = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))["deployment"][
         "strategy"
     ]
     assert configured["type"] == "RollingUpdate"
-    assert strategy("--set", "signingKeys.existingSecret=gatekeeper-keys") == configured
-    assert strategy("--set", "signingKeys.generate=false") == configured
+    for args in ((), ("--set", "signingKeys.existingSecret=gatekeeper-keys")):
+        docs = _render(chart, *args, "--set", "deployment.replicas=2")
+        deployment = _get(docs, "Deployment", "gatekeeper")
+        assert deployment["spec"]["strategy"] == configured
+        assert deployment["spec"]["replicas"] == 2
+        volumes = {v["name"]: v for v in _pod(docs, "gatekeeper")["volumes"]}
+        assert "secret" in volumes["signing-keys"]
 
 
 def test_the_service_registry_is_a_mounted_secret(helm: Path, tmp_path: Path) -> None:

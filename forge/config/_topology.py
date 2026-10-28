@@ -256,9 +256,9 @@ def compute_topology(
     # The Redis URLs each backend's fragments and app template default to, which a Redis with a password must
     # override, and the Keycloak admin access its app template reads from the env.
     for bc, be in zip(config.backends, backends, strict=True):
-        infra_env = _APP_TEMPLATE_INFRA_ENV.get((bc.language, bc.app_template or ""), {})
+        infra_env = _app_template_infra_env(bc)
         be["redis_env"] = (
-            _redis_env_defaults(plan, bc) | infra_env.get("redis", {})
+            _redis_env_defaults(plan, bc) | dict(infra_env.get("redis", {}))
             if "redis" in rendered_infra
             else {}
         )
@@ -408,19 +408,17 @@ def _redis_env_defaults(plan: ResolvedPlan | None, bc: BackendConfig) -> dict[st
     return env
 
 
-# What an app template reads from the redis and keycloak charts only through the env in production:
-# tenant-management-service's production.yaml resolves ${REDIS_URL} and ${KEYCLOAK_ADMIN_*}, which APP__TMS__*
-# override. The values are the charts' Services and placeholder credentials.
-_APP_TEMPLATE_INFRA_ENV: dict[tuple[BackendLanguage, str], dict[str, dict[str, str]]] = {
-    (BackendLanguage.PYTHON, "tenant-management-service"): {
-        "redis": {"APP__TMS__REDIS_URL": "redis://redis:6379"},
-        "keycloak": {
-            "APP__TMS__KEYCLOAK_ADMIN_URL": "http://keycloak:8080",
-            "APP__TMS__KEYCLOAK_ADMIN_USER": "admin",
-            "APP__TMS__KEYCLOAK_ADMIN_PASSWORD": "CHANGEME",
-        },
-    },
-}
+def _app_template_infra_env(bc: BackendConfig) -> Mapping[str, Mapping[str, str]]:
+    """What ``bc``'s app template reads from the redis and keycloak charts, as its template.toml declares."""
+    from forge.backend_app_templates import (  # noqa: PLC0415 — avoid config<->app_templates cycle
+        DEFAULT_BACKEND_TEMPLATE,
+        get_backend_application_template,
+    )
+
+    app_tmpl = get_backend_application_template(
+        bc.language, bc.app_template or DEFAULT_BACKEND_TEMPLATE
+    )
+    return app_tmpl.infra_env if app_tmpl else {}
 
 
 # Roles Postgres or CloudNativePG own, and the suffixes of the Secrets CloudNativePG names <cluster>-<suffix>.
