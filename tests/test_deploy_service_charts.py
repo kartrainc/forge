@@ -80,19 +80,59 @@ def test_one_chart_per_service_and_the_platform(per_service: Path) -> None:
     assert "CHARTS := platform $(SERVICES)" in makefile
 
 
-def test_a_backend_chart_carries_its_umbrella_workload(per_service: Path, umbrella: Path) -> None:
+def _assert_backends_carry_their_umbrella_workloads(per_service: Path, umbrella: Path) -> None:
     workloads = _values(umbrella / "deploy" / "helm" / "values.yaml")["workloads"]
     for name, workload in workloads.items():
         chart = _values(per_service / "deploy" / "helm" / name / "values.yaml")
         # the S2S client secret moves from env (a ConfigMap) to secretEnv (a Secret)
         secrets = {k: v for k, v in workload["env"].items() if k.endswith("_SECRET")}
         assert chart["env"] == {k: v for k, v in workload["env"].items() if k not in secrets}
-        assert chart["secretEnv"] == {**workload["secretEnv"], **secrets}
+        assert (chart["secretEnv"] or {}) == {**(workload["secretEnv"] or {}), **secrets}
         for key, value in workload.items():
             if key not in ("env", "secretEnv"):
                 assert chart[key] == value, f"{name}.{key}"
+        assert set(chart) - set(workload) <= {
+            "partOf",
+            "waitForPostgres",
+            "postgresImage",
+            "podSecurityContext",
+        }
         # the Service listens on containerPort: no second port value to drift from it
         assert "service" not in chart
+
+
+def test_a_backend_chart_carries_its_umbrella_workload(per_service: Path, umbrella: Path) -> None:
+    _assert_backends_carry_their_umbrella_workloads(per_service, umbrella)
+
+
+def test_a_backend_without_a_database_carries_its_umbrella_workload() -> None:
+    def gen(layout: str | None) -> Path:
+        options: dict[str, object] = {"deploy.target": "kubernetes"}
+        if layout:
+            options["deploy.helm_layout"] = layout
+        config = ProjectConfig(
+            project_name="capture",
+            backends=[
+                BackendConfig(name="store", language=BackendLanguage.NODE, server_port=8010),
+                BackendConfig(
+                    name="capture",
+                    language=BackendLanguage.NODE,
+                    app_template="http-service",
+                    server_port=8011,
+                ),
+            ],
+            options=options,
+        )
+        return generate(config, quiet=True, dry_run=True)
+
+    per_service = gen("per_service")
+    _assert_backends_carry_their_umbrella_workloads(per_service, gen(None))
+    capture = _values(per_service / "deploy" / "helm" / "capture" / "values.yaml")
+    assert "dbName" not in capture
+    assert capture["migrateCommand"] == []
+    assert not capture["secretEnv"]
+    platform = _values(per_service / "deploy" / "helm" / "platform" / "values.yaml")
+    assert platform["infra"]["databases"] == ["store"]
 
 
 def test_a_frontend_chart_carries_its_umbrella_frontend(per_service: Path, umbrella: Path) -> None:

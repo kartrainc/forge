@@ -52,9 +52,9 @@ ingress:
 infra:
   inCluster: false
 {%- if topology.render_postgres %}
-  # One DATABASE per backend, created on the in-cluster Postgres's first boot.
+  # One DATABASE per backend that has one, created on the in-cluster Postgres's first boot.
   databases:
-{%- for be in topology.backends %}
+{%- for be in topology.backends if be.uses_database | default(true) %}
     - {{ be.db_name }}
 {%- endfor %}
   postgres:

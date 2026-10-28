@@ -15,14 +15,18 @@ image:
   pullPolicy: IfNotPresent
 replicaCount: 2
 containerPort: {{ service.port }}
+{%- if service.uses_database | default(true) %}
 # The Postgres database this backend owns (matches the db_name in the DB URL
 # below); the platform chart's in-cluster Postgres creates it (infra.databases).
 dbName: {{ service.db_name }}
+{%- endif %}
 # A migration runs as a pre-install/pre-upgrade Helm hook Job before the
 # Deployment rolls (templates/migrate-job.yaml).
 hasMigrations: {{ "true" if service.has_migrations else "false" }}
 migrateCommand:
-{%- if service.language == "python" %}
+{%- if not (service.uses_database | default(true)) %}
+  []
+{%- elif service.language == "python" %}
   ["python", "-m", "app", "db", "upgrade"]
 {%- elif service.language == "node" %}
   ["npx", "prisma", "migrate", "deploy"]
@@ -98,6 +102,7 @@ env:
 # set secretEnv: null and wire an ExternalSecret (see templates/secret.yaml);
 # an empty map does not remove these defaults, Helm merges it into them.
 secretEnv:
+{%- if service.uses_database | default(true) %}
 {%- if service.language == "python" %}
   APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- elif service.language == "node" %}
@@ -105,6 +110,7 @@ secretEnv:
   DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- elif service.language in ("rust", "go") %}
   DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- endif %}
 {%- endif %}
 {%- for k, v in service.synthesis_env.items() if k.endswith("_SECRET") %}
   # the S2S client secret the in-cluster gatekeeper knows; replace it per environment
