@@ -24,7 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `values-$(ENV).yaml` when present.
 - A backend's migration Job, while `migration.waitForPostgres` (`postgres-rw`) resolves, waits until its own DB URL
   (`migration.databaseUrlEnv`) connects and, with a managed runtime role, until that role exists, for at most
-  `migration.waitTimeoutSeconds` (180). Under `database.rls_app_role` it migrates as the owner, then grants the role
+  `migration.waitTimeoutSeconds` (120); the Job retries once and stops at `migration.activeDeadlineSeconds` (280),
+  within the default 5m hook timeout. Under `database.rls_app_role` it migrates as the owner, then grants the role
   the backend serves as its tables. `migration.dbAppRoleManaged` is `true` with the postgres chart, which creates that
   role; against another Postgres set it `false`, and `db-app-role.sh` creates the role with `migration.ownerSecret`'s
   `APP_DB_PASSWORD`.
