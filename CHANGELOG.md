@@ -360,6 +360,9 @@ Each safeguard below is an option, so a project can choose another strategy.
 - A Node service's `docker-compose.yaml` and `docker-compose.fragment.yaml`
   set `APP__SERVER__PORT`, which its config reads. With `PORT`, a service on a
   port other than 5000 still listened on 5000.
+- Ignore Finder's `.DS_Store` in the generator fingerprint and the quality
+  scans, as the built package does. Opening an installed generator in Finder
+  made it fail "generator differs from recorded source".
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth
