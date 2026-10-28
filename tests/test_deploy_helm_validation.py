@@ -350,16 +350,17 @@ def test_the_platform_routes_each_host_to_the_services() -> None:
     docs = _template(helm / "platform", *_GATEKEEPER_ON)
     ingresses = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Ingress"}
     routes = {
-        name: (rule["host"], [(p["backend"]["service"]["name"], p["backend"]["service"]["port"]["number"])
+        name: (rule["host"], [(p["backend"]["service"]["name"], p["backend"]["service"]["port"])
                               for p in rule["http"]["paths"]])
         for name, ing in ingresses.items()
         for rule in ing["spec"]["rules"]
     }
     assert routes == {
-        "rel-frontend-api": ("shop.example.com", [("api", 8001)]),
-        "rel-frontend-web": ("shop.example.com", [("frontend", 80)]),
-        "rel-admin-api": ("admin.shop.example.com", [("api", 8001)]),
-        "rel-admin-web": ("admin.shop.example.com", [("admin", 80)]),
+        # by the Service's port name, so no release repeats a service's port
+        "rel-frontend-api": ("shop.example.com", [("api", {"name": "http"})]),
+        "rel-frontend-web": ("shop.example.com", [("frontend", {"name": "http"})]),
+        "rel-admin-api": ("admin.shop.example.com", [("api", {"name": "http"})]),
+        "rel-admin-web": ("admin.shop.example.com", [("admin", {"name": "http"})]),
     }
     assert "rewrite-target" in str(ingresses["rel-admin-api"]["metadata"].get("annotations"))
     assert "annotations" not in ingresses["rel-admin-web"]["metadata"]
@@ -411,7 +412,7 @@ def test_a_backend_release_owns_its_config_and_rolls_when_it_changes() -> None:
     assert env_changed["checksum/secret"] == base["checksum/secret"]
     assert secret_changed["checksum/secret"] != base["checksum/secret"]
 
-    # an external Secret (secretEnv: {}) is what the migration reads
+    # an external Secret (secretEnv: null) is what the migration reads
     external = render("--set", "secretEnv=null")
     assert ("Secret", "user-api-secret") not in external
     assert ("Secret", "user-api-migrate-secret") not in external
@@ -420,3 +421,13 @@ def test_a_backend_release_owns_its_config_and_rolls_when_it_changes() -> None:
         "user-api-migrate-config",
         "user-api-secret",
     ]
+    # an empty map is merged into the defaults and removes nothing
+    assert ("Secret", "user-api-secret") in render("--set-json", "secretEnv={}")
+
+    # the migration waits for the in-cluster Postgres when its host resolves, and never with ""
+    (wait,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]["initContainers"]
+    assert "getent hosts postgres" in wait["command"][-1]
+    # the pod runs as a uid without a passwd entry: pg_isready needs a user to make an attempt
+    assert "pg_isready -h postgres -p 5432 -U postgres" in wait["command"][-1]
+    no_wait = render("--set", "waitForPostgres=")[("Job", "user-api-migrate")]
+    assert "initContainers" not in no_wait["spec"]["template"]["spec"]

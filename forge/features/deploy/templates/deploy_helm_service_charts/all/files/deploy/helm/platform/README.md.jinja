@@ -20,3 +20,9 @@ Install this chart first, then the services (`make helm-install`), each with its
 
 Every `values.yaml` is forge-owned (re-rendered on `forge --update`, three-way merged); keep environment values in
 separate files.
+
+A service's port is its forge `server_port`: its siblings call it and the platform's Ingress routes to it by name, so
+change it in forge and update, not in one release's values.
+
+A service removed from the project leaves its chart on disk and its release installed, and `make helm-uninstall` no
+longer lists it: run `helm uninstall <service>` and delete `deploy/helm/<service>/`.

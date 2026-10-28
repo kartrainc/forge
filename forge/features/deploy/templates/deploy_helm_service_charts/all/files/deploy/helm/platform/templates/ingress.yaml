@@ -4,7 +4,7 @@
 {{- if .Values.ingress.enabled }}
 {{- $hosts := list }}
 {{- range .Values.ingress.frontends }}
-{{- $hosts = append $hosts (dict "name" .name "host" (.host | default (ternary $.Values.ingress.host (printf "%s.%s" .name $.Values.ingress.host) .primary)) "service" .name "port" .port) }}
+{{- $hosts = append $hosts (dict "name" .name "host" (.host | default (ternary $.Values.ingress.host (printf "%s.%s" .name $.Values.ingress.host) .primary)) "service" .name) }}
 {{- end }}
 {{- if not $hosts }}
 {{- $hosts = list (dict "name" "api" "host" .Values.ingress.host) }}
@@ -35,7 +35,11 @@ spec:
               service:
                 name: {{ .service }}
                 port:
+                  {{- if .port }}
                   number: {{ .port }}
+                  {{- else }}
+                  name: http
+                  {{- end }}
           {{- end }}
 {{- end }}
 {{- if .service }}
@@ -58,7 +62,7 @@ spec:
               service:
                 name: {{ .service }}
                 port:
-                  number: {{ .port }}
+                  name: http
 {{- end }}
 {{- end }}
 {{- end }}

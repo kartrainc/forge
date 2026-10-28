@@ -12,6 +12,6 @@ spec:
     {{- include "svc.selector" . | nindent 4 }}
   ports:
     - name: http
-      port: {{ .Values.service.port }}
+      port: {{ .Values.containerPort }}
       targetPort: http
       protocol: TCP

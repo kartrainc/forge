@@ -13,7 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   datastores, Keycloak and gatekeeper. A service rolls out, fails its migration and rolls back alone. Its Service is
   named after it on its own port, so the `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve in the
   cluster as in compose. Each chart's values carry its umbrella workload entry, except that the S2S client secret
-  (`GATEKEEPER_CLIENT_SECRET`) is in `secretEnv`, so it lands in the Secret rather than the ConfigMap.
+  (`GATEKEEPER_CLIENT_SECRET`) is in `secretEnv`, so it lands in the Secret rather than the ConfigMap. A service's
+  Service listens on its `containerPort` and the platform's Ingress routes to the port named `http`, so no release
+  repeats a port. The migrate Job waits for the platform's in-cluster Postgres when `postgres` resolves and skips the
+  wait otherwise. `secretEnv: null`, not `{}`, drops a chart's Secret for an external one.
 - Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
   entry exposed to their Jinja as `service`.
 

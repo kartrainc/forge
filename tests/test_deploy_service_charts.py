@@ -91,8 +91,8 @@ def test_a_backend_chart_carries_its_umbrella_workload(per_service: Path, umbrel
         for key, value in workload.items():
             if key not in ("env", "secretEnv"):
                 assert chart[key] == value, f"{name}.{key}"
-        # the Service on the service's own port: http://<name>:<port> resolves as in compose
-        assert chart["service"] == {"port": workload["containerPort"]}
+        # the Service listens on containerPort: no second port value to drift from it
+        assert "service" not in chart
 
 
 def test_a_frontend_chart_carries_its_umbrella_frontend(per_service: Path, umbrella: Path) -> None:
@@ -124,9 +124,10 @@ def test_a_frontend_chart_carries_its_umbrella_frontend(per_service: Path, umbre
 
 def test_the_platform_routes_every_service_and_creates_every_database(per_service: Path) -> None:
     platform = _values(per_service / "deploy" / "helm" / "platform" / "values.yaml")
-    assert [(p["service"], p["port"]) for p in platform["ingress"]["paths"]] == [
-        ("user-api", 8001),
-        ("billing", 8002),
+    # each route names the Service and takes its port by name
+    assert platform["ingress"]["paths"] == [
+        {"path": "/api/user-api(/|$)(.*)", "pathType": "ImplementationSpecific", "service": "user-api"},
+        {"path": "/api/billing(/|$)(.*)", "pathType": "ImplementationSpecific", "service": "billing"},
     ]
     assert [(f["name"], f["primary"]) for f in platform["ingress"]["frontends"]] == [
         ("frontend", True),

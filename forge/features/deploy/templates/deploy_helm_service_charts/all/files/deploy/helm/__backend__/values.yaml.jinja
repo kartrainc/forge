@@ -95,7 +95,8 @@ env:
 {%- endif %}
 # Secret env -> Secret (templates/secret.yaml). Placeholders only: forge
 # NEVER bakes a real credential into the chart. Override per environment, or
-# set secretEnv: {} and wire an ExternalSecret (see templates/secret.yaml).
+# set secretEnv: null and wire an ExternalSecret (see templates/secret.yaml);
+# an empty map does not remove these defaults, Helm merges it into them.
 secretEnv:
 {%- if service.language == "python" %}
   APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
@@ -110,14 +111,14 @@ secretEnv:
   {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
 {%- endfor %}
 
-# The Service, named after the release on the service's own port: a sibling's
-# INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }} (http://{{ service.name }}:{{ service.port }}) resolves.
-service:
-  port: {{ service.port }}
+# The Service listens on containerPort, the port its siblings call
+# (INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }}, http://{{ service.name }}:{{ service.port }}) and the platform's Ingress
+# routes to by name: change it in forge (server_port) and update, never here alone.
 
-# The in-cluster Postgres host the migrate Job waits for (the platform chart's
-# "postgres" under infra.inCluster); empty for a managed database.
-waitForPostgres: ""
+# The migrate Job waits for this Postgres host when it resolves in the cluster
+# (the platform's "postgres" under infra.inCluster) and skips the wait when it
+# does not (a managed database); "" never waits.
+waitForPostgres: postgres
 postgresImage: pgvector/pgvector:pg16
 
 # Pod security: non-root by default (matches the compose posture).

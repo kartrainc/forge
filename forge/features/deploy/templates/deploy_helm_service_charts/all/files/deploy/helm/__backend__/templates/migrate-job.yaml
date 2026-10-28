@@ -1,6 +1,6 @@
 {{- /* The service's migration: a pre-install/pre-upgrade hook, so the schema is current before the Deployment rolls;
        a failed migration fails this release only. The database must exist first: install the platform chart before
-       the services when it runs the in-cluster Postgres, and set waitForPostgres to its host to wait for it. */ -}}
+       the services; when it runs the in-cluster Postgres, the Job waits for it (waitForPostgres). */ -}}
 {{- if .Values.hasMigrations }}
 apiVersion: batch/v1
 kind: Job
@@ -32,7 +32,12 @@ spec:
           command:
             - sh
             - -c
-            - until pg_isready -h {{ . }} -p 5432; do echo "waiting for postgres"; sleep 2; done
+            - |
+              if getent hosts {{ . }} >/dev/null; then
+                until pg_isready -h {{ . }} -p 5432 -U postgres; do echo "waiting for postgres"; sleep 2; done
+              else
+                echo "{{ . }} does not resolve: no in-cluster Postgres to wait for"
+              fi
       {{- end }}
       containers:
         - name: migrate
@@ -43,7 +48,7 @@ spec:
             - configMapRef:
                 name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
             - secretRef:
-                # the hook copy of secretEnv, or the external Secret that replaces it (secretEnv: {})
+                # the hook copy of secretEnv, or the external Secret that replaces it (secretEnv: null)
                 name: {{ include "svc.child" (dict "root" . "suffix" (ternary "migrate-secret" "secret" (not (empty .Values.secretEnv)))) }}
                 optional: true
 {{- end }}

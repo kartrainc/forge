@@ -6,7 +6,8 @@
 #     helm upgrade --install platform deploy/helm/platform -f values-<env>.yaml
 
 # HTTP ingress. Each service is its own release, named after the service, so
-# the routes name each service's Service and port. The rewrite annotation is
+# the routes name each service's Service and its port "http" (a path of your
+# own to another Service may set port: <number>). The rewrite annotation is
 # nginx-ingress-specific; switch className + annotations for another
 # controller. Every frontend gets two Ingresses on its host: one for the
 # /api/<backend> paths with the annotations, one for / without them.
@@ -22,7 +23,6 @@ ingress:
     - path: /api/{{ be.name }}(/|$)(.*)
       pathType: ImplementationSpecific
       service: {{ be.name }}
-      port: {{ be.port }}
 {%- endfor %}
 {%- else %}
   paths: []
@@ -35,7 +35,6 @@ ingress:
     - name: {{ fe.name }}
       primary: {{ "true" if fe.primary else "false" }}
       host: ""
-      port: 80
 {%- endfor %}
 {%- else %}
   frontends: []
