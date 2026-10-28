@@ -26,14 +26,23 @@ export async function checkRedis(url?: string): Promise<CheckResult> {
 			error: "redis package not installed",
 		};
 	}
+	// One attempt within 2 s, as the Python, Rust and Go checks make. The client's default reconnects
+	// without end, so an unreachable Redis would hold every request open and leave a client behind.
+	const client = redisModule.createClient({
+		url: resolvedUrl,
+		socket: { connectTimeout: 2000, reconnectStrategy: false },
+	});
+	client.on("error", () => {
+		// swallow — we handle failure via the promise below
+	});
+	const attempt = client.connect().then(() => client.ping());
+	attempt.catch(() => undefined);
+	let timeout: NodeJS.Timeout | undefined;
+	const deadline = new Promise<never>((_resolve, reject) => {
+		timeout = setTimeout(() => reject(new Error("no answer within 2000 ms")), 2000);
+	});
 	try {
-		const client = redisModule.createClient({ url: resolvedUrl });
-		client.on("error", () => {
-			// swallow — we handle failure via the promise below
-		});
-		await client.connect();
-		const pong = await client.ping();
-		await client.quit();
+		const pong = await Promise.race([attempt, deadline]);
 		return {
 			status: pong ? "up" : "down",
 			latency_ms: Math.round(performance.now() - start),
@@ -45,6 +54,9 @@ export async function checkRedis(url?: string): Promise<CheckResult> {
 			latency_ms: Math.round(performance.now() - start),
 			error: String(err?.message ?? err),
 		};
+	} finally {
+		clearTimeout(timeout);
+		client.destroy();
 	}
 }
 

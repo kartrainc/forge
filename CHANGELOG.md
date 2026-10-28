@@ -363,6 +363,10 @@ Each safeguard below is an option, so a project can choose another strategy.
 - Ignore Finder's `.DS_Store` in the generator fingerprint and the quality
   scans, as the built package does. Opening an installed generator in Finder
   made it fail "generator differs from recorded source".
+- A Node service's `/api/v1/health/deep` checks Redis once, within 2 seconds
+  as the Python, Rust and Go checks do, and closes the client. The Redis
+  client reconnected without end, so an unreachable Redis held the request
+  open and left a client behind for each one.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth
