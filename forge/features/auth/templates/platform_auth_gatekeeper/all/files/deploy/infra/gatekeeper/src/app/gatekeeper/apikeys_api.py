@@ -198,6 +198,7 @@ async def _require_admin(
             tenant,
             issuer_url=tc.issuer_url,
             client_id=tc.client_id,
+            managed=tc.managed,
         )
     except jwt.ExpiredSignatureError as exc:
         # Fail closed on an expired access token: the SPA can re-auth via
@@ -209,7 +210,7 @@ async def _require_admin(
     if (
         payload.get("sub") != session.sub
         or payload.get(cfg.tenant_id_claim) != session.tenant_id
-        or session.tenant_id != tc.tenant_id
+        or not tc.admits(session.tenant_id)
     ):
         raise HTTPException(status_code=403, detail="Session identity mismatch")
 

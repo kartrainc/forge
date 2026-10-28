@@ -21,6 +21,7 @@ fragment ``.jinja`` template can walk it with either attribute or item access
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from forge.config._backend import BackendLanguage
@@ -55,6 +56,58 @@ def compute_render_postgres(
     return (has_backends and database_mode != "none") or include_keycloak
 
 
+# Languages whose ``shared_rls`` fragment enforces RLS, and the backend
+# template that isolates tenants by Keycloak realm instead (excluded from the
+# RLS fragments, so it keeps the owner role).
+_RLS_LANGUAGES: frozenset[BackendLanguage] = frozenset({BackendLanguage.PYTHON, BackendLanguage.GO})
+_RLS_EXCLUDED_APP_TEMPLATES: frozenset[str] = frozenset({"tenant-management-service"})
+
+
+def option_value(options: Mapping[str, object], path: str) -> object:
+    """``options[path]``, else the registered default."""
+    if path in options:
+        return options[path]
+    from forge.options import OPTION_REGISTRY  # noqa: PLC0415 — options import features
+
+    option = OPTION_REGISTRY.get(path)
+    return option.default if option is not None else None
+
+
+def project_keycloak_realm(config: ProjectConfig) -> str:
+    """The realm the project's users sign in to (``master`` is never used).
+
+    The single source for the realm JSON, the gatekeeper, the realm sync,
+    the backends' auth env and the Helm chart.
+    """
+    fc = config.frontend
+    if fc and config.include_keycloak and fc.keycloak_realm and fc.keycloak_realm != "master":
+        return fc.keycloak_realm
+    return DEFAULT_REALM
+
+
+def db_app_role(bc: BackendConfig, options: Mapping[str, object], database_mode: str) -> str:
+    """The non-owner role ``bc`` serves requests as, or ``""`` for the owner.
+
+    Set for a ``shared_rls`` backend whose language enforces RLS while
+    ``database.rls_app_role`` is on: Postgres skips RLS for the superuser that
+    owns the schema, so the service must not connect as it.
+    """
+    from forge.backend_app_templates import (  # noqa: PLC0415 — avoid config<->app_templates cycle
+        backend_uses_database,
+    )
+
+    if (
+        database_mode == "none"
+        or not backend_uses_database(bc.language, bc.app_template)
+        or option_value(options, "database.multitenancy") != "shared_rls"
+        or not option_value(options, "database.rls_app_role")
+        or bc.language not in _RLS_LANGUAGES
+        or (bc.app_template or "") in _RLS_EXCLUDED_APP_TEMPLATES
+    ):
+        return ""
+    return f"{bc.name.replace('-', '_')}_app"
+
+
 def database_backends(backends: list[BackendConfig]) -> list[BackendConfig]:
     """The backends that own a database: a stack of ``http-service`` only needs no Postgres."""
     from forge.backend_app_templates import (  # noqa: PLC0415 — avoid config<->app_templates cycle
@@ -68,6 +121,9 @@ def backend_topology_entry(
     bc: BackendConfig,
     synthesis: PlatformSynthesis | None,
     rendered_infra: set[str],
+    *,
+    options: Mapping[str, object] | None = None,
+    database_mode: str = "none",
 ) -> dict[str, Any]:
     """Build one backend's topology entry (name/port/db/migrations/deps/S2S).
 
@@ -97,6 +153,9 @@ def backend_topology_entry(
         "db_name": bc.name.replace("-", "_"),
         "uses_database": uses_database,
         "has_migrations": uses_database and bc.language in BUILTIN_MIGRATING,
+        # Role the service connects as instead of the migration owner
+        # (``database.rls_app_role``); "" keeps the owner.
+        "db_app_role": db_app_role(bc, options or {}, database_mode),
         "depends_on_services": depends_on_services,
         # Per-service S2S / inter-service env block; empty when synthesis is
         # inactive (single-service or auth.service_discovery off).
@@ -186,8 +245,12 @@ def compute_topology(
         render_postgres=render_postgres,
         extra_service_names=_extra_service_names(plan),
     )
+    options = plan.option_values if plan is not None else config.options
     backends = tuple(
-        backend_topology_entry(bc, synthesis, rendered_infra) for bc in config.backends
+        backend_topology_entry(
+            bc, synthesis, rendered_infra, options=options, database_mode=database_mode
+        )
+        for bc in config.backends
     )
     # Frontends beside the primary; the primary keeps the scalar keys below.
     extra_frontends = tuple(
@@ -213,13 +276,9 @@ def compute_topology(
         # Realm + client_id sourced EXACTLY as docker_manager builds the compose
         # render context, so the Helm auth env (values.yaml.jinja) and compose
         # agree. Empty/default when not a keycloak project.
-        "keycloak_realm": (
-            config.frontend.keycloak_realm
-            if config.frontend
-            and config.include_keycloak
-            and config.frontend.keycloak_realm != "master"
-            else DEFAULT_REALM
-        ),
+        "keycloak_realm": project_keycloak_realm(config),
+        "keycloak_tenant_source": option_value(options, "auth.keycloak_tenant_source"),
+        "keycloak_self_registration": option_value(options, "auth.keycloak_self_registration"),
         "keycloak_client_id": (
             config.frontend.keycloak_client_id
             if config.frontend and config.include_keycloak

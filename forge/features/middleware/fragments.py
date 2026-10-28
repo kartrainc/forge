@@ -76,7 +76,12 @@ def register_all(api: ForgeAPI) -> None:
                     dependencies=("@fastify/rate-limit@11.2.1",),
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(fragment_dir=_impl("rate_limit", "rust")),
-                BackendLanguage.GO: FragmentImplSpec(fragment_dir=_impl("rate_limit", "go")),
+                # ``auth.mode`` decides whether a verified identity can key
+                # the bucket by tenant (generate) or only the address (none).
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("rate_limit", "go"),
+                    reads_options=("auth.mode",),
+                ),
             },
         )
     )

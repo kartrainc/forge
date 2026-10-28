@@ -235,7 +235,9 @@ class LoginForm(HTMLParser):
     fields = None
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
-        if tag == "form" and attrs.get("id") == "kc-form-login":
+        if tag == "form" and (
+            attrs.get("id") == "kc-form-login" or "login-actions/authenticate" in attrs.get("action", "")
+        ):
             self.action = attrs["action"]
             self.fields = {}
         if tag == "input" and self.fields is not None and attrs.get("type") == "hidden":
@@ -250,12 +252,18 @@ with httpx.Client(timeout=15, follow_redirects=False) as client:
     auth_url = login.headers["location"]
     expected_issuer = os.environ["KEYCLOAK_BASE_URL"] + "/" + os.environ["KEYCLOAK_ADMIN_REALM"]
     assert auth_url.startswith(expected_issuer + "/protocol/openid-connect/auth?")
-    page = client.get(auth_url)
-    assert page.status_code == 200, page.status_code
-    form = LoginForm()
-    form.feed(page.text)
-    assert form.action, "Keycloak did not render the expected login form"
-    result = client.post(form.action, data={**form.fields, "username": "dev@localhost", "password": "devpass"})
+    result = client.get(auth_url)
+    assert result.status_code == 200, result.status_code
+    # With organizations (auth.keycloak_tenant_source=organization) Keycloak
+    # signs in identity-first: the username, then the password on a second
+    # form. Without them one form takes both.
+    for _ in range(3):
+        if result.status_code != 200:
+            break
+        form = LoginForm()
+        form.feed(result.text)
+        assert form.action, "Keycloak did not render the expected login form"
+        result = client.post(form.action, data={**form.fields, "username": "dev@localhost", "password": "devpass"})
     assert result.status_code == 302, result.status_code
     callback = urlsplit(result.headers["location"])
     assert callback.path == "/callback" and "code=" in callback.query

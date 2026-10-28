@@ -19,6 +19,7 @@ import jwt
 from app.gatekeeper.config import get_settings
 from app.gatekeeper.helpers import JWTPayload
 from app.gatekeeper.http_client import get_http_client, with_retry
+from app.gatekeeper.organizations import with_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ async def verify_token(
     allow_expired: bool = False,
     issuer_url: str | None = None,
     client_id: str | None = None,
+    managed: bool = False,
 ) -> JWTPayload:
     """
     Validate an access-token JWT against the tenant's JWKS.
@@ -117,6 +119,10 @@ async def verify_token(
     client_id:
         Per-tenant OIDC client ID for audience validation.  Falls back
         to static config.
+    managed:
+        ``TenantConfig.managed``: the host has a TMS ``tenant-route``, whose
+        realm carries the tenant in its own claim, so the tenant source is
+        not applied.
 
     Returns
     -------
@@ -160,4 +166,6 @@ async def verify_token(
         issuer=issuer_url or f"{cfg.keycloak_base_url}/{tenant}",
         options=options,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
     )  # ty:ignore[invalid-assignment]
-    return payload
+    # Every Keycloak user token passes through here, so this is where the
+    # tenant source (TENANT_SOURCE) sets the tenant claim.
+    return with_tenant(payload, managed=managed)  # type: ignore[return-value]  # ty:ignore[invalid-return-type]

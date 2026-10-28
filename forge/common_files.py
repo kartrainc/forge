@@ -66,10 +66,15 @@ def apply_common_files(
             from forge.quality.model import subjects
 
             matrix = [item for item in subjects(config) if item["language"] == bc.language.value]
+            workflow = ci_src.read_text().replace("__FORGE_SERVICE_MATRIX__", json.dumps(matrix))
+            isolation = _isolation_matrix(config, bc.language)
+            isolation_src = COMMON_DIR / f"ci_{bc.language.value}_isolation.yml"
+            if isolation and isolation_src.is_file():
+                workflow += isolation_src.read_text().replace(
+                    "__FORGE_ISOLATION_MATRIX__", json.dumps(isolation)
+                )
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(
-                ci_src.read_text().replace("__FORGE_SERVICE_MATRIX__", json.dumps(matrix))
-            )
+            destination.write_text(workflow)
             if collector:
                 collector.record(destination, origin="base-template", template_name="_common")
 
@@ -142,6 +147,33 @@ def _copy_nuxt_ui_agent_tooling(project_root: Path, collector: ProvenanceCollect
     _copy_if_absent(
         COMMON_DIR / "codex-config.toml", project_root / ".codex" / "config.toml", collector
     )
+
+
+def _isolation_matrix(config: ProjectConfig, language: object) -> list[dict]:
+    """Backends of *language* whose tenant isolation CI tests as the app role.
+
+    One entry per backend with a ``database.rls_app_role`` role: the
+    ``tenant-isolation`` job migrates its database as the owner, creates the
+    role with ``deploy/compose/db-app-role.sh`` and runs the isolation test as it.
+    """
+    from forge.config._topology import db_app_role  # noqa: PLC0415
+
+    if config.backend_mode != "generate":
+        return []
+    entries = []
+    for bc in config.backends:
+        role = db_app_role(bc, config.options, config.database_mode)
+        if bc.language == language and role:
+            entries.append(
+                {
+                    "name": bc.name,
+                    "path": f"services/{bc.name}",
+                    "runtime": bc.python_version if bc.language.value == "python" else "",
+                    "db_name": bc.name.replace("-", "_"),
+                    "app_role": role,
+                }
+            )
+    return entries
 
 
 def _ci_source_for(bc: BackendConfig) -> Path | None:

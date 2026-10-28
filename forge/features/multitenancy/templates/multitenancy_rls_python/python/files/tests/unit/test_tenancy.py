@@ -76,6 +76,8 @@ def test_subdomain_resolution() -> None:
     # bare host (no subdomain) → None
     assert r.resolve(_request(headers={"host": "example.com"})) == "example"
     assert r.resolve(_request(headers={"host": "localhost"})) is None
+    # an IP address names no tenant
+    assert r.resolve(_request(headers={"host": "127.0.0.1:8080"})) is None
 
 
 def test_token_claim_resolution_flat() -> None:

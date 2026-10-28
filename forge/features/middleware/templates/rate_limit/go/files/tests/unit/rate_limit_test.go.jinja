@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+{%- if options['auth.mode'] == 'generate' %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
 
 	"{{ project_name }}/internal/identity"
 	"{{ project_name }}/internal/middleware"
@@ -76,19 +80,52 @@ func TestRateLimitSkipsProbePaths(t *testing.T) {
 	}
 }
 
-func TestRateLimitKeysTenantsAcrossAddresses(t *testing.T) {
-	limiter := middleware.RateLimit(middleware.RateLimitOptions{RequestsPerMinute: 1})
-	tenant := identity.New(uuid.New(), "subject")
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		limiter(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNoContent)
-		})).ServeHTTP(w, r.WithContext(identity.WithContext(r.Context(), tenant)))
+// withIdentity binds ident to each request; verified marks its token as
+// verified by the platform-auth middleware.
+func withIdentity(ident identity.IdentityContext, verified bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := identity.WithContext(r.Context(), ident)
+{%- if options['auth.mode'] == 'generate' %}
+		if verified {
+			ctx = platformauth.WithIdentity(ctx, platformauth.IdentityContext{TenantID: ident.TenantID, Subject: ident.Subject})
+		}
+{%- endif %}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func TestRateLimitKeysVerifiedTenantsAcrossAddresses(t *testing.T) {
+	limiter := middleware.RateLimit(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	handler := withIdentity(identity.New(uuid.New(), "subject"), true, limiter(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 	if code := sendFrom(handler, "198.51.100.1:1", "/api/v1/items", nil).Code; code != http.StatusNoContent {
 		t.Fatalf("first tenant request: %d", code)
 	}
-	if code := sendFrom(handler, "198.51.100.2:1", "/api/v1/items", nil).Code; code != http.StatusTooManyRequests {
-		t.Fatalf("the tenant bucket follows the tenant, not the address: %d", code)
+	second := sendFrom(handler, "198.51.100.2:1", "/api/v1/items", nil).Code
+{%- if options['auth.mode'] == 'generate' %}
+	if second != http.StatusTooManyRequests {
+		t.Fatalf("the bucket of a verified tenant follows the tenant, not the address: %d", second)
+	}
+{%- else %}
+	if second != http.StatusNoContent {
+		t.Fatalf("without platform auth nothing is verified, so the address keys the bucket: %d", second)
+	}
+{%- endif %}
+}
+
+func TestRateLimitIgnoresAnUnverifiedTenant(t *testing.T) {
+	limiter := middleware.RateLimit(middleware.RateLimitOptions{RequestsPerMinute: 1})
+	ok := limiter(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	// A tenant the client chose (a tenant header without a verified token)
+	// buys no fresh bucket: the address keys it.
+	if code := sendFrom(withIdentity(identity.New(uuid.New(), "subject"), false, ok), "198.51.100.3:1", "/", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("first request: %d", code)
+	}
+	if code := sendFrom(withIdentity(identity.New(uuid.New(), "subject"), false, ok), "198.51.100.3:1", "/", nil).Code; code != http.StatusTooManyRequests {
+		t.Fatalf("another unverified tenant from the same address: %d", code)
 	}
 }
 

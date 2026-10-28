@@ -22,9 +22,9 @@ atomicity isn't required:
   Disappearance = absolute expiry.
 * ``gk:session:{session_id}:active`` — plain string ``"1"`` with
   TTL = ``idle_timeout_seconds``. Refreshed on every :func:`touch`
-  via a single ``SET … EX``. Disappearance = idle expiry.
+  via a single ``SET … XX EX``. Disappearance = idle expiry.
 
-``check_validity`` is two `MGET` reads; ``touch`` is one `SET`. Both
+``check_validity`` is two `MGET` reads; ``touch`` is one `SET … XX`. Both
 are atomic on the wire; the read-evaluate-write race the obvious
 single-key design exposes is gone.
 
@@ -65,6 +65,9 @@ class ServerSession:
     login_time: int
     idle_timeout_seconds: int
     absolute_timeout_seconds: int
+    # Kept for the end-session ``id_token_hint``; "" for sessions issued
+    # before it was stored.
+    id_token: str = ""
 
 
 # ── store ───────────────────────────────────────────────────────────────
@@ -101,6 +104,7 @@ class ServerSessionStore:
         sub: str,
         idle_timeout_seconds: int,
         absolute_timeout_seconds: int,
+        id_token: str = "",
     ) -> str:
         """Persist a new session. Returns the freshly-minted ``session_id``.
 
@@ -128,6 +132,7 @@ class ServerSessionStore:
             "login_time": now,
             "idle_timeout_seconds": idle_timeout_seconds,
             "absolute_timeout_seconds": absolute_timeout_seconds,
+            "id_token": id_token,
         }
         ciphertext = self._fernet.encrypt(json.dumps(body).encode("utf-8"))
 
@@ -216,30 +221,27 @@ class ServerSessionStore:
         """Refresh the ``:active`` TTL to ``idle_timeout_seconds``.
 
         Returns ``True`` on success, ``False`` if the session has
-        absolute-expired (the body key is gone) — extending an
-        absolute-expired session would resurrect a dead row, which
-        is wrong.
+        absolute-expired (the body key is gone) or idle-expired (the
+        ``:active`` key is gone) — extending either would resurrect a
+        session that already ended.
 
-        Single ``SET … EX`` is atomic on the wire. Concurrent touches
-        from multiple tabs both succeed; the last write wins, which
-        is the correct semantics — both saw activity.
+        The extension is one ``SET … XX EX``: it only rewrites an
+        ``:active`` key that still exists, so an idle expiry between the
+        body read and the write cannot be undone. Concurrent touches from
+        multiple tabs both succeed; the last write wins, which is the
+        correct semantics — both saw activity.
         """
         if not session_id:
             return False
 
-        # Cheap existence check first. If the body is gone, the session
-        # has absolute-expired — refusing to touch prevents the active
-        # key from outliving its parent.
-        body_ttl = await self._redis.ttl(_body_key(session_id))
-        if body_ttl is None or body_ttl < 0:
-            # ttl returns -2 for "no key" and -1 for "key without TTL"
-            # (which shouldn't happen for our keys). Treat both as gone.
-            return False
-
-        # Read idle_timeout from the body so the touch uses the
-        # session's own configured cap, not a global default.
-        body_raw = await self._redis.get(_body_key(session_id))
-        if body_raw is None:
+        # The body carries the session's own idle cap; its TTL bounds the
+        # extension. ttl returns -2 for "no key" and -1 for "key without
+        # TTL" (which shouldn't happen for our keys): both mean gone.
+        async with self._redis.pipeline(transaction=False) as pipe:
+            pipe.ttl(_body_key(session_id))
+            pipe.get(_body_key(session_id))
+            body_ttl, body_raw = await pipe.execute()
+        if body_raw is None or body_ttl is None or body_ttl < 0:
             return False
         session = self._decrypt(session_id, body_raw)
         if session is None:
@@ -250,14 +252,15 @@ class ServerSessionStore:
         # don't claim "alive for 30 min more" when absolute expires
         # in 5 min. min(idle_ttl, body_ttl).
         new_ttl = min(idle_ttl, body_ttl)
-        await self._redis.setex(_active_key(session_id), new_ttl, "1")
-        return True
+        extended = await self._redis.set(_active_key(session_id), "1", ex=new_ttl, xx=True)
+        return bool(extended)
 
     async def update_tokens(
         self,
         session_id: str,
         access_token: str,
         refresh_token: str,
+        id_token: str | None = None,
     ) -> bool:
         """Replace the access/refresh tokens after a Keycloak refresh.
 
@@ -286,6 +289,7 @@ class ServerSessionStore:
             "login_time": session.login_time,
             "idle_timeout_seconds": session.idle_timeout_seconds,
             "absolute_timeout_seconds": session.absolute_timeout_seconds,
+            "id_token": id_token or session.id_token,
         }
         ciphertext = self._fernet.encrypt(json.dumps(new_body).encode("utf-8"))
         await self._redis.setex(_body_key(session_id), body_ttl, ciphertext)
@@ -367,6 +371,7 @@ class ServerSessionStore:
                 login_time=int(envelope["login_time"]),
                 idle_timeout_seconds=int(envelope["idle_timeout_seconds"]),
                 absolute_timeout_seconds=int(envelope["absolute_timeout_seconds"]),
+                id_token=str(envelope.get("id_token") or ""),
             )
         except (KeyError, ValueError, TypeError) as exc:
             logger.warning(

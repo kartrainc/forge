@@ -135,3 +135,30 @@ async def refresh_tokens(
     resp = await client.post(url, data=payload)
     resp.raise_for_status()
     return resp.json()
+
+
+async def end_session(
+    tenant: str,
+    refresh_token: str,
+    *,
+    issuer_url: str | None = None,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+) -> None:
+    """End the user's Keycloak session from the server (back-channel logout).
+
+    POSTs the session's refresh token to the end-session endpoint with the
+    client credentials. Keycloak then revokes the SSO session, so the next
+    sign-in asks for the password again even if the browser never reaches
+    the front-channel logout redirect.
+    """
+    cfg = get_settings()
+    base_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
+    payload = {
+        "client_id": client_id or cfg.gatekeeper_client_id,
+        "client_secret": client_secret or cfg.gatekeeper_client_secret,
+        "refresh_token": refresh_token,
+    }
+    client = get_http_client()
+    resp = await client.post(f"{base_url}/protocol/openid-connect/logout", data=payload)
+    resp.raise_for_status()

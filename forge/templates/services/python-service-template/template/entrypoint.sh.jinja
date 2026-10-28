@@ -4,10 +4,18 @@
 # upgrade, so concurrent replicas serialize instead of racing the same DDL.
 # SQLite dev paths still work because lifecycle._on_startup creates
 # tables in-memory when it finds an empty database.
+#
+# MIGRATE_ON_START=false skips the upgrade: a deployment that migrates with
+# other credentials than the service's (database.rls_app_role, where the
+# service's role cannot create tables) runs migrations before the service.
 set -eu
 
-echo "[entrypoint] alembic upgrade head"
-alembic upgrade head
+if [ "${MIGRATE_ON_START:-true}" = "true" ]; then
+    echo "[entrypoint] alembic upgrade head"
+    alembic upgrade head
+else
+    echo "[entrypoint] MIGRATE_ON_START=${MIGRATE_ON_START}: skipping migrations"
+fi
 
 echo "[entrypoint] starting {{ project_slug }} server"
 exec python -m app server run "$@"

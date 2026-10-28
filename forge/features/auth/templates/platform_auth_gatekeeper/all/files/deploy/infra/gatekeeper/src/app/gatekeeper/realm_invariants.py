@@ -12,10 +12,16 @@ This module's job is to verify the invariant on every gatekeeper boot
 and refuse to come up otherwise — converting a future user-facing 502
 into a loud boot-time crash that surfaces on the deploy dashboard.
 
-The check is **read-only** (GET /admin/realms/{realm}/users/profile),
-so the gatekeeper service can hold admin credentials without the
-privilege-creep concern that would attend a *write* path. The full
-schema *sync* is intentionally elsewhere.
+With ``TENANT_SOURCE=organization`` it also checks that the realm has
+Organizations enabled and the ``gatekeeper`` client its organization mapper.
+Keycloak imports the realm file only into an empty database, so an existing
+realm upgraded to the organization source keeps neither; without them no
+token carries an organization and every sign-in is refused with 403.
+
+The check is **read-only** (GET /admin/realms/{realm}/users/profile, the
+realm and its gatekeeper client), so the gatekeeper service can hold admin
+credentials without the privilege-creep concern that would attend a *write*
+path. The full schema *sync* is intentionally elsewhere.
 """
 
 from __future__ import annotations
@@ -47,6 +53,8 @@ async def verify_user_profile_active(
     admin_password: str,
     required_attributes: frozenset[str] = frozenset(["tenant_id"]),
     required_policy: str = "ADMIN_EDIT",
+    organizations: bool = False,
+    client_id: str = "gatekeeper",
     http_client: httpx.AsyncClient | None = None,
     timeout: float = 10.0,
     max_attempts: int = 5,
@@ -62,6 +70,8 @@ async def verify_user_profile_active(
       this Keycloak defaults to ``DISABLED``, which drops any attribute
       that isn't explicitly declared — including the ``tenant_id`` that
       legacy users might still need.
+    - With ``organizations``, the realm has Organizations enabled and the
+      ``client_id`` client an ``oidc-organization-membership-mapper``.
 
     Raises :class:`RealmInvariantError` on any divergence with the same
     diagnostic the silent-drop guard already produces. Network errors
@@ -131,12 +141,46 @@ async def verify_user_profile_active(
                 "failure mode. Run keycloak-realm-sync (or apply realm.json "
                 "via PUT /admin/realms/{realm}/users/profile) to reconcile."
             )
+        if organizations:
+            await _check_organizations(token)
         logger.info(
             "realm invariant ok: realm=%s attrs=%d policy=%s",
             realm,
             len(profile.get("attributes") or []),
             live_policy,
         )
+
+    async def _check_organizations(token: str) -> None:
+        headers = {"Authorization": f"Bearer {token}"}
+        realm_resp = await client.get(f"{base}/admin/realms/{realm}", headers=headers)
+        realm_resp.raise_for_status()
+        upgrade = (
+            "An existing realm is not re-imported from deploy/infra/keycloak-realm.json: "
+            "apply the Keycloak steps in UPGRADING.md, or set "
+            'auth.keycloak_tenant_source="user_attribute" to keep the tenant_id attribute.'
+        )
+        if not realm_resp.json().get("organizationsEnabled"):
+            raise RealmInvariantError(
+                f"realm invariant probe: TENANT_SOURCE=organization but realm {realm!r} "
+                f"has Organizations disabled, so every sign-in would get 403. {upgrade}"
+            )
+        clients_resp = await client.get(
+            f"{base}/admin/realms/{realm}/clients",
+            params={"clientId": client_id},
+            headers=headers,
+        )
+        clients_resp.raise_for_status()
+        mappers = [
+            mapper.get("protocolMapper")
+            for found in clients_resp.json()
+            for mapper in found.get("protocolMappers") or []
+        ]
+        if "oidc-organization-membership-mapper" not in mappers:
+            raise RealmInvariantError(
+                f"realm invariant probe: TENANT_SOURCE=organization but the {client_id!r} "
+                f"client of realm {realm!r} has no organization membership mapper, so no "
+                f"token names an organization and every sign-in would get 403. {upgrade}"
+            )
 
     try:
         for attempt in range(1, max_attempts + 1):

@@ -1,0 +1,302 @@
+"""Real-Postgres integration test: shared-RLS cross-tenant isolation.
+
+Shipped by ``database.multitenancy=shared_rls``. Proves that the UoW binds
+``app.current_tenant`` from the authenticated account (``set_tenant_context`` in
+``__aenter__``) so a Row-Level-Security policy keyed on that GUC physically
+filters cross-tenant rows — the token-claim tenant flows account → GUC → policy.
+
+Postgres comes from ``$TEST_DATABASE_URL``, else ``$DATABASE_URL``. RLS does
+not apply to a superuser or ``BYPASSRLS`` role, so when that URL's role bypasses
+RLS the test creates a throwaway role that does not, and queries as it.
+
+``test_app_role_isolates_the_migrated_tables`` runs as the role the service
+runs as (``database.rls_app_role``, created by ``deploy/compose/db-app-role.sh``)
+on the migrated database: ``$APP_ROLE_DATABASE_URL``. The generated CI's
+``tenant-isolation`` job migrates as the owner, runs the script and sets it,
+with ``REQUIRE_APP_ROLE_TEST=1`` so the test fails there rather than skip;
+other jobs, which have no app role, skip it.
+
+With ``database.rls_startup_guard`` on, the tests fail rather than skip when
+CI provides no Postgres or no role RLS applies to: a skipped isolation test
+reads as a pass.
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+
+from forge_core.persistence.unit_of_work import AsyncUnitOfWork
+
+# database.rls_startup_guard and database.rls_app_role at generation time.
+REQUIRE_ISOLATION_TEST = {{ "True" if options['database.rls_startup_guard'] else "False" }}
+APP_ROLE = {{ "True" if options['database.rls_app_role'] else "False" }}
+
+
+def _database_url() -> str:
+    url = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+    if url.startswith(("postgres://", "postgresql://")):
+        return "postgresql+asyncpg://" + url.split("://", 1)[1]
+    return url
+
+
+_URL = _database_url()
+
+
+def _app_role_url() -> str:
+    url = os.environ.get("APP_ROLE_DATABASE_URL", "")
+    if url.startswith(("postgres://", "postgresql://")):
+        return "postgresql+asyncpg://" + url.split("://", 1)[1]
+    return url
+
+
+def _unavailable(reason: str) -> None:
+    """Skip locally; fail in CI when the isolation test is required."""
+    if REQUIRE_ISOLATION_TEST and os.environ.get("CI"):
+        pytest.fail(f"tenant isolation test cannot run: {reason}")
+    pytest.skip(reason)
+
+
+pytestmark = pytest.mark.integration
+
+
+class _Account:
+    def __init__(self, customer_id: str) -> None:
+        self.customer_id = customer_id
+        self.user_id = None
+
+
+async def _bypasses(engine: AsyncEngine) -> tuple[bool, bool]:
+    """(role bypasses RLS, role may create roles) for ``engine``'s role."""
+    async with engine.connect() as conn:
+        row = (
+            await conn.exec_driver_sql(
+                "SELECT rolsuper OR rolbypassrls, rolsuper OR rolcreaterole "
+                "FROM pg_roles WHERE rolname = current_user"
+            )
+        ).one()
+    return bool(row[0]), bool(row[1])
+
+
+@pytest.mark.asyncio
+async def test_shared_rls_cross_tenant_isolation() -> None:
+    if not _URL.startswith("postgresql"):
+        _unavailable("set TEST_DATABASE_URL or DATABASE_URL to a Postgres database")
+    tenant_a = str(uuid.uuid4())
+    tenant_b = str(uuid.uuid4())
+    admin = create_async_engine(_URL)
+    probe_role = ""
+    engine = admin
+
+    # Self-contained RLS-protected table keyed on the app.current_tenant GUC —
+    # the same predicate shape the shared_rls migration installs.
+    async with admin.begin() as conn:
+        await conn.exec_driver_sql("DROP TABLE IF EXISTS rls_probe")
+        await conn.exec_driver_sql(
+            "CREATE TABLE rls_probe (id serial PRIMARY KEY, customer_id uuid NOT NULL, v text)"
+        )
+        await conn.exec_driver_sql("ALTER TABLE rls_probe ENABLE ROW LEVEL SECURITY")
+        await conn.exec_driver_sql("ALTER TABLE rls_probe FORCE ROW LEVEL SECURITY")
+        await conn.exec_driver_sql(
+            "CREATE POLICY rls_probe_tenant ON rls_probe "
+            "USING (customer_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid) "
+            "WITH CHECK "
+            "(customer_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid)"
+        )
+
+    try:
+        bypasses, can_create_role = await _bypasses(admin)
+        if bypasses:
+            if not can_create_role:
+                reason = "the database role bypasses RLS and cannot create a role that does not"
+                if REQUIRE_ISOLATION_TEST:
+                    pytest.fail(reason)
+                pytest.skip(reason)
+            # Generated names only: neither value comes from outside the test.
+            probe_role = "rls_probe_" + uuid.uuid4().hex[:12]
+            password = uuid.uuid4().hex
+            async with admin.begin() as conn:
+                await conn.exec_driver_sql(
+                    f"CREATE ROLE {probe_role} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'"
+                )
+                await conn.exec_driver_sql(
+                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON rls_probe TO {probe_role}"
+                )
+                await conn.exec_driver_sql(
+                    f"GRANT USAGE, SELECT ON SEQUENCE rls_probe_id_seq TO {probe_role}"
+                )
+                schema = (await conn.exec_driver_sql("SELECT current_schema()")).scalar()
+                await conn.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{schema}" TO {probe_role}')
+            engine = create_async_engine(
+                make_url(_URL).set(username=probe_role, password=password)
+            )
+            assert (await _bypasses(engine))[0] is False, "the probe role must not bypass RLS"
+
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        def _uow(account: _Account | None) -> AsyncUnitOfWork:
+            # No session_binder: shared_rls uses the default account→GUC bind.
+            return AsyncUnitOfWork(session_factory=session_factory, account=account)
+
+        # Write under tenant A (UoW binds app.current_tenant = A).
+        async with _uow(_Account(tenant_a)) as uow:
+            await uow.session.execute(
+                text("INSERT INTO rls_probe (customer_id, v) VALUES (:c, 'a-secret')"),
+                {"c": tenant_a},
+            )
+
+        async with _uow(_Account(tenant_a)) as uow:
+            seen_a = (await uow.session.execute(text("SELECT count(*) FROM rls_probe"))).scalar()
+        async with _uow(_Account(tenant_b)) as uow:
+            seen_b = (await uow.session.execute(text("SELECT count(*) FROM rls_probe"))).scalar()
+        assert seen_a == 1, "tenant A must see its own row"
+        assert seen_b == 0, "tenant B must NOT see tenant A's row — RLS leak"
+
+        # No tenant context (PublicUnitOfWork) ⇒ fail closed with ZERO rows.
+        # The policy's ``NULLIF(current_setting(...), '')`` collapses both the
+        # never-set (NULL) and reverted-empty ('') GUC to NULL, so the cast
+        # never raises — even on a connection recycled from a prior tenant.
+        async with _uow(None) as uow:
+            seen_public = (
+                await uow.session.execute(text("SELECT count(*) FROM rls_probe"))
+            ).scalar()
+        assert seen_public == 0, "no tenant context must not see tenant data (fail closed)"
+    finally:
+        if engine is not admin:
+            await engine.dispose()
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql("DROP TABLE IF EXISTS rls_probe")
+            if probe_role:
+                # DROP OWNED BY also revokes the schema grant, which would
+                # otherwise keep DROP ROLE from succeeding.
+                await conn.exec_driver_sql(f"DROP OWNED BY {probe_role}")
+                await conn.exec_driver_sql(f"DROP ROLE {probe_role}")
+        await admin.dispose()
+
+
+@pytest.mark.asyncio
+async def test_app_role_isolates_the_migrated_tables() -> None:
+    url = _app_role_url()
+    if not url.startswith("postgresql"):
+        reason = "set APP_ROLE_DATABASE_URL to the app role's URL of a migrated database"
+        if APP_ROLE and REQUIRE_ISOLATION_TEST and os.environ.get("REQUIRE_APP_ROLE_TEST") == "1":
+            pytest.fail(f"tenant isolation test cannot run: {reason}")
+        pytest.skip(reason)
+    from sqlalchemy.exc import DBAPIError, ProgrammingError  # noqa: PLC0415
+
+    from app.core.tenancy.guard import assert_rls_enforced  # noqa: PLC0415
+
+    engine = create_async_engine(url)
+    tenant_a = str(uuid.uuid4())
+    tenant_b = str(uuid.uuid4())
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    def _uow(account: _Account | None) -> AsyncUnitOfWork:
+        return AsyncUnitOfWork(session_factory=session_factory, account=account)
+
+    async def _count(account: _Account | None) -> int:
+        async with _uow(account) as uow:
+            return (await uow.session.execute(text("SELECT count(*) FROM items"))).scalar()
+
+    insert = text(
+        "INSERT INTO items (id, name, customer_id, user_id) "
+        "VALUES (gen_random_uuid(), :name, :c, gen_random_uuid())"
+    )
+    try:
+        # The startup guard passes for the role the service connects as.
+        assert await assert_rls_enforced(engine) is True
+
+        async with _uow(_Account(tenant_a)) as uow:
+            await uow.session.execute(insert, {"name": "a-secret", "c": tenant_a})
+        assert await _count(_Account(tenant_a)) == 1, "tenant A must see its own row"
+        assert await _count(_Account(tenant_b)) == 0, "tenant B must NOT see A's row — RLS leak"
+        assert await _count(None) == 0, "no tenant context must see nothing (fail closed)"
+
+        # Writing another tenant's row violates the policy's WITH CHECK.
+        with pytest.raises(DBAPIError, match="row-level security"):
+            async with _uow(_Account(tenant_b)) as uow:
+                await uow.session.execute(insert, {"name": "forged", "c": tenant_a})
+
+        # The app role cannot lift the isolation: it owns nothing, creates nothing.
+        for statement in (
+            "ALTER TABLE items DISABLE ROW LEVEL SECURITY",
+            "ALTER TABLE items NO FORCE ROW LEVEL SECURITY",
+            "DROP POLICY tenant_isolation_items ON items",
+            "CREATE TABLE forge_app_role_probe (id int)",
+        ):
+            with pytest.raises(ProgrammingError, match="must be owner|permission denied"):
+                async with engine.begin() as conn:
+                    await conn.exec_driver_sql(statement)
+    finally:
+        async with _uow(_Account(tenant_a)) as uow:
+            await uow.session.execute(
+                text("DELETE FROM items WHERE customer_id = :c"), {"c": tenant_a}
+            )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_startup_guard_sees_inherited_roles() -> None:
+    """A member of a superuser, BYPASSRLS or table-owning role is refused too."""
+    if not _URL.startswith("postgresql"):
+        _unavailable("set TEST_DATABASE_URL or DATABASE_URL to a Postgres database")
+    from app.core.tenancy.guard import RLSBypassError, assert_rls_enforced  # noqa: PLC0415
+
+    admin = create_async_engine(_URL)
+    if not (await _bypasses(admin))[1]:
+        await admin.dispose()
+        pytest.skip("the database role cannot create roles")
+    suffix = uuid.uuid4().hex[:12]
+    owner, parent, member = f"rls_owner_{suffix}", f"rls_bypass_{suffix}", f"rls_member_{suffix}"
+    password = uuid.uuid4().hex
+    try:
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql(f"CREATE ROLE {owner} NOLOGIN")
+            await conn.exec_driver_sql(f"CREATE ROLE {parent} NOLOGIN BYPASSRLS")
+            schema = (await conn.exec_driver_sql("SELECT current_schema()")).scalar()
+            await conn.exec_driver_sql(f'GRANT USAGE, CREATE ON SCHEMA "{schema}" TO {owner}')
+            await conn.exec_driver_sql(f"SET ROLE {owner}")
+            await conn.exec_driver_sql(f"CREATE TABLE {owner}_t (id int)")
+            await conn.exec_driver_sql("RESET ROLE")
+        for granted, problem in ((owner, "owner of 1 table"), (parent, "BYPASSRLS")):
+            async with admin.begin() as conn:
+                await conn.exec_driver_sql(
+                    f"CREATE ROLE {member} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'"
+                )
+                await conn.exec_driver_sql(f"GRANT {granted} TO {member}")
+            engine = create_async_engine(make_url(_URL).set(username=member, password=password))
+            try:
+                with pytest.raises(RLSBypassError, match=problem):
+                    await assert_rls_enforced(engine)
+            finally:
+                await engine.dispose()
+                async with admin.begin() as conn:
+                    await conn.exec_driver_sql(f"DROP ROLE {member}")
+        # A temporary table holds no tenant rows: its owner is not refused,
+        # whichever connection of the role created it.
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql(
+                f"CREATE ROLE {member} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'"
+            )
+        engine = create_async_engine(make_url(_URL).set(username=member, password=password))
+        try:
+            async with engine.connect() as conn:
+                await conn.exec_driver_sql("CREATE TEMP TABLE scratch (id int)")
+                await conn.commit()  # visible to the guard's own connection
+                await assert_rls_enforced(engine)
+        finally:
+            await engine.dispose()
+            async with admin.begin() as conn:
+                await conn.exec_driver_sql(f"DROP ROLE {member}")
+    finally:
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql(f"DROP TABLE IF EXISTS {owner}_t")
+            await conn.exec_driver_sql(f"DROP OWNED BY {owner}")
+            await conn.exec_driver_sql(f"DROP ROLE IF EXISTS {owner}")
+            await conn.exec_driver_sql(f"DROP ROLE IF EXISTS {parent}")
+        await admin.dispose()

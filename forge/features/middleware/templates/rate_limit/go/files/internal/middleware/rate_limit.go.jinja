@@ -12,6 +12,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+{%- if options['auth.mode'] == 'generate' %}
+
+	platformauth "forge.local/platform-auth-go"
+{%- endif %}
 
 	"{{ project_name }}/internal/apperrors"
 	"{{ project_name }}/internal/identity"
@@ -32,8 +36,9 @@ type RateLimitOptions struct {
 	SkipPaths         []string
 }
 
-// RateLimit keys requests by tenant when an identity is bound, else by client
-// IP, and answers 429 RATE_LIMITED with Retry-After once a bucket is empty.
+// RateLimit keys requests by tenant when a verified token's identity is bound,
+// else by client IP, and answers 429 RATE_LIMITED with Retry-After once a
+// bucket is empty.
 func RateLimit(options RateLimitOptions) Middleware {
 	if options.RequestsPerMinute <= 0 {
 		options.RequestsPerMinute = 120
@@ -112,9 +117,11 @@ func (l *rateLimiter) take(key string, now time.Time) (bool, time.Duration) {
 	return true, 0
 }
 
-// rateLimitKey prefers the tenant, then the client address.
+// rateLimitKey prefers the verified tenant, then the client address. An
+// identity whose tenant the client chose (a tenant header without a verified
+// token) is keyed by address, so switching tenants buys no fresh bucket.
 func rateLimitKey(r *http.Request) string {
-	if id, ok := identity.FromContext(r.Context()); ok && id.TenantID != uuid.Nil {
+	if id, ok := verifiedIdentity(r); ok && id.TenantID != uuid.Nil {
 		return "tenant:" + id.TenantID.String()
 	}
 	if client := clientAddress(r); client != "" {
@@ -158,3 +165,21 @@ func clientAddress(r *http.Request) string {
 func trustedProxy(addr netip.Addr) bool {
 	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
 }
+{%- if options['auth.mode'] == 'generate' %}
+
+// verifiedIdentity returns the identity bound to r when the platform-auth
+// middleware verified its token.
+func verifiedIdentity(r *http.Request) (identity.IdentityContext, bool) {
+	if _, verified := platformauth.IdentityFromContext(r.Context()); !verified {
+		return identity.IdentityContext{}, false
+	}
+	return identity.FromContext(r.Context())
+}
+{%- else %}
+
+// verifiedIdentity reports none: without platform auth (auth.mode=none) no
+// token is verified, so every request is keyed by address.
+func verifiedIdentity(*http.Request) (identity.IdentityContext, bool) {
+	return identity.IdentityContext{}, false
+}
+{%- endif %}

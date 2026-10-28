@@ -193,3 +193,74 @@ Keys are disabled by default, including their management routes.""",
             category=FeatureCategory.PLATFORM,
         )
     )
+
+    api.add_option(
+        Option(
+            path="auth.keycloak_tenant_source",
+            type=OptionType.ENUM,
+            default="organization",
+            options=("organization", "user_attribute"),
+            summary="Where the Gatekeeper takes each user's tenant from in Keycloak.",
+            description="""\
+How the Gatekeeper decides which tenant a signed-in user belongs to. The
+tenant becomes the ``https://forge/tenant_id`` claim of the internal token,
+which the services isolate data by.
+
+- ``organization`` (default): Keycloak Organizations (Keycloak 26+). The realm
+  enables organizations and seeds one for the dev user; sign-in requests the
+  ``organization`` scope, and the active organization's id is the tenant. A
+  member of several organizations picks one at sign-in and switches with a
+  form ``POST /auth/organization`` (``alias``); ``/auth/login?idp=<alias>``
+  passes ``kc_idp_hint`` to go straight to an organization's identity
+  provider. A user in no organization cannot sign in unless
+  ``auth.keycloak_self_registration=own_organization``.
+- ``user_attribute``: the ``tenant_id`` user attribute, set by an
+  administrator (or, with ``auth.keycloak_self_registration=default_tenant``,
+  the default tenant for every self-registered user).
+
+A host with a TMS ``tenant-route`` keeps the TMS model in both modes: TMS
+pins the host to one tenant and its realm's ``tenant_id`` claim is used.
+
+Only for ``auth.provider=gatekeeper``. Sets the Gatekeeper's ``TENANT_SOURCE``
+and the realm's organization settings.""",
+            category=FeatureCategory.PLATFORM,
+        )
+    )
+
+    api.add_option(
+        Option(
+            path="auth.keycloak_self_registration",
+            type=OptionType.ENUM,
+            default="off",
+            options=("off", "own_organization", "default_tenant"),
+            summary="Whether users can sign themselves up, and which tenant they get.",
+            description="""\
+Self-registration through the realm's registration form.
+
+- ``off`` (default): the realm does not offer registration. Users are created
+  by an administrator (or an identity provider) with their tenant: added to an
+  organization, or given the ``tenant_id`` attribute. A user without a tenant
+  is refused at sign-in and their Keycloak session is ended.
+- ``own_organization`` (``auth.keycloak_tenant_source=organization``): the
+  realm offers registration. On the first sign-in of a user in no
+  organization the Gatekeeper creates an organization with that user as its
+  only member, through the Keycloak Admin API, and signs them in to it, so
+  every sign-up starts its own tenant. Only a verified email gets an
+  organization (it is named after it): the realm turns on ``verifyEmail``,
+  so configure its SMTP server. The Gatekeeper's service account is granted
+  ``manage-realm`` for this, a realm-wide administration role: whoever holds
+  the Gatekeeper's client secret can also change the realm's authentication
+  flows, password policy, identity providers and SMTP settings, so keep that
+  secret as you would a realm administrator's password. Nothing limits how
+  many sign-ups (organizations) are created: consider a captcha or rate
+  limit on the registration form.
+- ``default_tenant`` (``auth.keycloak_tenant_source=user_attribute``): the
+  realm offers registration, and a user without a ``tenant_id`` attribute is
+  given the default tenant at their first sign-in. Every self-registered user
+  shares that tenant and its data: only for a single-tenant application.
+
+Sets the Gatekeeper's ``SELF_REGISTRATION`` and the realm's
+``registrationAllowed`` and ``verifyEmail``.""",
+            category=FeatureCategory.PLATFORM,
+        )
+    )

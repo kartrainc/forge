@@ -45,6 +45,22 @@ class TenantConfig:
     # corresponding check is skipped at /auth time.
     idle_timeout_seconds: int = 0
     absolute_timeout_seconds: int = 0
+    # True for a TMS ``tenant-route`` (the host belongs to ``tenant_id``);
+    # False for the static fallback, whose ``tenant_id`` is only a default.
+    managed: bool = False
+
+    def admits(self, tenant_id: str | None) -> bool:
+        """Whether a session or token for *tenant_id* may be used on this host.
+
+        A TMS route pins its host to one tenant. Without one, the tenant comes
+        from the user: with organizations any active organization is admitted;
+        with the user attribute, the fallback's tenant must match.
+        """
+        if not tenant_id:
+            return False
+        if not self.managed and get_settings().tenant_source == "organization":
+            return True
+        return tenant_id == self.tenant_id
 
 
 # ── In-memory cache (same pattern as jwks.py) ─────────────────────────────
@@ -109,6 +125,7 @@ async def resolve_tenant_config(hostname: str) -> TenantConfig | None:
                     cfg.default_absolute_timeout_seconds,
                 )
             ),
+            managed=True,
         )
         _config_cache[hostname] = (now, tc)
         return tc
@@ -121,25 +138,25 @@ def get_fallback_config(tenant_slug: str) -> TenantConfig:
     """
     Build a :class:`TenantConfig` from the static ``GatekeeperSettings``.
 
-    This preserves backward compatibility: when no ``tenant-route:*`` key
-    exists in Redis, the gatekeeper assumes ``tenant_slug == realm_name``
-    and uses the single static ``keycloak_base_url`` / ``client_id`` /
-    ``client_secret`` from environment variables.
+    Without a ``tenant-route:*`` key in Redis the gatekeeper signs users in
+    to the configured realm (``KEYCLOAK_ADMIN_REALM``) with the static
+    ``keycloak_base_url`` / ``client_id`` / ``client_secret``. With
+    ``REALM_PER_HOST`` the host's first label names the realm instead.
     """
     cfg = get_settings()
     # Further frontends of the project (``GATEKEEPER_FRONTEND_HOST_LABELS``)
-    # are served on hosts of their own and resolve like the admin realm.
+    # are served on hosts of their own and resolve like the admin realm, also
+    # with REALM_PER_HOST.
     frontend_labels = {
         label.strip()
         for label in cfg.gatekeeper_frontend_host_labels.split(",")
         if label.strip()
     }
-    realm = cfg.keycloak_admin_realm if tenant_slug in frontend_labels else tenant_slug
+    per_host = cfg.realm_per_host and tenant_slug not in frontend_labels
+    realm = tenant_slug if per_host else cfg.keycloak_admin_realm
     return TenantConfig(
         tenant_id=(
-            cfg.default_tenant_id
-            if realm == cfg.keycloak_admin_realm
-            else tenant_slug
+            cfg.default_tenant_id if realm == cfg.keycloak_admin_realm else realm
         ),
         realm_type="dedicated",
         realm_name=realm,

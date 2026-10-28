@@ -170,7 +170,8 @@ def test_compute_returns_synthesis_when_active() -> None:
     syn = compute_platform_synthesis(cfg, resolve(cfg))
     assert isinstance(syn, PlatformSynthesis)
     assert all(isinstance(c, ServiceClient) for c in syn.clients)
-    assert syn.realm == "forge"
+    # The project's realm, the same one compose, the gatekeeper and Helm use.
+    assert syn.realm == "app"
     assert syn.issuer == "http://gatekeeper:5000"
     assert syn.internal_audience == "forge-services"
 

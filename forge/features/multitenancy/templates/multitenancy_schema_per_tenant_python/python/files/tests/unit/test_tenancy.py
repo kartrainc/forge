@@ -127,6 +127,8 @@ def test_resolve_subdomain() -> None:
     assert r.resolve(_request(headers={"host": "acme.example.com"})) == "acme"
     assert r.resolve(_request(headers={"host": "example.com:8080"})) == "example"
     assert r.resolve(_request(headers={"host": "localhost"})) is None
+    # an IP address names no tenant
+    assert r.resolve(_request(headers={"host": "127.0.0.1:8080"})) is None
 
 
 def test_resolve_token_claim_builtin_dotpath() -> None:
