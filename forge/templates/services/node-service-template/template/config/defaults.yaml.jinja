@@ -12,12 +12,14 @@ server:
     allowHeaders: ["*"]
     allowCredentials: false
     maxAge: 600
+{%- if use_database | default(true) %}
 
 db:
   url: "postgresql://postgres:postgres@localhost:5432/{{ project_name }}"
   poolMin: 2
   poolMax: 10
   statementTimeoutMs: 30000
+{%- endif %}
 
 logging:
   level: "info"

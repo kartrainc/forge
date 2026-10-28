@@ -6,6 +6,10 @@ _exclude:
   - "node_modules"
   - "dist"
   - "coverage"
+  # ``use_database=false`` (the ``http-service`` app template) drops the
+  # Prisma stack and the sample CRUD entity. Matched against rendered paths;
+  # renders to an empty pattern (matches nothing) when the database is on.
+  - "{% if not (use_database | default(true)) %}/prisma\n/prisma.config.ts\n/src/data\n/src/lib/prisma.ts\n/src/lib/prisma-options.ts\n/src/routes/items.ts\n/src/schemas/common.schema.ts\n/src/schemas/health.schema.ts\n/src/schemas/item.schema.ts\n/src/services\n/tests/setup.ts\n/tests/integration/database.test.ts\n/tests/integration/items.test.ts\n/tests/unit/item.service.test.ts\n/tests/unit/prisma-options.test.ts\n/tests/unit/repositories.test.ts{% endif %}"
 
 # ---------------------------------------------------------------------------
 # Questions (prompted during generation)
@@ -66,3 +70,11 @@ project_title:
   type: str
   when: false
   default: "{{ project_name | replace('-', ' ') | title }}"
+
+# Set by the generator from the backend's app template (``http-service``
+# turns it off). Only passed when false, so ``crud-service`` renders and
+# records exactly what it did before this switch existed.
+use_database:
+  type: bool
+  when: false
+  default: true

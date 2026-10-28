@@ -34,7 +34,9 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES = _REPO_ROOT / "forge" / "templates" / "services"
 
-_NODE_SCHEMA = _TEMPLATES / "node-service-template" / "template" / "src" / "config" / "schema.ts"
+_NODE_SCHEMA = (
+    _TEMPLATES / "node-service-template" / "template" / "src" / "config" / "schema.ts.jinja"
+)
 _NODE_LOADER = _TEMPLATES / "node-service-template" / "template" / "src" / "config" / "loader.ts"
 _RUST_CONFIG = _TEMPLATES / "rust-service-template" / "template" / "src" / "config.rs"
 _RUST_MAIN = _TEMPLATES / "rust-service-template" / "template" / "src" / "main.rs"

@@ -86,6 +86,35 @@ class TestInferBackends:
     def test_missing_services_dir_returns_empty(self, tmp_path: Path) -> None:
         assert _infer_backends(tmp_path) == []
 
+    def test_recovers_each_backends_app_template(self, tmp_path: Path) -> None:
+        """An http-service or a worker comes back as itself, with its own default features."""
+        rendered = {
+            "capture": ("package.json", "services/node-service-template", "use_database: false\n"),
+            "store": ("package.json", "services/node-service-template", ""),
+            "jobs": ("pyproject.toml", "services/python/worker", ""),
+            "tenants": ("pyproject.toml", "services/python/tenant-management-service", ""),
+            "legacy": ("package.json", None, ""),
+        }
+        for name, (marker, template_dir, extra) in rendered.items():
+            service = tmp_path / "services" / name
+            service.mkdir(parents=True)
+            (service / marker).write_text("{}", encoding="utf-8")
+            if template_dir is not None:
+                answers = f"_src_path: /venv/site-packages/forge/templates/{template_dir}\n{extra}"
+                (service / ".copier-answers.yml").write_text(answers, encoding="utf-8")
+
+        backends = {b.name: b for b in _infer_backends(tmp_path)}
+
+        assert {name: b.app_template for name, b in backends.items()} == {
+            "capture": "http-service",
+            "jobs": "worker",
+            "legacy": "crud-service",
+            "store": "crud-service",
+            "tenants": "tenant-management-service",
+        }
+        assert backends["capture"].features == []
+        assert backends["store"].features == ["items"]
+
 
 class TestUpdateProject:
     def test_refuses_without_forge_toml(self, tmp_path: Path) -> None:

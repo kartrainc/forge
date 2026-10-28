@@ -34,6 +34,7 @@ def register_all(api: ForgeAPI) -> None:
         Fragment(
             name="background_tasks",
             capabilities=("redis",),
+            excluded_app_templates=("http-service",),  # stateless: no worker or queue
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("background_tasks", "python"),
@@ -70,6 +71,7 @@ def register_all(api: ForgeAPI) -> None:
             # covered, auto-derivation tags this as tier 1 cross-backend
             # parity. The explicit ``parity_tier=2`` override that used to
             # live here is dropped now that the Rust impl has landed.
+            excluded_app_templates=("http-service",),  # stateless: no queue of its own
             implementations={
                 BackendLanguage.PYTHON: FragmentImplSpec(
                     fragment_dir=_impl("queue_port", "python"),
@@ -126,6 +128,7 @@ def register_all(api: ForgeAPI) -> None:
             # language-specific by design", not "feature is Python-only".
             depends_on=("queue_port",),
             capabilities=("redis",),
+            excluded_app_templates=("http-service",),  # follows queue_port
             implementations={
                 BackendLanguage.NODE: FragmentImplSpec(
                     fragment_dir=_impl("queue_bullmq", "node"),

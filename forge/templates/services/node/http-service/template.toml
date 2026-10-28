@@ -1,0 +1,17 @@
+# Backend application-template manifest — discovered by
+# forge.backend_app_templates.
+#
+# `http-service` is the Node baseline (Fastify, config, logging, health, error
+# envelope, auth hooks) without a database of its own: the same template as
+# crud-service, rendered with `use_database=false`, so it drops Prisma, the
+# migrate step and the sample `items` CRUD. For stateless services (renderers,
+# screenshot or PDF capture, edge adapters). The compose stack and the Helm
+# chart wire no database, DB URL or migrate step for it.
+[template]
+variant = "http-service"
+language = "node"
+display_label = "Node — HTTP service (no database)"
+template_dir = "services/node-service-template"
+base = ""
+supported = true
+uses_database = false

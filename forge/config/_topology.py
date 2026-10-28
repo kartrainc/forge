@@ -55,6 +55,15 @@ def compute_render_postgres(
     return (has_backends and database_mode != "none") or include_keycloak
 
 
+def database_backends(backends: list[BackendConfig]) -> list[BackendConfig]:
+    """The backends that own a database: a stack of ``http-service`` only needs no Postgres."""
+    from forge.backend_app_templates import (  # noqa: PLC0415 — avoid config<->app_templates cycle
+        backend_uses_database,
+    )
+
+    return [bc for bc in backends if backend_uses_database(bc.language, bc.app_template)]
+
+
 def backend_topology_entry(
     bc: BackendConfig,
     synthesis: PlatformSynthesis | None,
@@ -70,6 +79,7 @@ def backend_topology_entry(
     """
     from forge.backend_app_templates import (  # noqa: PLC0415 — avoid config<->app_templates cycle
         DEFAULT_BACKEND_TEMPLATE,
+        backend_uses_database,
         get_backend_application_template,
     )
 
@@ -79,12 +89,14 @@ def backend_topology_entry(
     depends_on_services = [
         svc for svc in (app_tmpl.requires_services if app_tmpl else ()) if svc in rendered_infra
     ]
+    uses_database = backend_uses_database(bc.language, bc.app_template)
     return {
         "name": bc.name,
         "language": bc.language.value,
         "port": bc.server_port,
         "db_name": bc.name.replace("-", "_"),
-        "has_migrations": bc.language in BUILTIN_MIGRATING,
+        "uses_database": uses_database,
+        "has_migrations": uses_database and bc.language in BUILTIN_MIGRATING,
         "depends_on_services": depends_on_services,
         # Per-service S2S / inter-service env block; empty when synthesis is
         # inactive (single-service or auth.service_discovery off).
@@ -165,7 +177,7 @@ def compute_topology(
     """
     database_mode = config.database_mode
     render_postgres = compute_render_postgres(
-        has_backends=bool(config.backends),
+        has_backends=bool(database_backends(config.backends)),
         database_mode=database_mode,
         include_keycloak=config.include_keycloak,
     )

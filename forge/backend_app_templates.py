@@ -83,6 +83,10 @@ class BackendApplicationTemplate:
             ``depends_on: <svc>: condition: service_healthy`` edge for each
             one that is actually rendered, so the service doesn't crash-loop
             racing an infra container that isn't up yet.
+        uses_database: ``False`` for a service shape with no database of its
+            own (e.g. Node ``http-service``): no database, migrate step or
+            DB URL is wired for it, and its template renders with
+            ``use_database=false``.
     """
 
     language: LanguageKey
@@ -92,6 +96,7 @@ class BackendApplicationTemplate:
     supported: bool = True
     base_template_dir: str = ""
     requires_services: tuple[str, ...] = ()
+    uses_database: bool = True
 
 
 BACKEND_APPLICATION_TEMPLATES: dict[tuple[LanguageKey, str], BackendApplicationTemplate] = {}
@@ -113,6 +118,12 @@ def get_backend_application_template(
 ) -> BackendApplicationTemplate | None:
     """Return the variant for ``(language, variant)``, or ``None``."""
     return BACKEND_APPLICATION_TEMPLATES.get((language, variant))
+
+
+def backend_uses_database(language: LanguageKey, variant: str | None) -> bool:
+    """Whether a backend's app template owns a database (unknown variants do)."""
+    template = get_backend_application_template(language, variant or DEFAULT_BACKEND_TEMPLATE)
+    return template.uses_database if template is not None else True
 
 
 def available_backend_templates(language: LanguageKey) -> tuple[str, ...]:
@@ -209,6 +220,11 @@ def _discover_manifests() -> None:
         requires_services = (
             tuple(str(s) for s in requires_raw) if isinstance(requires_raw, list) else ()
         )
+        uses_database = template.get("uses_database", True)
+        if not isinstance(uses_database, bool):
+            # A string such as "false" would read as true and wire a database: skip the
+            # manifest like any other malformed one rather than guess.
+            continue
         register_backend_application_template(
             BackendApplicationTemplate(
                 language=language,
@@ -218,6 +234,7 @@ def _discover_manifests() -> None:
                 supported=bool(template.get("supported", True)),
                 base_template_dir=str(template.get("base", "")),
                 requires_services=requires_services,
+                uses_database=uses_database,
             )
         )
 
