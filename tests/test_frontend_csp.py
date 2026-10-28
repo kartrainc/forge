@@ -18,6 +18,7 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
@@ -440,6 +441,42 @@ def test_without_chromium_the_canary_says_so_and_the_server_still_serves(tmp_pat
         server.terminate()
         _, stderr = server.communicate(timeout=10)
     assert "could not open the canary page in Chromium" in stderr
+
+
+def _status(port: int, path: str, body: bytes | None = None) -> int:
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as res:
+            return res.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_a_bad_report_or_path_is_a_bad_request_and_the_server_keeps_serving(
+    tmp_path: Path,
+) -> None:
+    app = _app(tmp_path, f'add_header Content-Security-Policy "{"default-src 'self'"}" always;\n')
+    reports = tmp_path / "reports.jsonl"
+    server, port = _serve(app, {"FORGE_CSP_REPORT": str(reports)})
+    try:
+        _get(port)
+        report = {"csp-report": {"effective-directive": "img-src", "blocked-uri": "https://x.test"}}
+        assert _status(port, "/__csp-report", b"not json") == 400
+        assert _status(port, "/__csp-report", b"null") == 400
+        assert _status(port, "/__csp-report", json.dumps(report).encode()) == 204
+        # A malformed percent-escape, as nginx answers it.
+        assert _status(port, "/%E0%A4%A.js") == 400
+        assert _get(port)[0].startswith("default-src 'self'")
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+    # Neither body is dropped: the check fails on each.
+    assert [json.loads(line) for line in reports.read_text(encoding="utf-8").splitlines()] == [
+        {"unreadable-report": "not json"},
+        {"unreadable-report": "null"},
+        report["csp-report"],
+    ]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

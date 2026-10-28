@@ -161,6 +161,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Component library of the Vue template. Defaults to 'shadcn'. "
         "Svelte and Flutter keep their own kits.",
     )
+    p.add_argument(
+        "--dev-server",
+        action="store_true",
+        default=None,
+        help="Vue only: also generate docker-compose.dev.yaml, which runs the "
+        "frontend as a Vite dev server with hot reload (docker compose up --watch). "
+        "Off by default.",
+    )
 
     # Frontend toggles
     p.add_argument("--include-auth", action="store_true", default=None)

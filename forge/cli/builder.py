@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import sys
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from forge.config import (
     DEFAULT_REALM,
@@ -108,6 +109,15 @@ class _Resolver:
         return node if node is not None else default
 
 
+class _FeaturesKeyword(TypedDict, total=False):
+    features: list[str]
+
+
+def _features_of(raw: Any) -> _FeaturesKeyword:
+    """A ``features`` keyword when the configuration names some, else none (the backend's default)."""
+    return {} if raw is None else {"features": _normalize_features(raw)}
+
+
 def _normalize_features(raw: Any, default: list[str] | None = None) -> list[str]:
     """Coerce CLI/config feature input (list or comma-string) to a clean list."""
     if raw is None:
@@ -133,6 +143,7 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "generate_e2e_tests": "generate_e2e_tests",
     "layout": "layout",
     "ui_kit": "ui_kit",
+    "dev_server": "dev_server",
 }
 
 
@@ -188,7 +199,8 @@ def _build_backends_from_cfg(
                     project_name=project_name,
                     language=language,
                     description=be_cfg.get("description", description),
-                    features=_normalize_features(be_cfg.get("features"), default=["items"]),
+                    # Omitted, the backend's own default: ["items"], or none without a database.
+                    **_features_of(be_cfg.get("features")),
                     python_version=be_cfg.get("python_version", "3.13"),
                     node_version=be_cfg.get("node_version", "22"),
                     rust_edition=be_cfg.get("rust_edition", "2024"),
@@ -209,15 +221,14 @@ def _build_backends_from_cfg(
             project_name=project_name,
             language=language,
             description=description,
-            features=_normalize_features(
-                r.get("features", "backend", "features", default=None),
-                default=["items"],
-            ),
+            # Omitted, the backend's own default: ["items"], or none without a database.
+            **_features_of(r.get("features", "backend", "features", default=None)),
             python_version=r.get("python_version", "backend", "python_version", default="3.13"),
             node_version=r.get("node_version", "backend", "node_version", default="22"),
             rust_edition=r.get("rust_edition", "backend", "rust_edition", default="2024"),
             go_version=str(r.get("go_version", "backend", "go_version", default="1.27")),
             server_port=r.get("backend_port", "backend", "server_port", default=5000),
+            app_template=r.get("app_template", "backend", "app_template", default="crud-service"),
         )
     ]
 
@@ -298,6 +309,7 @@ def _frontend_config(
         generate_e2e_tests=get("generate_e2e_tests", True),
         layout=get("layout", "sidebar"),
         ui_kit=get("ui_kit", "shadcn"),
+        dev_server=get("dev_server", False),
         name=name,
     )
 
@@ -309,6 +321,9 @@ def _build_frontend_from_cfg(
     fw_str = r.get("frontend", "frontend", "framework", default="none")
     framework = _frontend_framework(fw_str)
     if framework == FrontendFramework.NONE:
+        if r.get("dev_server", "frontend", "dev_server", default=False):
+            # Not a silent no-op: there is no frontend to run as a dev server.
+            raise ValueError("dev_server needs a Vue frontend: pass --frontend vue.")
         return None, False
 
     def get(key: str, default: Any) -> Any:
@@ -337,6 +352,12 @@ def _build_frontends_from_cfg(
     """
     frontends_raw = r.cfg.get("frontends")
     if isinstance(frontends_raw, list):
+        if getattr(r.args, "dev_server", None):
+            print(
+                "warning: --dev-server has no effect beside a frontends: list; "
+                "set dev_server: true on the entries that want it.",
+                file=sys.stderr,
+            )
         frontends: list[FrontendConfig] = []
         for i, raw in enumerate(frontends_raw):
             # Unlike a backend entry, a frontend's position matters (index 0 is

@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from forge.common_files import COMMON_DIR, apply_common_files
-from forge.config import BackendConfig, BackendLanguage, ProjectConfig
+from forge.config import (
+    BackendConfig,
+    BackendLanguage,
+    FrontendConfig,
+    FrontendFramework,
+    ProjectConfig,
+)
 
 
 class TestApplyCommonFiles:
@@ -21,6 +27,35 @@ class TestApplyCommonFiles:
         assert (tmp_path / ".editorconfig").is_file()
         assert (tmp_path / ".gitignore").is_file()
         assert (tmp_path / ".pre-commit-config.yaml").is_file()
+
+    def test_check_yaml_reads_compose_tags_only_when_a_dev_server_overlay_is_generated(
+        self, tmp_path: Path
+    ) -> None:
+        # docker-compose.dev.yaml uses !reset and !override, which check-yaml rejects
+        # without --unsafe; a project without the overlay keeps the stock hook.
+        def hook(dev_server: bool) -> str:
+            root = tmp_path / f"dev-{dev_server}"
+            root.mkdir()
+            config = ProjectConfig(
+                project_name="demo",
+                backends=[
+                    BackendConfig(name="api", project_name="demo", language=BackendLanguage.PYTHON)
+                ],
+                frontends=[
+                    FrontendConfig(
+                        project_name="demo",
+                        framework=FrontendFramework.VUE,
+                        include_chat=False,
+                        dev_server=dev_server,
+                    )
+                ],
+            )
+            apply_common_files(config, root)
+            return (root / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+        assert "args: [--unsafe]" in hook(True)
+        stock = (COMMON_DIR / "pre-commit-config.yaml").read_text(encoding="utf-8")
+        assert hook(False) == stock
 
     def test_writes_python_ci_workflow(self, tmp_path: Path) -> None:
         config = ProjectConfig(

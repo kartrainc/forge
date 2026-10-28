@@ -72,16 +72,35 @@ def test_available_backend_templates_per_language():
         "tenant-management-service",
         "worker",
     )
-    assert bat.available_backend_templates(BackendLanguage.NODE) == ("crud-service",)
+    assert bat.available_backend_templates(BackendLanguage.NODE) == (
+        "crud-service",
+        "http-service",
+    )
     assert bat.available_backend_templates(BackendLanguage.RUST) == ("crud-service",)
 
 
 def test_all_backend_template_names():
     assert bat.all_backend_template_names() == (
         "crud-service",
+        "http-service",
         "tenant-management-service",
         "worker",
     )
+
+
+def test_http_service_variant_is_node_baseline_without_database():
+    """``http-service`` renders the Node baseline template itself, with the
+    database switched off; every other variant keeps its database."""
+    from forge.config import BACKEND_REGISTRY
+
+    t = bat.get_backend_application_template(BackendLanguage.NODE, "http-service")
+    assert t is not None
+    assert t.template_dir == BACKEND_REGISTRY[BackendLanguage.NODE].template_dir
+    assert t.base_template_dir == ""
+    assert t.uses_database is False
+    assert bat.backend_uses_database(BackendLanguage.NODE, "http-service") is False
+    assert bat.backend_uses_database(BackendLanguage.NODE, "crud-service") is True
+    assert bat.backend_uses_database(BackendLanguage.NODE, None) is True
 
 
 def test_get_unknown_variant_returns_none():
@@ -356,6 +375,310 @@ def test_crud_service_renders_baseline_shape(tmp_path: Path):
     assert (svc / "src" / "app" / "api" / "v1" / "endpoints" / "items.py").is_file()
     # ...and NOT the worker package.
     assert not (svc / "src" / "worker").exists()
+
+
+def test_node_http_service_renders_without_database(tmp_path: Path):
+    """A Node ``http-service`` next to a Node ``crud-service`` gets no Prisma
+    stack, no sample entity, no database, no DB URL, no migrate step and no
+    queue or cache, while its sibling keeps all of them."""
+    import json
+
+    cfg = ProjectConfig(
+        project_name="http_demo",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name="capture",
+                project_name="http_demo",
+                language=BackendLanguage.NODE,
+                app_template="http-service",
+                server_port=5100,
+                features=[],
+            ),
+            BackendConfig(
+                name="store",
+                project_name="http_demo",
+                language=BackendLanguage.NODE,
+                server_port=5101,
+                features=["items"],
+            ),
+        ],
+        frontends=[],
+        options={
+            "reliability.connection_pool": True,
+            "async.task_queue": True,
+            "queue.backend": "bullmq",
+            "reliability.cache": "redis",
+        },
+    )
+    from forge.generator import generate
+
+    root = generate(cfg, quiet=True, dry_run=True)
+    svc = root / "services" / "capture"
+    for rel in (
+        "prisma",
+        "prisma.config.ts",
+        "src/data",
+        "src/lib/prisma.ts",
+        "src/lib/prisma-pool.ts",
+        "src/routes/items.ts",
+        "src/services",
+        "src/worker",
+    ):
+        assert not (svc / rel).exists(), f"database, queue or worker file rendered: {rel}"
+    assert "prisma" not in (svc / "entrypoint.sh").read_text(encoding="utf-8").lower()
+    # Every rendered source and test, not a fixed list: a database file added to the
+    # template later without its exclusion fails here instead of in the generated build.
+    for path in sorted(svc.rglob("*.ts")):
+        if "node_modules" in path.parts:
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(svc).as_posix()
+        assert "prisma" not in text.lower(), rel
+        assert "item.schema" not in text and "item.service" not in text, rel
+        assert "itemRoutes" not in text and "data/repositories" not in text, rel
+
+    package = json.loads((svc / "package.json").read_text(encoding="utf-8"))
+    assert not [name for name in package["dependencies"] if "prisma" in name]
+    assert not {"bullmq", "ioredis"} & set(package["dependencies"])
+    assert "prisma" not in package["devDependencies"]
+    store_package = json.loads(
+        (root / "services" / "store" / "package.json").read_text(encoding="utf-8")
+    )
+    assert {"bullmq", "ioredis"} <= set(store_package["dependencies"])
+    assert "migrate" not in package["scripts"]
+    assert "use_database: false" in (svc / ".copier-answers.yml").read_text(encoding="utf-8")
+
+    # Only the database-free image drops dev dependencies: crud-service's
+    # entrypoint still runs the Prisma CLI.
+    prune = "npm prune --omit=dev"
+    assert prune in (svc / "Dockerfile").read_text(encoding="utf-8")
+    assert prune not in (root / "services" / "store" / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (svc / ".dockerignore").read_text(encoding="utf-8")
+    assert "node_modules" in dockerignore
+    assert ".env.*\n!.env.example" in dockerignore
+
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "capture-migrate:" not in compose
+    assert "store-migrate:" in compose
+    assert "/capture\"" not in compose
+    init_db = (root / "deploy" / "compose" / "init-db.sh").read_text(encoding="utf-8")
+    assert "capture" not in init_db
+    assert "store" in init_db
+    assert (root / "services" / "store" / "src" / "lib" / "prisma.ts").is_file()
+
+    # No entity, so no domain enum; the database-backed sibling keeps them.
+    assert not (svc / "src" / "schemas" / "enums").exists()
+    assert (root / "services" / "store" / "src" / "schemas" / "enums").is_dir()
+
+    # Its own tests carry the coverage gate: the entrypoint and the routes over real HTTP.
+    assert (svc / "tests" / "e2e" / "entrypoint.test.ts").is_file()
+    assert '"/api/v1/"' in (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
+
+    # The config reads APP__SERVER__PORT: a plain PORT would leave every Node service on 5000.
+    for name, port in (("capture", 5100), ("store", 5101)):
+        for compose_file in ("docker-compose.yaml", "docker-compose.fragment.yaml"):
+            text = (root / "services" / name / compose_file).read_text(encoding="utf-8")
+            assert f'APP__SERVER__PORT: "{port}"' in text, (name, compose_file)
+            assert "\n      PORT:" not in text, (name, compose_file)
+
+    # forge --update rebuilds each backend as the template that rendered it.
+    from forge.sync.forge_to_project.updater import _infer_backends
+
+    assert {b.name: b.app_template for b in _infer_backends(root)} == {
+        "capture": "http-service",
+        "store": "crud-service",
+    }
+
+
+def test_a_backend_without_a_database_defaults_to_no_features():
+    http = BackendConfig(name="capture", language=BackendLanguage.NODE, app_template="http-service")
+    crud = BackendConfig(name="store", language=BackendLanguage.NODE)
+
+    assert http.features == []
+    assert crud.features == ["items"]
+    http.validate()
+
+
+def test_a_template_set_later_still_gets_its_own_default_features():
+    import dataclasses
+
+    crud = BackendConfig(name="capture", language=BackendLanguage.NODE)
+    replaced = dataclasses.replace(crud, app_template="http-service")
+    assigned = BackendConfig(name="capture", language=BackendLanguage.NODE)
+    assigned.app_template = "http-service"
+    assigned.validate()
+
+    assert crud.features == ["items"]
+    assert replaced.features == []
+    assert assigned.features == []
+
+
+def test_a_backend_without_a_database_refuses_crud_features():
+    # A feature is a table, its API and the frontend's pages: without a database the pages
+    # would call an API nobody serves.
+    http = BackendConfig(
+        name="capture",
+        language=BackendLanguage.NODE,
+        app_template="http-service",
+        features=["items"],
+    )
+
+    with pytest.raises(ValueError, match="owns no database"):
+        http.validate()
+
+
+def test_a_stack_file_backend_without_features_gets_its_templates_default():
+    import argparse
+
+    from forge.cli.builder import _build_config
+
+    args = argparse.Namespace()
+    stack = {
+        "project_name": "http_demo",
+        "backends": [
+            {"name": "capture", "language": "node", "app_template": "http-service", "server_port": 5100},
+            {"name": "store", "language": "node", "server_port": 5101},
+        ],
+        "frontend": {"framework": "none"},
+    }
+
+    config = _build_config(args, stack)
+
+    assert [b.features for b in config.backends] == [[], ["items"]]
+
+
+def test_a_single_backend_table_selects_its_app_template():
+    import argparse
+
+    from forge.cli.builder import _build_config
+
+    stack = {
+        "project_name": "http_demo",
+        "backend": {"name": "capture", "language": "node", "app_template": "http-service"},
+        "frontend": {"framework": "none"},
+    }
+
+    [backend] = _build_config(argparse.Namespace(), stack).backends
+
+    assert backend.app_template == "http-service"
+    assert backend.features == []
+
+
+def test_authenticated_e2e_verifies_a_minted_token(tmp_path: Path):
+    """Behind the gatekeeper, the E2E suite serves its own keys, expects the verifier's 401 for an
+    anonymous request and routes an authenticated one; without auth it routes directly."""
+    from forge.generator import generate
+
+    def network_test(auth: bool, out: Path) -> str:
+        cfg = ProjectConfig(
+            project_name="http_auth",
+            output_dir=str(out),
+            backends=[
+                BackendConfig(
+                    name="capture",
+                    project_name="http_auth",
+                    language=BackendLanguage.NODE,
+                    app_template="http-service",
+                    server_port=5100,
+                )
+            ],
+            frontends=[],
+            include_keycloak=auth,
+            options={"auth.provider": "gatekeeper"} if auth else {},
+        )
+        root = generate(cfg, quiet=True, dry_run=True)
+        svc = root / "services" / "capture"
+        assert "tests/integration/setup-env.ts" in (svc / "vitest.e2e.config.ts").read_text(
+            encoding="utf-8"
+        )
+        return (svc / "tests" / "e2e" / "network.test.ts").read_text(encoding="utf-8")
+
+    with_auth = network_test(True, tmp_path / "auth")
+    without = network_test(False, tmp_path / "plain")
+
+    assert "buildTestToken" in with_auth
+    assert "toBe(401)" in with_auth
+    assert "buildTestToken" not in without
+    assert "toBe(401)" not in without
+
+
+def _http_only_project(tmp_path: Path, names: list[str]) -> ProjectConfig:
+    return ProjectConfig(
+        project_name="http_only",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name=name,
+                project_name="http_only",
+                language=BackendLanguage.NODE,
+                app_template="http-service",
+                server_port=5100 + index,
+                features=[],
+            )
+            for index, name in enumerate(names)
+        ],
+        frontends=[],
+    )
+
+
+def test_stack_of_http_services_has_no_postgres(tmp_path: Path):
+    from forge.generator import generate
+
+    root = generate(_http_only_project(tmp_path, ["capture"]), quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "postgres:" not in compose
+    assert "POSTGRES_DB" not in compose
+    assert "capture-migrate" not in compose
+
+
+def test_postgres_for_keycloak_alone_keeps_its_default_database(tmp_path: Path):
+    """No backend owns a database, but Keycloak needs Postgres: no database named after an http-service."""
+    from forge.generator import generate
+
+    cfg = _http_only_project(tmp_path, ["capture"])
+    cfg.include_keycloak = True
+    root = generate(cfg, quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "POSTGRES_DB: postgres" in compose
+    assert "POSTGRES_DB: capture" not in compose
+
+
+def test_postgres_names_its_database_after_a_backend_that_owns_one(tmp_path: Path):
+    from forge.generator import generate
+
+    cfg = _http_only_project(tmp_path, ["capture"])
+    cfg.backends.append(
+        BackendConfig(
+            name="store",
+            project_name="http_only",
+            language=BackendLanguage.NODE,
+            server_port=5200,
+            features=["items"],
+        )
+    )
+    root = generate(cfg, quiet=True, dry_run=True)
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "POSTGRES_DB: store" in compose
+
+
+def test_database_name_collision_ignores_backends_without_a_database(tmp_path: Path):
+    cfg = _http_only_project(tmp_path, ["my-svc"])
+    cfg.backends.append(
+        BackendConfig(
+            name="my_svc",
+            project_name="http_only",
+            language=BackendLanguage.NODE,
+            server_port=5200,
+            features=["items"],
+        )
+    )
+
+    cfg.validate()
 
 
 def test_two_stage_variant_renders_nonempty_app_title(tmp_path: Path):

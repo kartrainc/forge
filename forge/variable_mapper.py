@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from forge.backend_app_templates import backend_uses_database
 from forge.config import (
     BACKEND_REGISTRY,
     BackendConfig,
@@ -170,6 +171,10 @@ def backend_context(
     # build stage when there's no sibling ``packages/`` tree.
     if bc.sdk_consumption is not None:
         ctx["sdk_consumption"] = bc.sdk_consumption
+    # Only a database-free app template passes the key, so crud-service keeps
+    # its template default and its recorded answers byte-identical.
+    if not backend_uses_database(bc.language, bc.app_template):
+        ctx["use_database"] = False
     return ctx
 
 
@@ -370,6 +375,9 @@ def vue_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict
         # The component library the template renders on (forge.ui_kits);
         # kit-specific files are selected by Copier conditional names.
         "ui_kit": fc.ui_kit,
+        # The Vite dev-server overlay (ADR-013) also renders the wrapper config.
+        "dev_server": fc.dev_server,
+        "dev_server_host": config.frontend_host(fc),
         "nuxt_ui_version": NUXT_UI_VERSION,
         # The Tailwind palette behind Nuxt UI's primary colour (brand module).
         "nuxt_ui_primary": nuxt_ui_primary(fc.default_color_scheme),

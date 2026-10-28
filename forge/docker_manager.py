@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
+from forge.backend_app_templates import backend_uses_database
 from forge.config import (
     DEFAULT_REALM,
     TRAEFIK_DASHBOARD_PORT,
@@ -22,6 +23,7 @@ from forge.config._topology import (
     backend_topology_entry,
     compute_render_postgres,
     compute_rendered_infra,
+    database_backends,
     frontend_host_rule,
     frontend_topology_entry,
 )
@@ -134,8 +136,9 @@ def render_compose(
     # per-backend migrate sidecars. Keycloak has its own DB needs, so the
     # postgres service still renders when it's enabled.
     database_mode = config.database_mode
+    owners = database_backends(config.backends)
     render_postgres = compute_render_postgres(
-        has_backends=bool(config.backends),
+        has_backends=bool(owners),
         database_mode=database_mode,
         include_keycloak=config.include_keycloak,
     )
@@ -164,7 +167,10 @@ def render_compose(
         "backend_language": primary.language.value if primary else "python",
         "backend_slug": config.backend_slug,
         "backend_port": primary.server_port if primary else 5000,
-        "db_name": config.backend_slug.replace("-", "_"),
+        # Postgres's own database: the first backend that owns one, so a leading
+        # http-service backend does not leave a stray database behind; with none
+        # (Postgres rendered for Keycloak alone), the image's default database.
+        "db_name": owners[0].name.replace("-", "_") if owners else "postgres",
         "has_frontend": has_frontend,
         "frontend_slug": config.frontend_slug if has_frontend else "",
         "frontend_port": (
@@ -346,12 +352,117 @@ def render_frontend_dockerfile(
         context = {
             "package_manager": fc.package_manager,
             "build_dir": build_dir,
+            "dev_server": fc.dev_server,
+            "server_port": fc.server_port,
         }
 
     output = template.render(context)
     dockerfile_path = frontend_dir / "Dockerfile"
     dockerfile_path.write_text(output, encoding="utf-8")
     return dockerfile_path
+
+
+# What starts the stack with the dev-server overlay (docker-compose.dev.yaml). The
+# automatic boot cannot: it runs the base file alone, which serves nginx.
+DEV_STACK_COMMAND = (
+    "docker compose -f docker-compose.yml -f docker-compose.dev.yaml up --build --watch"
+)
+
+DEV_OVERLAY = "docker-compose.dev.yaml"
+
+# The lockfile each package manager writes, which a dependency change rebuilds.
+_LOCKFILES = {
+    "npm": "package-lock.json",
+    "pnpm": "pnpm-lock.yaml",
+    "yarn": "yarn.lock",
+}
+
+
+def _lockfile(fc: FrontendConfig) -> str:
+    return _LOCKFILES.get(fc.package_manager, "package-lock.json")
+
+
+_DEV_SERVER_README = """
+## Hot reload in Docker Compose
+
+This app also runs as a Vite dev server in the project's Compose stack, behind the same
+Traefik router and host as the built app. From the project root:
+
+```bash
+{command}
+```
+
+- Needs Docker Compose 2.39.4 or newer.
+- Edits under `apps/{slug}` sync into the container; a change to `package.json` or the
+  lockfile rebuilds the image.
+- No content-security policy applies and nginx is not in the path, so check security
+  headers on the built image (`docker compose up --build`).
+- The generated stack does not route the sign-in paths (`/auth/*`) on any frontend. With auth
+  on, the app redirects to `/auth/login` as it does in the built stack; generate with auth off
+  for a hot-reload loop without sign-in, or route the gatekeeper in your own Compose overlay.
+- Turn it off with `dev_server: false` and `forge --update`.
+"""
+
+
+def append_dev_server_readme(
+    config: ProjectConfig, frontend_dir: Path, frontend: FrontendConfig | None = None
+) -> Path | None:
+    """Add the hot-reload section to the app's README, which the Vue template writes.
+
+    Done here rather than in the template's post-generate script so a project without
+    ``dev_server`` keeps that script, and every other file, byte for byte.
+    """
+    readme = frontend_dir / "README.md"
+    if not readme.is_file():
+        return None
+    text = readme.read_text(encoding="utf-8")
+    if "## Hot reload in Docker Compose" in text:
+        return readme
+    fc = frontend or config.frontend
+    slug = fc.name if fc is not None else config.frontend_slug
+    section = _DEV_SERVER_README.format(command=DEV_STACK_COMMAND, slug=slug)
+    readme.write_text(text.rstrip("\n") + "\n" + section, encoding="utf-8")
+    return readme
+
+
+def is_dev_server_file(relative: str) -> bool:
+    """Whether a project path is one ``frontend.dev_server`` makes forge write.
+
+    The overlay is one file at the project root; each app has a wrapper next to its
+    ``vite.config.ts``. Judged by name, not by which apps currently have the option, so a
+    file an earlier update left behind is still recognised once the option is off.
+    """
+    return relative == DEV_OVERLAY or (
+        relative.startswith("apps/") and relative.endswith("/vite.dev.config.ts")
+    )
+
+
+def render_dev_overlay(config: ProjectConfig, project_root: Path) -> Path:
+    """Render ``docker-compose.dev.yaml``, the Vite dev-server overlay (ADR-013).
+
+    It overrides the compose service of every frontend that has ``dev_server``: the
+    ``dev`` Dockerfile stage as the build target, the router's service port set to the
+    dev server's, a Node health check, and the Compose Watch rules that sync the app
+    into the container. The primary frontend's service is ``frontend``; a further
+    frontend's is its DNS name, as in ``docker-compose.yml``.
+    """
+    apps = [
+        {
+            "service": "frontend" if config.is_primary_frontend(fc) else fc.dns_name,
+            "name": fc.name,
+            "port": fc.server_port,
+            "lockfile": _lockfile(fc),
+        }
+        for fc in config.active_frontends
+        if fc.dev_server
+    ]
+    if not apps:
+        raise ValueError("render_dev_overlay called without a frontend that has dev_server")
+    template = _jinja_env().get_template("deploy/docker-compose.dev.yaml.j2")
+    output = template.render({"apps": apps, "image_prefix": config.project_slug.lower()})
+    overlay_path = project_root / DEV_OVERLAY
+    overlay_path.write_text(output, encoding="utf-8")
+    return overlay_path
 
 
 def render_frontend_dockerignore(
@@ -469,6 +580,9 @@ def render_init_db(
     extra_dbs = set()
     if config.database_mode != "none":
         for bc in config.backends:
+            if not backend_uses_database(bc.language, bc.app_template):
+                continue
+
             db_name = bc.name.replace("-", "_")
             extra_dbs.add(db_name)
     if config.include_keycloak:

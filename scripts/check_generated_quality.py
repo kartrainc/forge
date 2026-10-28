@@ -31,6 +31,7 @@ def check(
     auth: bool = False,
     features: list[str] | None = None,
     extra_frontends: list[tuple[str, str]] | None = None,
+    app_template: str | None = None,
 ) -> dict:
     """Render the reference application for ``language`` and run its gates.
 
@@ -45,6 +46,7 @@ def check(
                 name="api",
                 language=BackendLanguage.PYTHON if frontend else BackendLanguage(language),
                 **({"features": features} if features else {}),
+                **({"app_template": app_template} if app_template else {}),
             )
         ],
         frontends=[
@@ -131,6 +133,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--features", help="Comma-separated CRUD features (default: items).")
     parser.add_argument(
+        "--app-template",
+        help="The backend's app template variant (default: the language's crud-service).",
+    )
+    parser.add_argument(
         "--extra-frontend",
         action="append",
         default=[],
@@ -148,6 +154,7 @@ if __name__ == "__main__":
             (name, kit or "shadcn")
             for name, _, kit in (item.partition(":") for item in args.extra_frontend)
         ],
+        app_template=args.app_template,
     )
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["passed"] else 12)

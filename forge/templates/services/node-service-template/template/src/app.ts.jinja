@@ -2,7 +2,9 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { healthRoutes } from "./routes/health.js";
 import { homeRoutes } from "./routes/home.js";
+{%- if use_database | default(true) %}
 import { itemRoutes } from "./routes/items.js";
+{%- endif %}
 import { errorHandler } from "./middleware/error-handler.js";
 import { correlationHook } from "./middleware/correlation.js";
 import { requestLogger } from "./middleware/logging.js";
@@ -45,7 +47,9 @@ export async function buildApp() {
 	// skip-listed request via an onRequest hook, binding
 	// ``req.identity`` for downstream handlers. Routes can opt into
 	// finer-grained authorization via ``app.requireScope(...)``.
+{%- if use_database | default(true) %}
 	await app.register(itemRoutes, { prefix: "/api/v1/{{ entity_plural }}" });
+{%- endif %}
 	// FORGE:ROUTER_REGISTRATION
 
 	return app;

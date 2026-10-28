@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
+{%- if use_database | default(true) %}
 import { checkDatabase } from "../services/health.service.js";
+{%- endif %}
 
 export async function healthRoutes(app: FastifyInstance) {
 	app.get("/live", async (_req, reply) => {
@@ -7,12 +9,18 @@ export async function healthRoutes(app: FastifyInstance) {
 	});
 
 	app.get("/ready", async (_req, reply) => {
+{%- if use_database | default(true) %}
 		const db = await checkDatabase();
 		const overall = db.status === "UP" ? "UP" : "DOWN";
 
 		return reply.code(overall === "UP" ? 200 : 503).send({
 			status: overall,
 			components: { database: db },
+{%- else %}
+		return reply.send({
+			status: "UP",
+			components: {},
+{%- endif %}
 			system_info: {
 				node_version: process.version,
 				platform: process.platform,

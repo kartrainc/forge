@@ -300,6 +300,7 @@ class TestWhitelistSelfCheck:
 
     EXTENSIONLESS_WHITELIST: frozenset[str] = frozenset({
         "Dockerfile",
+        ".dockerignore",
         ".editorconfig",
         ".gitignore",
         ".gitkeep",

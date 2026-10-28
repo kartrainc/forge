@@ -499,6 +499,7 @@ class TestCollectInputs:
                 True,  # enable keycloak auth? yes
                 False,  # enable chat? no (asked after the kit, which has chat)
                 False,  # enable openapi? no
+                False,  # run the frontend as a dev server? no
                 True,  # proceed with generation? yes
             ]
         )
