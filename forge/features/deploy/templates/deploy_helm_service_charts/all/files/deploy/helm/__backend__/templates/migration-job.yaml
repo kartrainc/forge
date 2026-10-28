@@ -1,0 +1,129 @@
+{{- /* The migration, a pre-install/pre-upgrade hook: a failed one fails this release only. While
+       migration.waitForPostgres resolves, it waits until its own database URL connects, and the runtime role exists
+       under migration.dbAppRoleManaged: CloudNativePG creates both after the primary. With migration.dbAppRole it
+       migrates as the owner, then the db-role container grants the runtime role, which it creates first unless the
+       postgres chart does (migration.dbAppRoleManaged). */ -}}
+{{- if .Values.migration.enabled }}
+{{- $m := .Values.migration }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-5" | nindent 4 }}
+spec:
+  backoffLimit: 1
+  # within helm's and Flux's default 5m hook timeout, whatever the retries
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "svc.processLabels" (dict "root" . "suffix" "migrate" "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- /* a pre-install hook runs before the chart's own ServiceAccount exists: only an existing one */}}
+      {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.name }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- end }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.deployment.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or $m.waitForPostgres $m.dbAppRole }}
+      initContainers:
+        {{- with $m.waitForPostgres }}
+        {{- $urlEnv := required (printf "%s: migration.databaseUrlEnv is required while migration.waitForPostgres is set" $.Chart.Name) $m.databaseUrlEnv }}
+        {{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $urlEnv) }}
+        {{- fail (printf "%s: migration.databaseUrlEnv must name an environment variable, not %q" $.Chart.Name $urlEnv) }}
+        {{- end }}
+        {{- $timeout := int (required (printf "%s: migration.waitTimeoutSeconds is required while migration.waitForPostgres is set" $.Chart.Name) $m.waitTimeoutSeconds) }}
+        {{- $role := and $m.dbAppRole $m.dbAppRoleManaged }}
+        - name: wait-for-postgres
+          image: {{ include "svc.auxImage" (dict "root" $ "key" "migration.postgresImage" "image" $m.postgresImage) | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              if ! getent hosts {{ . }} >/dev/null; then
+                echo "{{ . }} does not resolve: no in-cluster Postgres to wait for"
+                exit 0
+              fi
+              url=$(printf '%s' "${{ $urlEnv }}" | sed -e 's|^postgresql+[a-z0-9]*://|postgresql://|' -e 's|?.*$||')
+              if [ -z "$url" ]; then
+                echo "{{ $urlEnv }} is not set" >&2
+                exit 1
+              fi
+              {{- if $role }}
+              check="SELECT CASE WHEN EXISTS (SELECT FROM pg_roles WHERE rolname = :'role') THEN 'ready' ELSE 'role ' || :'role' || ' does not exist' END;"
+              {{- else }}
+              check="SELECT 'ready';"
+              {{- end }}
+              deadline=$(( $(date +%s) + {{ $timeout }} ))
+              until out=$(echo "$check" | psql "$url" -w -At -v role="${APP_DB_ROLE:-}" 2>&1) && [ "$out" = ready ]; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "{{ $urlEnv }} is not ready after {{ $timeout }}s: $out" >&2
+                  exit 1
+                fi
+                echo "waiting for the database of {{ $urlEnv }}"
+                sleep 2
+              done
+          {{- /* the migration's env, wherever the URL comes from: pin migration.postgresImage by digest */}}
+          envFrom:
+            {{- include "svc.migrateEnvFrom" $ | nindent 12 }}
+          {{- if $role }}
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $m.dbAppRole | quote }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+        {{- end }}
+        {{- if $m.dbAppRole }}
+        {{- include "svc.migrateContainer" . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        {{- if $m.dbAppRole }}
+        - name: db-role
+          image: {{ include "svc.auxImage" (dict "root" . "key" "migration.postgresImage" "image" $m.postgresImage) | quote }}
+          command: ["sh", "/scripts/db-app-role.sh"]
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $m.dbAppRole | quote }}
+            {{- if $m.dbAppRoleManaged }}
+            # the postgres chart creates the role and owns its password: only grant
+            - name: APP_DB_ROLE_MANAGED
+              value: "true"
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: db-app-role
+              mountPath: /scripts
+              readOnly: true
+        {{- else }}
+        {{- include "svc.migrateContainer" . | nindent 8 }}
+        {{- end }}
+      {{- if $m.dbAppRole }}
+      volumes:
+        - name: db-app-role
+          configMap:
+            name: {{ include "svc.child" (dict "root" . "suffix" "db-app-role") }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,21 @@
+{{- range .Values.databases }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ include "postgres.child" (dict "root" $ "suffix" (.name | replace "_" "-")) }}
+  labels:
+    {{- include "postgres.labels" $ | nindent 4 }}
+spec:
+  cluster:
+    name: {{ include "postgres.name" $ }}
+  name: {{ .name }}
+  owner: {{ .owner }}
+  {{- with .extensions }}
+  extensions:
+    {{- range . }}
+    - name: {{ . }}
+      ensure: present
+    {{- end }}
+  {{- end }}
+{{- end }}

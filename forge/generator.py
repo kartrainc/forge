@@ -44,6 +44,7 @@ from forge.config import (
 from forge.docker_manager import (
     DEV_STACK_COMMAND,
     append_dev_server_readme,
+    helm_realm_json,
     render_compose,
     render_db_app_role_script,
     render_dev_overlay,
@@ -355,6 +356,7 @@ def _run_generation_phases(
         registry_path = render_service_registry(config, synthesis, project_root)
         if registry_path is not None:
             collector.record(registry_path, origin="base-template")
+    copy_helm_chart_files(config, plan.option_values, project_root, collector)
     # Per-backend toolchain (install/verify/post_generate) — deferred to HERE,
     # after _apply_project_scope, so project-scoped workspace members (the
     # ``platform_auth_sdk_*`` SDKs under ``packages/``) and the workspace-root
@@ -874,28 +876,6 @@ def _apply_project_scope(
             ui_kit=_vue_ui_kit(config),
         )
 
-    # Bundle the Keycloak realm into the Helm chart's files/ so the in-cluster
-    # realm-sync Job can mount it via ``.Files.Get``. Only for a kubernetes
-    # deploy target with keycloak — the realm JSON was rendered into
-    # deploy/infra/ in the docker phase above.
-    if plan.option_values.get("deploy.target") == "kubernetes":
-        _realm = project_root / "deploy" / "infra" / "keycloak-realm.json"
-        if _realm.is_file():
-            _realm_dst = project_root / "deploy" / "helm" / "files" / "keycloak-realm.json"
-            _realm_dst.parent.mkdir(parents=True, exist_ok=True)
-            from forge.docker_manager import helm_realm_json  # noqa: PLC0415
-
-            _realm_dst.write_text(
-                helm_realm_json(config, _realm.read_text(encoding="utf-8")), encoding="utf-8"
-            )
-            collector.record(_realm_dst, origin="base-template")
-        _role_script = project_root / "deploy" / "compose" / "db-app-role.sh"
-        if _role_script.is_file():
-            _role_dst = project_root / "deploy" / "helm" / "files" / "db-app-role.sh"
-            _role_dst.parent.mkdir(parents=True, exist_ok=True)
-            _role_dst.write_bytes(_role_script.read_bytes())
-            collector.record(_role_dst, origin="base-template")
-
     # Drop shared quality-signal files (.editorconfig, .gitignore, CI, pre-commit)
     # if the per-template generators haven't already provided them.
     from forge.common_files import apply_common_files  # noqa: PLC0415
@@ -923,6 +903,69 @@ def _apply_project_scope(
             code=TEMPLATE_RENDER_FAILED,
             hint="Fix the schema or emitter and generate again; incomplete output is not usable.",
         ) from exc
+
+
+def helm_chart_files(
+    config: ProjectConfig, option_values: dict[str, Any], project_root: Path
+) -> dict[str, bytes]:
+    """What the Helm charts read with ``.Files.Get``, by project path, from where compose has it.
+
+    The umbrella chart takes the Keycloak realm and the runtime-role script
+    under ``deploy/helm/files/``; deploy.helm_layout=per_service puts the realm
+    in the keycloak chart, the script in each backend chart whose migration
+    creates a runtime role, and the S2S client registry in the gatekeeper chart.
+    Read once the realm and the registry are rendered, by generation and by the
+    update.
+    """
+    if option_values.get("deploy.target") != "kubernetes":
+        return {}
+    from forge.config._topology import db_app_role  # noqa: PLC0415
+
+    per_service = option_values.get("deploy.helm_layout") == "per_service"
+    infra = project_root / "deploy" / "infra"
+    copies = (
+        (infra / "keycloak-realm.json", ["keycloak" if per_service else ""]),
+        (
+            project_root / "deploy" / "compose" / "db-app-role.sh",
+            [
+                bc.name
+                for bc in config.backends
+                if db_app_role(bc, option_values, config.database_mode)
+            ]
+            if per_service
+            else [""],
+        ),
+        (
+            infra / "gatekeeper" / "secrets" / "service_registry.yaml",
+            ["gatekeeper"] if per_service else [],
+        ),
+    )
+    files: dict[str, bytes] = {}
+    for src, charts in copies:
+        if not src.is_file():
+            continue
+        body = (
+            helm_realm_json(config, src.read_text(encoding="utf-8")).encode()
+            if src.suffix == ".json"
+            else src.read_bytes()
+        )
+        for chart in charts:
+            files[(Path("deploy") / "helm" / chart / "files" / src.name).as_posix()] = body
+    return files
+
+
+def copy_helm_chart_files(
+    config: ProjectConfig,
+    option_values: dict[str, Any],
+    project_root: Path,
+    collector: ProvenanceCollector,
+) -> None:
+    """Write :func:`helm_chart_files` into a freshly generated project."""
+    for rel, body in helm_chart_files(config, option_values, project_root).items():
+        dst = project_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(body)
+        collector.record(dst, origin="base-template")
 
 
 def _finalize(

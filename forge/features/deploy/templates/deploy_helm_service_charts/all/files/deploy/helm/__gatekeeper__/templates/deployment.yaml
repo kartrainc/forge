@@ -1,0 +1,105 @@
+{{- $keyDir := include "gatekeeper.signingKeyDir" . }}
+{{- $registryPath := include "gatekeeper.registryPath" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gatekeeper.name" . }}
+  labels:
+    {{- include "gatekeeper.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  {{- with .Values.deployment.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gatekeeper.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gatekeeper.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- /* The values, not the Secrets: the keys they generate hold for the release. */}}
+        checksum/secret: {{ .Values.secret | toJson | sha256sum }}
+        checksum/registry: {{ include (print $.Template.BasePath "/registry-secret.yaml") . | sha256sum }}
+        {{- with .Values.deployment.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "gatekeeper.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.deployment.terminationGracePeriodSeconds }}
+      containers:
+        - name: gatekeeper
+          image: {{ include "gatekeeper.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.container.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "gatekeeper.child" (dict "root" . "suffix" "config") }}
+            {{- if or .Values.secret.enabled .Values.externalSecret.enabled }}
+            - secretRef:
+                name: {{ include "gatekeeper.child" (dict "root" . "suffix" "secret") }}
+            {{- end }}
+            {{- with .Values.container.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.container.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.container.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: signing-keys
+              mountPath: {{ $keyDir }}
+              readOnly: true
+            - name: service-registry
+              mountPath: {{ dir $registryPath }}
+              readOnly: true
+      volumes:
+        - name: signing-keys
+          secret:
+            secretName: {{ .Values.signingKeys.existingSecret | default (include "gatekeeper.child" (dict "root" . "suffix" "signing")) }}
+        - name: service-registry
+          secret:
+            secretName: {{ .Values.serviceRegistry.existingSecret | default (include "gatekeeper.child" (dict "root" . "suffix" "registry")) }}
+            items:
+              - key: service_registry.yaml
+                path: {{ base $registryPath }}
+      {{- with .Values.deployment.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

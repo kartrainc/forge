@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "redis.name" . }}
+  labels:
+    {{- include "redis.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "redis.child" (dict "root" . "suffix" "headless") }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "redis.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "redis.labels" . | nindent 8 }}
+      annotations:
+        # the server reads both at startup: a change restarts it
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: valkey
+          image: {{ include "redis.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # requirepass reaches the server on stdin, so the password is in no file and on no command line
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              : "${REDISCLI_AUTH:?the password is empty}"
+              password=$(printf '%s' "$REDISCLI_AUTH" | sed 's/[\\"]/\\&/g')
+              exec valkey-server /etc/valkey/valkey.conf - <<EOF
+              requirepass "$password"
+              EOF
+          env:
+            # valkey-cli reads it too: the probes and `kubectl exec` sessions authenticate without it in their arguments
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redis.secretName" . }}
+                  key: password
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          startupProbe:
+            {{- include "redis.ping" . | nindent 12 }}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            # loading the append-only file may take a while
+            failureThreshold: 60
+          livenessProbe:
+            {{- include "redis.ping" . | nindent 12 }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            {{- include "redis.ping" . | nindent 12 }}
+            periodSeconds: 5
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/valkey
+              readOnly: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "redis.child" (dict "root" . "suffix" "config") }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "redis.selector" . | nindent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

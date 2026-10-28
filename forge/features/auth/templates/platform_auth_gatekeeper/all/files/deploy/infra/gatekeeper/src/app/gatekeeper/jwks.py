@@ -17,7 +17,7 @@ from typing import Any
 import jwt
 
 from app.gatekeeper.config import get_settings
-from app.gatekeeper.helpers import JWTPayload
+from app.gatekeeper.helpers import JWTPayload, public_realm_url
 from app.gatekeeper.http_client import get_http_client, with_retry
 from app.gatekeeper.organizations import with_tenant
 
@@ -115,7 +115,8 @@ async def verify_token(
         If ``True``, ``jwt.ExpiredSignatureError`` is **not** caught so
         the caller can handle the refresh flow.
     issuer_url:
-        Per-tenant issuer URL from TMS.  Falls back to static config.
+        Per-tenant issuer URL from TMS.  Falls back to static config. Keys
+        come from it; the ``iss`` must be its :func:`public_realm_url`.
     client_id:
         Per-tenant OIDC client ID for audience validation.  Falls back
         to static config.
@@ -163,7 +164,7 @@ async def verify_token(
         key=key,
         algorithms=["RS256"],
         audience=client_id or cfg.gatekeeper_client_id,
-        issuer=issuer_url or f"{cfg.keycloak_base_url}/{tenant}",
+        issuer=public_realm_url(tenant, issuer_url),
         options=options,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
     )  # ty:ignore[invalid-assignment]
     # Every Keycloak user token passes through here, so this is where the

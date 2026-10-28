@@ -210,3 +210,75 @@ def test_go_backend_compiles(tmp_path: Path, go_backend_registered: None, requir
             f"go {label} failed for the generated service:\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
+
+
+@pytest.fixture
+def scratch_projects():
+    """Dry-run project roots to delete after the test."""
+    roots: list[Path] = []
+    yield roots
+    for root in roots:
+        if root.parent.name.startswith("forge-dry-"):
+            shutil.rmtree(root.parent, ignore_errors=True)
+
+
+def test_a_plugin_backend_generates_beside_keycloak(
+    tmp_path: Path, go_backend_registered: None, scratch_projects: list[Path]
+) -> None:
+    """Keycloak brings Redis, whose URLs the topology looks up per backend
+    language: a plugin language is not coerced to a built-in one."""
+    from forge.generator import generate
+
+    config = _make_go_config(tmp_path)
+    config.include_keycloak = True
+    scratch_projects.append(generate(config, quiet=True, dry_run=True))
+    assert "keycloak:" in (scratch_projects[0] / "docker-compose.yml").read_text(encoding="utf-8")
+
+
+def test_a_plugin_backend_gets_a_service_chart_beside_a_builtin_one(
+    tmp_path: Path, go_backend_registered: None, scratch_projects: list[Path]
+) -> None:
+    import yaml
+
+    from forge.config import BackendConfig, BackendLanguage
+    from forge.generator import generate
+
+    config = _make_go_config(tmp_path)
+    config.backends.append(
+        BackendConfig(
+            name="jobs", project_name="Go Svc", language=BackendLanguage.PYTHON, server_port=8301
+        )
+    )
+    config.include_keycloak = True
+    config.options = {
+        "deploy.target": "kubernetes",
+        "deploy.helm_layout": "per_service",
+        "async.task_queue": True,
+    }
+    scratch_projects.append(generate(config, quiet=True, dry_run=True))
+    helm = scratch_projects[0] / "deploy" / "helm"
+
+    def secret(name: str) -> dict[str, str]:
+        values = yaml.safe_load((helm / name / "values.yaml").read_text(encoding="utf-8"))
+        return values["secret"]["stringData"]
+
+    # the task queue is Python's here, so only its backend gets the queue's Redis URL
+    assert secret("jobs")["TASKIQ_BROKER_URL"] == "redis://:CHANGEME@redis:6379/2"
+    assert "TASKIQ_BROKER_URL" not in secret("api")
+
+
+@pytest.mark.parametrize("layout", ["umbrella", "per_service"])
+def test_the_helm_charts_need_a_builtin_backend(
+    tmp_path: Path, go_backend_registered: None, layout: str
+) -> None:
+    """deploy.target=kubernetes is refused for a project of plugin backends
+    only, whichever chart layout it picks; a defaulted target is skipped."""
+    from forge.capability_resolver import resolve
+    from forge.errors import OptionsError
+
+    config = _make_go_config(tmp_path)
+    config.options = {"deploy.target": "kubernetes", "deploy.helm_layout": layout}
+    with pytest.raises(OptionsError, match="none of its supported backends"):
+        resolve(config)
+    config.option_origins = {"deploy.target": "default", "deploy.helm_layout": "default"}
+    resolve(config)

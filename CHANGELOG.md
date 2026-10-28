@@ -5,6 +5,66 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Per-service Helm charts
+
+- `deploy.helm_layout` (`umbrella` by default, `per_service`): with `deploy.target=kubernetes`, `per_service` emits
+  one Helm chart per component, each installed as its own release named after it: one per backend and per frontend,
+  plus `postgres` (a CloudNativePG cluster with each backend's owner and runtime roles and its database), `redis`
+  (Valkey), `keycloak` (importing the project's realm) and `gatekeeper` when the project has them. The charts follow
+  helmart's shape (`deployment`, `image`, `container`, `service`, `configMap`, `secret`, `ingressRoute`,
+  `autoscaling`), and each service's Traefik routes and Middlewares live in its own values. A service rolls out, fails
+  its migration and rolls back alone; its Service is named after it on its own port, so the
+  `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve as in compose. Credentials, including the S2S
+  client secrets and the Keycloak realm (the Secret `<release>-realm`, which holds the clients' secrets and the dev
+  user's password), stay out of ConfigMaps; `secret.enabled: false` or `externalSecret` hands a Secret to External
+  Secrets; `image.digest` wins over the tag and `imagePolicy.requireDigest` enforces it. Redis requires a password,
+  and the Redis URLs each backend's fragments and app template default to carry it; a `tenant-management-service`
+  also gets the keycloak chart's admin (`APP__TMS__KEYCLOAK_ADMIN_*`). A frontend serves on 8080 as a non-root nginx.
+  `make helm-template`, `k8s-manifests` and `helm-install` pass `--namespace $(NAMESPACE)` and each chart's
+  `values-$(ENV).yaml` when present.
+- A backend's migration Job, while `migration.waitForPostgres` (`postgres-rw`) resolves, waits until its own DB URL
+  (`migration.databaseUrlEnv`) connects and, with a managed runtime role, until that role exists, for at most
+  `migration.waitTimeoutSeconds` (120); the Job retries once and stops at `migration.activeDeadlineSeconds` (280),
+  within the default 5m hook timeout. Under `database.rls_app_role` it migrates as the owner, then grants the role
+  the backend serves as its tables. `migration.dbAppRoleManaged` is `true` with the postgres chart, which creates that
+  role; against another Postgres set it `false`, and `db-app-role.sh` creates the role with `migration.ownerSecret`'s
+  `APP_DB_PASSWORD`.
+- `db-app-role.sh`: with `APP_DB_ROLE_MANAGED=true` it leaves creating the role and its password to whatever manages
+  the database (CloudNativePG) and only checks the role is safe and grants it the owner's tables.
+- The gatekeeper chart generates `SESSION_FERNET_KEY` and `DELEGATION_GRANT_FERNET_KEY` at install and keeps them
+  across upgrades by reading the installed Secret (`lookup`: a render without cluster access, such as `helm template`
+  or Argo CD, makes new ones each time, so set them there); it refuses the compose dev keys and values that are not
+  Fernet keys. It runs `ENV=development`, the dev posture: any other `ENV` refuses `SVC_AUTH_BACKEND=preshared`, the
+  only S2S authentication the backends' clients have. The Middlewares the backends' routes name (`gatekeeper-auth`,
+  `-strip-api-key`, `-untrusted-headers`) render by default (`authMiddlewares.enabled`) wherever Traefik's
+  Middleware CRD exists or a route is enabled (`authMiddlewares.force` otherwise). The ES256 signing key lives in the
+  `gatekeeper-signing` Secret, generated once and kept across upgrades, so the Deployment rolls with `RollingUpdate`
+  and scales past one replica. The keycloak chart's `mode: production` imports only the realm's service-account users,
+  with `sslRequired: external`, and refuses an empty or `CHANGEME` admin password or secret of any confidential
+  client.
+- The gatekeeper takes an optional `KEYCLOAK_PUBLIC_BASE_URL`, the realms URL browsers reach Keycloak at: sign-in and
+  sign-out redirects use it, and a token's `iss` must then be the public realm URL, as Keycloak issues it under
+  `KC_HOSTNAME`; token, JWKS and Admin API calls keep `KEYCLOAK_BASE_URL`. Unset, nothing changes (compose). The
+  gatekeeper chart sets it to `https://auth.<host>/realms` and the keycloak chart's `hostname` defaults to
+  `https://auth.<host>`: change the two together (without `KC_HOSTNAME`, a refresh through the in-cluster URL fails).
+  The gatekeeper logs its Redis URL with the password redacted.
+- A Python backend's chart generates `APP__SECURITY__SECRET_KEY` and `APP__SECURITY__AUTH__CLIENT_SECRET`
+  (`secret.generate`) at install when `secret.stringData` leaves them out and keeps them across upgrades the same way
+  (`lookup`), since the service refuses placeholders outside `ENV=development`. A backend's default startup probe
+  (`/api/v1/health/live`) gives a first start 3 minutes before liveness applies, and under `externalSecret` its pods
+  wait for the synced Secret instead of starting without it. Every chart quotes `partOf`, so a numeric or boolean
+  project name still renders a string label. The redis chart's `persistence` applies at install only: the
+  StatefulSet's `volumeClaimTemplates` never change, so resize the PVC itself.
+- Generation refuses a backend or frontend named after an object of the infrastructure charts (`postgres-rw`,
+  `postgres-events`, `redis-auth`, `keycloak-realm`, `gatekeeper-auth`, ...) and, beside Keycloak, a further frontend
+  named `auth`, which would take the keycloak chart's host `auth.<host>`. Generation and `forge --update` copy into
+  the charts what they read with `.Files.Get`: the realm into `keycloak`, `db-app-role.sh` into each backend chart
+  with a runtime role and the synthesized S2S registry into `gatekeeper`.
+- Generation also refuses a Postgres role whose Secret, `postgres-<role>`, would pass the 63 characters of a name.
+- Fragment files under `__backend__/`, `__frontend__/`, `__postgres__/`, `__redis__/`, `__keycloak__/` or
+  `__gatekeeper__/` are written once per topology entry (not at all when the project lacks the component), with the
+  entry exposed to their Jinja as `service`.
+
 ### Tenant isolation and Keycloak strategies
 
 Each safeguard below is an option, so a project can choose another strategy.
@@ -314,6 +374,10 @@ Each safeguard below is an option, so a project can choose another strategy.
 
 ### Fixed
 
+- `forge --update` of a Keycloak project without the ownership recipe
+  (`.forge/quality.json`) no longer uninstalls its gatekeeper and auth
+  fragments: the manifest does not record `include_keycloak`, which the update
+  now infers from `deploy/infra/keycloak-realm.json`.
 - One realm name (the project's) in the realm JSON, the gatekeeper, realm sync,
   service auth env and Helm, which used `app`, `forge` and the host label. The
   in-cluster Keycloak now imports the realm. `REALM_PER_HOST=true` restores

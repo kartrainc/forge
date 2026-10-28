@@ -1,0 +1,140 @@
+{%- macro q(v) -%}"{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"{%- endmacro -%}
+{%- set base_host = topology.project_slug | replace("_", "-") ~ ".example.com" -%}
+{%- set host = service.host or (base_host if service.primary else service.name ~ "." ~ base_host) -%}
+# Values of the {{ service.name }} chart, the {{ service.app }} frontend of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED (re-rendered on `forge --update`, three-way merged).
+# Override per environment with a separate file; the release is named after
+# the frontend:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+
+partOf: {{ q(topology.project_slug | replace("_", "-")) }}
+
+image:
+  repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.app }}
+  tag: latest
+  # sha256:<64 hex>; wins over the tag
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+imagePolicy:
+  # refuse to render without image.digest (and a pinned test.image)
+  requireDigest: false
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+  automountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+deployment:
+  # unused while autoscaling.enabled
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  podAnnotations: {}
+  podLabels: {}
+  terminationGracePeriodSeconds: 30
+  priorityClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+container:
+  # nginx listens here, and the Service: above 1023, as nginx runs as a non-root user without capabilities
+  port: 8080
+  command: []
+  args: []
+  env: []
+  envFrom: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+  startupProbe: {}
+  volumeMounts: []
+initContainers: []
+volumes: []
+
+service:
+  type: ClusterIP
+  annotations: {}
+  labels: {}
+
+# nginx's config, the ConfigMap {{ service.name }}-nginx. An empty nginxConf serves the SPA (try_files -> index.html)
+# on container.port with, under security.csp, these headers on every response and the Content-Security-Policy on
+# index.html ($request_id is each response's nonce). The backends' own routes take /api.
+configMap:
+  nginxConf: ""
+{%- if service.security_headers %}
+  securityHeaders:
+{%- for name, value in service.security_headers %}
+    {{ name }}: {{ q(value) }}
+{%- endfor %}
+{%- else %}
+  securityHeaders: {}
+{%- endif %}
+  contentSecurityPolicy: {{ q(service.csp) }}
+
+# Traefik: this frontend's host.
+ingressRoute:
+  enabled: false
+  entryPoints:
+    - websecure
+  tls: {}
+  # each key renders a Middleware named {{ service.name }}-<key>
+  middlewares: {}
+  routes:
+    - match: {{ q("Host(`" ~ host ~ "`)") }}
+      priority: 1
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Peers: {namespace (default: the release's), podLabels, ports}. ingressFrom reaches container.port (or ports),
+# egressTo is allowed beside DNS.
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+  egressTo: []
+
+# `helm test {{ service.name }}`: GET / through the Service.
+test:
+  enabled: true
+  image: curlimages/curl:8.23.0@sha256:11e64e28c5f58c8d93ee95fcf22ac055f48b0bc440e0ce7d8013bbb5ad6aa8ac

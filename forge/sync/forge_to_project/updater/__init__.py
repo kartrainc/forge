@@ -41,6 +41,9 @@ Template-level updates (1.2.0+):
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -243,6 +246,7 @@ def _update_locked(
         project_name=data.project_name or project_root.name,
         backends=resolver_backends,
         frontends=[fc for fc, _ in recorded],
+        include_keycloak=_recorded_keycloak(project_root, data),
         options=dict(data.options),
         # Carry origins through so the resolver can distinguish user-set
         # options from defaulted-but-persisted ones. Without this, a
@@ -569,6 +573,15 @@ def _update_locked(
     # matching the generate path (and docker-compose). (audit #5)
     _synthesis = compute_platform_synthesis(config, plan)
 
+    # The manifest does not record depends_on, so the synthesized S2S registry
+    # cannot be rendered again without the audience grants: the project's
+    # registry stays as it is, kept from the gatekeeper fragment's placeholder,
+    # and is rendered only when missing. The Helm charts then get the realm, the
+    # runtime-role script and the registry, decided on as the fragments' files are.
+    from forge.docker_manager import render_service_registry  # noqa: PLC0415
+    from forge.generator import helm_chart_files  # noqa: PLC0415
+
+    held = _hold(project_root, collector, _SERVICE_REGISTRY) if _synthesis is not None else None
     apply_project_features(
         project_root,
         project_apply_plan,
@@ -598,6 +611,20 @@ def _update_locked(
             else None
         ),
     )
+    if held is not None:
+        _put_back(held, collector)
+        if held.body is None:
+            registry_path = render_service_registry(config, _synthesis, project_root)
+            if registry_path is not None:
+                collector.record(registry_path, origin="base-template")
+    staging = Path(tempfile.mkdtemp(prefix="forge-update-"))
+    try:
+        for rel, body in helm_chart_files(config, plan.option_values, project_root).items():
+            (staging / rel).parent.mkdir(parents=True, exist_ok=True)
+            (staging / rel).write_bytes(body)
+        _apply_rendered(staging, project_root, update_mode, file_baselines, collector)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
     # Re-run schema-driven codegen so template/codegen changes reach existing
     # projects on ``forge --update`` (historically codegen ran only at fresh
@@ -743,6 +770,99 @@ def _update_locked(
         "file_conflicts": file_conflicts,
         "template_updates": template_update_outcomes,
     }
+
+
+_SERVICE_REGISTRY = "deploy/infra/gatekeeper/secrets/service_registry.yaml"
+
+
+@dataclass(frozen=True)
+class _HeldFile:
+    """A project file, its provenance record and its sidecars as they were before the fragment pass."""
+
+    rel: str
+    body: bytes | None
+    record: ProvenanceRecord | None
+    sidecars: dict[Path, bytes]
+
+
+def _file_sidecars(path: Path) -> tuple[Path, Path]:
+    return path.with_name(path.name + ".forge-merge"), path.with_name(
+        path.name + ".forge-merge.bin"
+    )
+
+
+def _hold(project_root: Path, collector: ProvenanceCollector, rel: str) -> _HeldFile:
+    path = project_root / rel
+    return _HeldFile(
+        rel=rel,
+        body=path.read_bytes() if path.is_file() else None,
+        record=collector.records.get(rel),
+        sidecars={s: s.read_bytes() for s in _file_sidecars(path) if s.is_file()},
+    )
+
+
+def _put_back(held: _HeldFile, collector: ProvenanceCollector) -> None:
+    path = collector.project_root / held.rel
+    if held.body is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(held.body)
+    if held.record is None:
+        collector.records.pop(held.rel, None)
+    else:
+        collector.records[held.rel] = held.record
+    for sidecar in _file_sidecars(path):
+        if sidecar in held.sidecars:
+            sidecar.write_bytes(held.sidecars[sidecar])
+        else:
+            sidecar.unlink(missing_ok=True)
+
+
+def _apply_rendered(
+    staging: Path,
+    project_root: Path,
+    update_mode: UpdateMode,
+    file_baselines: dict[str, str],
+    collector: ProvenanceCollector,
+) -> None:
+    """Decide on each file rendered under ``staging`` as the file-copy applier does on a fragment's."""
+    from forge.appliers.files import _apply_one_file  # noqa: PLC0415
+
+    for src in sorted(p for p in staging.rglob("*") if p.is_file()):
+        dst = project_root / src.relative_to(staging)
+        outcome = _apply_one_file(
+            src_path=src,
+            dst_path=dst,
+            update_mode=update_mode,
+            baselines=file_baselines,
+            project_root=project_root,
+            collector=None,
+            fragment_name="forge",
+        )
+        if outcome.action in ("applied", "skipped-idempotent"):
+            collector.record(dst, origin="base-template")
+
+
+def _recorded_keycloak(project_root: Path, data: ForgeTomlData) -> bool:
+    """Whether the project was generated with Keycloak, which the manifest does not record.
+
+    Only generation with Keycloak renders the realm and the Keycloak image, and
+    the resolver turns a gatekeeper auth stack off without it, so the stack
+    recorded in the options is one more sign. A deleted realm file alone must
+    not turn auth off: this update would uninstall the stack.
+    """
+    from forge.capability_resolver import _provider_needs_keycloak  # noqa: PLC0415
+
+    realm = "deploy/infra/keycloak-realm.json"
+    return (
+        (project_root / realm).is_file()
+        or realm in data.provenance
+        or any(rel.startswith("deploy/infra/keycloak/") for rel in data.provenance)
+        or (
+            data.options.get("auth.mode") == "generate"
+            and _provider_needs_keycloak(data.options.get("auth.provider"))
+        )
+    )
 
 
 def _sidecar_paths(project_root: Path) -> set[Path]:

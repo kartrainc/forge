@@ -186,20 +186,61 @@ def copy_files(
             rel = rel.with_name(rel.name[: -len(_JINJA_SUFFIX)])
         if rel in skip:
             continue
-        dst_path = dst_root / rel
-
-        outcome = _apply_one_file(
-            src_path=src_path,
-            dst_path=dst_path,
-            update_mode=update_mode,
-            baselines=baselines,
-            project_root=project_root,
-            collector=collector,
-            fragment_name=fragment_name,
-            render_context=render_context if render else None,
-        )
-        outcomes.append(outcome)
+        for instance_rel, instance_context in _instances(rel, render_context, src_path):
+            outcome = _apply_one_file(
+                src_path=src_path,
+                dst_path=dst_root / instance_rel,
+                update_mode=update_mode,
+                baselines=baselines,
+                project_root=project_root,
+                collector=collector,
+                fragment_name=fragment_name,
+                render_context=instance_context if render else None,
+            )
+            outcomes.append(outcome)
     return tuple(outcomes)
+
+
+# A directory named after a placeholder is written once per entry of the topology list it names, under the entry's
+# ``name``, with the entry exposed to the file's Jinja as ``service`` (the per-service Helm charts).
+_INSTANCE_DIRS = {
+    "__backend__": "backends",
+    "__frontend__": "frontends",
+    "__postgres__": "helm_postgres",
+    "__redis__": "helm_redis",
+    "__keycloak__": "helm_keycloak",
+    "__gatekeeper__": "helm_gatekeeper",
+}
+
+
+def _instances(
+    rel: Path, render_context: Mapping[str, Any] | None, src_path: Path
+) -> list[tuple[Path, Mapping[str, Any] | None]]:
+    """The destination paths of one source file: itself, or one per topology entry of its placeholder directory."""
+    placeholders = [part for part in rel.parts if part in _INSTANCE_DIRS]
+    if not placeholders:
+        return [(rel, render_context)]
+    if len(placeholders) > 1:
+        raise FragmentError(
+            f"fragment file {src_path.name} is under more than one placeholder directory ({', '.join(placeholders)})",
+            code=FRAGMENT_INJECT_YAML_BAD_SHAPE,
+            context={"file": str(src_path)},
+        )
+    placeholder = placeholders[0]
+    topology = (render_context or {}).get("topology")
+    if topology is None:
+        raise FragmentError(
+            f"fragment file {src_path.name} is under {placeholder}/, which only a fragment rendered with the "
+            "deployment topology can expand",
+            code=FRAGMENT_INJECT_YAML_BAD_SHAPE,
+            context={"file": str(src_path)},
+        )
+    base = dict(render_context or {})
+    out: list[tuple[Path, Mapping[str, Any] | None]] = []
+    for entry in topology[_INSTANCE_DIRS[placeholder]]:
+        parts = [entry["name"] if part == placeholder else part for part in rel.parts]
+        out.append((Path(*parts), {**base, "service": entry}))
+    return out
 
 
 def _apply_one_file(

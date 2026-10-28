@@ -1,0 +1,6 @@
+{{ include "gatekeeper.name" . }} runs with ENV={{ .Values.configMap.data.ENV }}.
+{{- if eq (.Values.configMap.data.ENV | default "" | lower) "development" }}
+This is the development posture: the gatekeeper's production checks are off. Any other ENV refuses
+SVC_AUTH_BACKEND=preshared, the only service-to-service authentication the generated backends have, so this
+release is not production-ready.
+{{- end }}

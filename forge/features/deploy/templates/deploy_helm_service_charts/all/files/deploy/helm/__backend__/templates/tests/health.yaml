@@ -1,0 +1,45 @@
+{{- /* `helm test`: the service answers its readiness check through its Service. */ -}}
+{{- if .Values.test.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "test") }}
+  labels:
+    {{- include "svc.processLabels" (dict "root" . "suffix" "test" "component" "test") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: health
+      image: {{ include "svc.auxImage" (dict "root" . "key" "test.image" "image" .Values.test.image) | quote }}
+      command: ["curl"]
+      args:
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "10"
+        - --retry
+        - "5"
+        - --retry-all-errors
+        - {{ printf "http://%s:%v/api/v1/health/ready" (include "svc.fullname" .) .Values.container.port | quote }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+{{- end }}

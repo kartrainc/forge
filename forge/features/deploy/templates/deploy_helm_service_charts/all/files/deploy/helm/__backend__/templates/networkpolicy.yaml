@@ -1,0 +1,39 @@
+{{- /* The service's pods: ingress on container.port from networkPolicy.ingressFrom (and this chart's helm test pod),
+       egress to DNS and networkPolicy.egressTo. */ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $port := list (int .Values.container.port) }}
+{{- $ingress := list }}
+{{- range $np.ingressFrom }}
+{{- $ingress = append $ingress (dict "from" (list (include "svc.peer" . | fromJson)) "ports" (include "svc.ports" (.ports | default $port) | fromJsonArray)) }}
+{{- end }}
+{{- if .Values.test.enabled }}
+{{- $test := dict "app.kubernetes.io/name" (include "svc.child" (dict "root" . "suffix" "test")) "app.kubernetes.io/instance" .Release.Name }}
+{{- $ingress = append $ingress (dict "from" (list (dict "podSelector" (dict "matchLabels" $test))) "ports" (include "svc.ports" $port | fromJsonArray)) }}
+{{- end }}
+{{- $egress := list (dict "ports" (list (dict "port" 53 "protocol" "UDP") (dict "port" 53 "protocol" "TCP"))) }}
+{{- range $np.egressTo }}
+{{- $rule := dict "to" (list (include "svc.peer" . | fromJson)) }}
+{{- with .ports }}
+{{- $_ := set $rule "ports" (include "svc.ports" . | fromJsonArray) }}
+{{- end }}
+{{- $egress = append $egress $rule }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "svc.fullname" . }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "svc.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml $ingress | nindent 4 }}
+  egress:
+    {{- toYaml $egress | nindent 4 }}
+{{- end }}

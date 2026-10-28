@@ -1422,6 +1422,31 @@ there is no slug, so only UUID labels are accepted.
 
 BACKENDS: python, go. Inert unless ``database.multitenancy != none``.
 
+### `deploy.helm_layout`
+
+**Type:** `enum` · **Default:** `umbrella` · **Stability:** `beta` · **Backends:** —
+
+**Allowed values:** `umbrella`, `per_service`
+
+_Helm layout under deploy.target=kubernetes — one umbrella chart, or one chart per service._
+
+How ``deploy.target=kubernetes`` packages the project for Helm.
+
+- ``umbrella`` (default): one chart at ``deploy/helm/`` holding every backend,
+  the frontends, the Ingress and the optional in-cluster datastores, installed
+  as one release.
+- ``per_service``: one chart per component, each installed as its own release
+  named after it: one per backend (``deploy/helm/<backend>/``) and per frontend,
+  plus ``postgres`` (a CloudNativePG cluster), ``redis``, ``keycloak`` and
+  ``gatekeeper`` when the project has them. Each service's Traefik routes live
+  in its own values. A service then rolls out, fails and rolls back alone, and
+  its Service is named after it on its own port, so the
+  ``INTERNAL_SERVICE_URL_<NAME>`` URLs the services already carry
+  (``http://<name>:<port>``) resolve in the cluster as in compose.
+
+Ignored unless ``deploy.target`` is ``kubernetes``. Switching layout on an
+existing project leaves the previous layout's files in place; see UPGRADING.
+
 ### `deploy.target`
 
 **Type:** `enum` · **Default:** `none` · **Stability:** `beta` · **Backends:** go, node, python, rust
@@ -1441,6 +1466,7 @@ Selects the deployment infrastructure scaffold.
   frontend, an Ingress, per-backend ConfigMap/Secret, and optional
   in-cluster datastores. The chart is rendered from the project's actual
   topology and re-rendered on ``forge --update`` so it never goes stale.
+  ``deploy.helm_layout=per_service`` emits one chart per service instead.
 
 The chart's ``values.yaml`` is forge-owned (topology defaults, three-way
 merged on update); copy ``values-prod.yaml.example`` to ``values-prod.yaml``

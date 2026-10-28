@@ -20,8 +20,9 @@ security:
   access_token_expire_minutes: 30
   refresh_token_expire_minutes: 600
   # Keycloak (URL, realm, client) comes from the environment, not this file:
-  # KEYCLOAK_BASE_URL, KEYCLOAK_ADMIN_REALM, GATEKEEPER_CLIENT_ID and
-  # GATEKEEPER_CLIENT_SECRET (see app/gatekeeper/config.py).
+  # KEYCLOAK_BASE_URL, KEYCLOAK_PUBLIC_BASE_URL, KEYCLOAK_ADMIN_REALM,
+  # GATEKEEPER_CLIENT_ID and GATEKEEPER_CLIENT_SECRET (see
+  # app/gatekeeper/config.py).
 
 discovery:
   enabled: false

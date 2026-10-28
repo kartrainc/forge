@@ -1,0 +1,135 @@
+{%- macro e(v) %}{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}{% endmacro -%}
+{%- set host = topology.project_slug | replace("_", "-") ~ ".example.com" -%}
+# Values of the {{ service.name }} chart: Keycloak, the identity provider of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED. It is re-rendered on every `forge --update` (a three-way merge keeps your edits or drops
+# a .forge-merge sidecar). Override per environment with a separate file forge never touches:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+
+partOf: "{{ e(topology.project_slug | replace("_", "-")) }}"
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "26.6"
+  # sha256:<64 hex>; wins over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePolicy:
+  requireDigest: false
+imagePullSecrets: []
+
+# development runs start-dev, one replica; production runs start, needs hostname and set credentials, and imports the
+# realm without its dev user and with sslRequired external. No clustering setup yet.
+mode: development
+replicas: 1
+# KC_HOSTNAME: the public URL, so the issuer of every token whichever URL issued it. The gatekeeper chart's
+# KEYCLOAK_PUBLIC_BASE_URL is this plus /realms: change them together. "" derives the URLs from each request, and
+# refreshing a token through the in-cluster URL then fails.
+hostname: "https://auth.{{ e(host) }}"
+
+# The database and role the postgres chart creates for Keycloak.
+db:
+  host: postgres-rw
+  port: 5432
+  database: keycloak
+  username: keycloak
+  passwordSecret:
+    name: postgres-keycloak
+    key: password
+
+# The master realm's bootstrap admin, created on the first start. existingSecret names a Secret with the keys
+# username and password to use instead. Mode production refuses the CHANGEME password.
+admin:
+  username: admin
+  password: CHANGEME
+  existingSecret: ""
+
+realm:
+  # Imported from files/keycloak-realm.json on the first start (an existing realm is kept).
+  name: "{{ e(topology.keycloak_realm) }}"
+  # The hosts the gatekeeper client accepts redirects and origins from.
+  appHost: "{{ e(host) }}"
+{%- set further = topology.frontends | rejectattr("primary") | list %}
+{%- if further %}
+  frontendHosts:
+{%- for fe in further %}
+    "{{ e(fe.name) }}": "{{ e(fe.name) }}.{{ e(host) }}"
+{%- endfor %}
+{%- else %}
+  frontendHosts: {}
+{%- endif %}
+  # Secrets of the realm's confidential clients, by clientId. gatekeeper must equal the gatekeeper chart's
+  # GATEKEEPER_CLIENT_SECRET. Mode production needs one for every confidential client (the svc-<backend> S2S
+  # clients too: their dev secrets are derivable) and refuses CHANGEME.
+  clientSecrets:
+    gatekeeper: CHANGEME
+  # A post-install/post-upgrade Job that applies the realm file's User-Profile to an existing realm, run with the
+  # gatekeeper image (build and push deploy/infra/gatekeeper/ first).
+  sync:
+    enabled: false
+    image:
+      repository: ghcr.io/example/{{ topology.project_slug }}-gatekeeper
+      tag: latest
+      digest: ""
+      pullPolicy: IfNotPresent
+    # The gatekeeper image runs as appuser, uid/gid 10001.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 10001
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+# More container env, e.g. KC_LOG_LEVEL.
+extraEnv: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    memory: 1536Mi
+
+# The image's user keycloak is uid 1000 in group 0, which own /opt/keycloak.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  # Keycloak writes its build and temporary files under /opt/keycloak.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+  automountToken: false
+
+# Traefik routing. Each middlewares.<key> is a Middleware spec, rendered as {{ service.name }}-<key>; a route without
+# services goes to this chart's Service.
+ingressRoute:
+  enabled: false
+  entryPoints:
+    - websecure
+  tls: {}
+  middlewares: {}
+  routes:
+    # Not the admin console and admin API (/admin, also behind encoded slashes).
+    - match: "Host(`auth.{{ e(host) }}`) && !PathRegexp(`(?i)^(/|%2f)+admin`)"
+      middlewares: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

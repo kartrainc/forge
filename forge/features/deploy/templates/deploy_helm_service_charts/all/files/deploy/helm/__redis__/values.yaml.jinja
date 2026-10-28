@@ -1,0 +1,62 @@
+# Values of the {{ service.name }} chart of {{ topology.project_slug }}: one Valkey instance, Redis-compatible, in
+# place of compose's redis.
+#
+# THIS FILE IS FORGE-OWNED. It is re-rendered from the project's deployment
+# topology on every `forge --update` (a three-way merge keeps your edits or
+# drops a .forge-merge sidecar). Override per environment with a separate file
+# forge never touches; install this chart before the services:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+#
+# Clients connect to redis://:<password>@{{ service.name }}:6379/0.
+
+partOf: {{ topology.project_slug | replace("_", "-") | tojson }}
+image:
+  repository: docker.io/valkey/valkey
+  tag: 8.1.11-alpine
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePolicy:
+  requireDigest: false
+imagePullSecrets: []
+
+auth:
+  # A placeholder, like the password in the services' Redis URLs: override per environment.
+  password: CHANGEME
+  # A Secret of your own (an ExternalSecret, ...) with the password under the key "password"; the chart then creates none.
+  existingSecret: ""
+
+# The append-only data; disabled, it lives in an emptyDir and goes with the pod. Install-time only: they feed the
+# StatefulSet's volumeClaimTemplates, which Kubernetes never updates, so a later change fails the upgrade (resize the
+# PVC itself instead).
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# The valkey image's user: uid 999, gid 1000 in the alpine variant.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,45 @@
+# Every optional template on, for the chart checks (helm lint, helm template, kubeconform); not an environment.
+image:
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+imagePullSecrets:
+  - name: registry
+imagePolicy:
+  requireDigest: true
+serviceAccount:
+  create: true
+deployment:
+  podDisruptionBudget:
+    enabled: true
+  podLabels:
+    example.com/tier: web
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                example.com/tier: web
+container:
+  volumeMounts:
+    - name: extra
+      mountPath: /usr/share/nginx/html/extra
+volumes:
+  - name: extra
+    emptyDir: {}
+ingressRoute:
+  enabled: true
+  tls:
+    certResolver: letsencrypt
+  middlewares:
+    compress:
+      compress: {}
+autoscaling:
+  enabled: true
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespace: traefik
+      podLabels:
+        app.kubernetes.io/name: traefik

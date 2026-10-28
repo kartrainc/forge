@@ -21,19 +21,37 @@
 # server stores the SCRAM-SHA-256 verifier computed from it. It must be
 # printable ASCII. Safe to re-run, and to run concurrently (every pod of a
 # Deployment may run it): an advisory lock serializes the runs.
+#
+# APP_DB_ROLE_MANAGED=true: something else (a database operator) creates the
+# role and owns its password, so this script only checks the role is safe and
+# refreshes its grants; APP_DB_PASSWORD is not needed.
 set -eu
 
 : "${APP_DB_ROLE:?APP_DB_ROLE is required}"
-: "${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}"
 
-# libpq splits startup options on spaces; a backslash escapes the next character.
-escaped=$(printf '%s' "$APP_DB_PASSWORD" | sed 's/[\\ ]/\\&/g')
-PGOPTIONS="${PGOPTIONS:-} -c forge.app_db_password=$escaped"
-export PGOPTIONS
+managed_role() {
+cat <<'SQL'
+DO $do$
+DECLARE
+    r pg_roles%ROWTYPE;
+BEGIN
+    SELECT * INTO r FROM pg_roles WHERE rolname = current_setting('forge.app_db_role');
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'role % does not exist: APP_DB_ROLE_MANAGED expects it created already',
+            current_setting('forge.app_db_role');
+    END IF;
+    IF NOT r.rolcanlogin OR r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole
+       OR r.rolreplication THEN
+        RAISE EXCEPTION 'role % must be LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION',
+            r.rolname;
+    END IF;
+END
+$do$;
+SQL
+}
 
-psql ${DB_OWNER_URL:+"$DB_OWNER_URL"} -v ON_ERROR_STOP=1 <<'SQL'
-\getenv role APP_DB_ROLE
-SELECT pg_advisory_lock(hashtext('forge:db-app-role'));
+created_role() {
+cat <<'SQL'
 SELECT format(
     'CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION',
     :'role')
@@ -115,6 +133,11 @@ BEGIN
     END;
 END
 $do$;
+SQL
+}
+
+grants() {
+cat <<'SQL'
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'role')\gexec
 SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'role')\gexec
 SELECT format('REVOKE CREATE ON SCHEMA public FROM %I', :'role')\gexec
@@ -127,3 +150,23 @@ SELECT format(
     'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I',
     :'role')\gexec
 SQL
+}
+
+if [ "${APP_DB_ROLE_MANAGED:-}" = "true" ]; then
+    role_sql=managed_role
+else
+    : "${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}"
+    # libpq splits startup options on spaces; a backslash escapes the next character.
+    escaped=$(printf '%s' "$APP_DB_PASSWORD" | sed 's/[\\ ]/\\&/g')
+    PGOPTIONS="${PGOPTIONS:-} -c forge.app_db_password=$escaped"
+    export PGOPTIONS
+    role_sql=created_role
+fi
+
+{
+    printf '%s\n' '\getenv role APP_DB_ROLE' \
+        "SELECT pg_advisory_lock(hashtext('forge:db-app-role'));" \
+        "SELECT set_config('forge.app_db_role', :'role', false);"
+    "$role_sql"
+    grants
+} | psql ${DB_OWNER_URL:+"$DB_OWNER_URL"} -v ON_ERROR_STOP=1

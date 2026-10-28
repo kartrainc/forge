@@ -19,6 +19,7 @@ so generation + re-application produce identical output.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -902,6 +903,81 @@ def _check_fragment_ui_kits(config: ProjectConfig, fragment_set: set[str]) -> No
         )
 
 
+# A Helm release name: a DNS-1123 label of at most 53 characters.
+_RELEASE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
+# The names of the infrastructure charts' releases and objects (CloudNativePG names its Services <cluster>-rw/-ro/-r,
+# the postgres chart a role's Secret and Database postgres-<role>).
+_INFRA_CHART_NAMES = {
+    **dict.fromkeys(
+        (
+            "postgres",
+            "postgres-rw",
+            "postgres-ro",
+            "postgres-r",
+            "postgres-events",
+            "postgres-keycloak",
+        ),
+        "the postgres chart",
+    ),
+    **dict.fromkeys(("redis", "redis-auth", "redis-config", "redis-headless"), "the redis chart"),
+    **dict.fromkeys(
+        ("keycloak", "keycloak-admin", "keycloak-hsts", "keycloak-realm", "keycloak-realm-sync"),
+        "the keycloak chart",
+    ),
+    **dict.fromkeys(
+        (
+            "gatekeeper",
+            "gatekeeper-auth",
+            "gatekeeper-config",
+            "gatekeeper-ratelimit",
+            "gatekeeper-registry",
+            "gatekeeper-secret",
+            "gatekeeper-signing",
+            "gatekeeper-strip-api-key",
+            "gatekeeper-untrusted-headers",
+        ),
+        "the gatekeeper chart",
+    ),
+}
+# The first label of the keycloak chart's host, auth.<host>; a further frontend is served on <name>.<host>.
+_KEYCLOAK_HOST_LABEL = "auth"
+
+
+def _check_service_chart_names(config: ProjectConfig, option_values: dict[str, object]) -> None:
+    """deploy.helm_layout=per_service writes deploy/helm/<name>/ per backend and frontend, installed as release <name>
+    beside the infrastructure charts: every name must be a release name, distinct from the others and from the
+    infrastructure charts' names, and a further frontend must not take the keycloak chart's host."""
+    from forge.config._topology import compute_topology, helm_postgres_conflict  # noqa: PLC0415
+
+    topology = compute_topology(config)
+    if topology["helm_keycloak"] and any(
+        fe["name"] == _KEYCLOAK_HOST_LABEL and not fe["primary"] for fe in topology["frontends"]
+    ):
+        raise OptionsError(
+            f"deploy.helm_layout=per_service: the frontend {_KEYCLOAK_HOST_LABEL!r} would be served on the keycloak "
+            f"chart's host, {_KEYCLOAK_HOST_LABEL}.<host>; rename the frontend"
+        )
+    names = [be["name"] for be in topology["backends"]] + [
+        fe["name"] for fe in topology["frontends"]
+    ]
+    seen: set[str] = set(_INFRA_CHART_NAMES)
+    for name in names:
+        if not _RELEASE_NAME.match(name):
+            raise OptionsError(
+                f"deploy.helm_layout=per_service: {name!r} is not a Helm release name (lowercase letters, digits "
+                "and '-', at most 53 characters); rename the service"
+            )
+        if name in seen:
+            raise OptionsError(
+                f"deploy.helm_layout=per_service: {name!r} is already taken by "
+                f"{_INFRA_CHART_NAMES.get(name, 'another service')}; rename the service"
+            )
+        seen.add(name)
+    conflict = helm_postgres_conflict(config, topology, option_values)
+    if conflict:
+        raise OptionsError(f"deploy.helm_layout=per_service: {conflict}; rename the service")
+
+
 def resolve(config: ProjectConfig) -> ResolvedPlan:
     """Produce an ordered ResolvedPlan from ``config.options``.
 
@@ -954,6 +1030,18 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
     fragment_set = _collect_fragments(option_values)
     fragment_set |= _collect_component_fragments(config)
     fragment_set = _expand_deps(fragment_set)
+    # deploy.helm_layout picks how deploy.target=kubernetes packages the project: per_service puts one chart per
+    # service in place of the umbrella chart, after every dependency is in, so the umbrella cannot come back. The
+    # charts stay requested as the umbrella was.
+    requested_as: dict[str, str] = {}
+    if (
+        "deploy_helm_chart" in fragment_set
+        and option_values.get("deploy.helm_layout") == "per_service"
+    ):
+        _check_service_chart_names(config, option_values)
+        fragment_set.discard("deploy_helm_chart")
+        fragment_set.add("deploy_helm_service_charts")
+        requested_as["deploy_helm_service_charts"] = "deploy_helm_chart"
     _check_fragment_ui_kits(config, fragment_set)
     _check_security_constraints(option_values, fragment_set)
     _check_unverified_tenant(option_values)
@@ -1002,7 +1090,9 @@ def resolve(config: ProjectConfig) -> ResolvedPlan:
             # to preserve pre-WS2 behavior for ad-hoc ProjectConfig
             # construction without origins (test fixtures, in-memory
             # callers that haven't been ported).
-            if _is_user_selected(config.options, name, config.option_origins):
+            if _is_user_selected(
+                config.options, requested_as.get(name, name), config.option_origins
+            ):
                 supported = ", ".join(sorted(lg.value for lg in frag.implementations)) or "(none)"
                 present = ", ".join(lang.value for lang in project_backends) or "(none)"
                 raise OptionsError(

@@ -1,0 +1,57 @@
+# Every optional part on, for helm lint/template and kubeconform in CI.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+imagePolicy:
+  requireDigest: true
+imagePullSecrets:
+  - name: registry
+mode: production
+hostname: https://auth.example.com
+admin:
+  password: ci-admin-password
+realm:
+  clientSecrets:
+    gatekeeper: ci-gatekeeper-secret
+{%- for be in topology.backends if be.synthesis_env.get("GATEKEEPER_CLIENT_ID") %}
+    "{{ be.synthesis_env.GATEKEEPER_CLIENT_ID }}": ci-{{ be.name }}-secret
+{%- endfor %}
+  sync:
+    enabled: true
+    image:
+      digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+extraEnv:
+  - name: KC_LOG_LEVEL
+    value: info
+serviceAccount:
+  create: true
+  annotations:
+    example.com/role: keycloak
+ingressRoute:
+  enabled: true
+  tls:
+    secretName: auth-tls
+  middlewares:
+    hsts:
+      headers:
+        stsSeconds: 31536000
+  routes:
+    - match: "Host(`auth.example.com`) && !PathRegexp(`(?i)^(/|%2f)+admin`)"
+      priority: 10
+      middlewares:
+        - name: keycloak-hsts
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: identity
+    effect: NoSchedule
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: keycloak

@@ -1,0 +1,101 @@
+# Values of the {{ service.name }} chart of {{ topology.project_slug }}: a CloudNativePG cluster holding the
+# database of every backend that has one{{ " and Keycloak's" if topology.include_keycloak else "" }}.
+#
+# THIS FILE IS FORGE-OWNED. It is re-rendered from the project's deployment
+# topology on every `forge --update` (a three-way merge keeps your edits or
+# drops a .forge-merge sidecar). Override per environment with a separate file
+# forge never touches. The CloudNativePG operator (1.26 or later) must already
+# run in the cluster; install this chart before the services:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+#
+# The operator names the cluster's Services after the release: the services
+# connect to {{ service.name }}-rw:5432, the primary.
+{%- set backend_databases = topology.backends | map(attribute="db_name") | list %}
+
+partOf: {{ topology.project_slug | replace("_", "-") | tojson }}
+imagePullSecrets: []
+imagePolicy:
+  requireDigest: false
+
+cluster:
+  instances: 1
+  image:
+    repository: ghcr.io/cloudnative-pg/postgresql
+    # PostgreSQL 16 as in compose; the standard image ships pgvector
+    tag: 16.15-standard-trixie
+    digest: ""
+    pullPolicy: IfNotPresent
+  storage:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # one instance: a PodDisruptionBudget would block every node drain (Karpenter consolidation)
+  enablePDB: false
+  enableSuperuserAccess: false
+  postgresql:
+    parameters: {}
+  monitoring:
+    enablePodMonitor: false
+  nodeSelector: {}
+  tolerations: []
+  # CloudNativePG's affinity stanza (nodeAffinity, enablePodAntiAffinity, ...), not a Pod's
+  affinity: {}
+
+# The roles the operator creates and keeps as declared, each with the password
+# in the Secret <release>-<role> (roleSecrets). A backend's database belongs to
+# the role of the same name, which runs its migrations; its migration only
+# grants to the runtime role below it.
+{%- if service.roles %}
+roles:
+{%- for role in service.roles %}
+  - name: {{ role.name }}
+    login: true
+    superuser: false
+{%- if role.runtime %}
+    # the role its service serves requests as (database.rls_app_role): row-level security applies to it
+    bypassrls: false
+    createdb: false
+    createrole: false
+    replication: false
+{%- endif %}
+{%- endfor %}
+{%- else %}
+roles: []
+{%- endif %}
+
+# One kubernetes.io/basic-auth Secret per role (username, password), named
+# <release>-<role> with "-" for "_". Placeholders only: override per
+# environment, or set create: false and provide Secrets of the same names
+# (an ExternalSecret, ...), labelled cnpg.io/reload: "true" so that a new
+# password applies at once. The services' DB URLs carry the same placeholder.
+roleSecrets:
+  create: true
+{%- if service.roles %}
+  passwords:
+{%- for role in service.roles %}
+    {{ role.name }}: CHANGEME
+{%- endfor %}
+{%- else %}
+  passwords: {}
+{%- endif %}
+
+# One Database per entry, owned by one of the roles; the first is created with
+# the cluster. The operator creates the extensions as a superuser: pgvector is
+# not a trusted extension, so the owner could not.
+{%- if service.databases %}
+databases:
+{%- for db in service.databases %}
+  - name: {{ db.name }}
+    owner: {{ db.owner }}
+    extensions: {{ "[vector]" if db.name in backend_databases else "[]" }}
+{%- endfor %}
+{%- else %}
+databases: []
+{%- endif %}

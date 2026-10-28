@@ -59,3 +59,22 @@ def register_all(api: ForgeAPI) -> None:
             },
         )
     )
+    # deploy.helm_layout=per_service: one chart per component (deploy/helm/<name>/), the placeholder directories of
+    # its tree (__backend__, __frontend__, __postgres__, ...) expanded per topology entry. The resolver puts it in
+    # place of deploy_helm_chart.
+    api.add_fragment(
+        Fragment(
+            name="deploy_helm_service_charts",
+            implementations={
+                lang: FragmentImplSpec(
+                    fragment_dir=_impl("deploy_helm_service_charts", "all"), scope="project"
+                )
+                for lang in (
+                    BackendLanguage.PYTHON,
+                    BackendLanguage.NODE,
+                    BackendLanguage.RUST,
+                    BackendLanguage.GO,
+                )
+            },
+        )
+    )

@@ -1,0 +1,79 @@
+# Every optional part on, for helm lint/template and kubeconform in CI.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+imagePolicy:
+  requireDigest: true
+imagePullSecrets:
+  - name: registry
+serviceAccount:
+  create: true
+  annotations:
+    example.com/role: gatekeeper
+deployment:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+  podAnnotations:
+    example.com/scrape: "true"
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: auth
+      effect: NoSchedule
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: gatekeeper
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: gatekeeper
+container:
+  env:
+    - name: LOG_LEVEL
+      value: info
+  envFrom:
+    - secretRef:
+        name: gatekeeper-extra
+service:
+  annotations:
+    example.com/internal: "true"
+secret:
+  enabled: false
+externalSecret:
+  enabled: true
+  secretStoreRef:
+    name: vault
+  dataFrom:
+    - extract:
+        key: gatekeeper
+signingKeys:
+  existingSecret: gatekeeper-signing-keys
+serviceRegistry:
+  existingSecret: gatekeeper-service-registry
+authMiddlewares:
+  enabled: true
+ingressRoute:
+  enabled: true
+  tls:
+    secretName: app-tls
+  middlewares:
+    ratelimit:
+      rateLimit:
+        average: 20
+        burst: 40
+  routes:
+    - match: "Host(`app.example.com`) && (Path(`/auth/login`) || Path(`/callback`) || Path(`/logout`))"
+      priority: 100
+      middlewares:
+        - name: gatekeeper-ratelimit

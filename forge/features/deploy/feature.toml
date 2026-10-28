@@ -10,7 +10,9 @@ stability = "beta"
 [feature.provides]
 options = [
     "deploy.target",
+    "deploy.helm_layout",
 ]
 fragments = [
     "deploy_helm_chart",
+    "deploy_helm_service_charts",
 ]

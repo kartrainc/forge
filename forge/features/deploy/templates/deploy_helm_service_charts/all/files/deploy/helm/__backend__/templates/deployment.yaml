@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "svc.fullname" . }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.deployment.replicas }}
+  {{- end }}
+  {{- with .Values.deployment.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "svc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "svc.podLabels" . | nindent 8 }}
+      annotations:
+        # an upgrade that changes only the ConfigMap or the Secret rolls the pods
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- /* The values, not the Secret: the keys it generates hold for the release. */}}
+        checksum/secret: {{ .Values.secret | toJson | sha256sum }}
+        {{- with .Values.deployment.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with include "svc.serviceAccountName" . }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.deployment.terminationGracePeriodSeconds }}
+      {{- with .Values.deployment.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.deployment.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "svc.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.container.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.container.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "svc.child" (dict "root" . "suffix" "config") }}
+            - secretRef:
+                name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
+                # Under externalSecret the pod waits for ESO's Secret: env is read only at container start.
+                optional: {{ not .Values.externalSecret.enabled }}
+            {{- with .Values.container.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.container.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.container.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.container.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
