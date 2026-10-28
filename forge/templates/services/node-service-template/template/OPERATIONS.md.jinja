@@ -12,7 +12,7 @@ Settings load lowest-to-highest priority (later wins):
 3. `config/{ENV}.yaml` — selected by `ENV` (or `NODE_ENV`), default `development`.
 4. `.secrets.yaml` — gitignored local overrides.
 5. `APP__*` environment variables — nested with `__`, e.g.
-   `APP__DB__URL`, `APP__SERVER__PORT`. Values are coerced (`"true"` → boolean,
+   `{% if use_database | default(true) %}APP__DB__URL{% else %}APP__LOGGING__LEVEL{% endif %}`, `APP__SERVER__PORT`. Values are coerced (`"true"` → boolean,
    `"123"` → number) before Zod validation.
 
 **Env vars always win.** Config is validated by Zod at startup; a malformed
@@ -24,6 +24,7 @@ If `security.auth.enabled=true` in a production-like environment (anything other
 than `development`/`test`/`local`), the loader **throws at startup** unless
 `GATEKEEPER_ISSUER` and `SERVICE_AUDIENCE` are both set. This prevents shipping
 an auth-on service with no issuer configured.
+{%- if use_database | default(true) %}
 
 ## Database migrations
 
@@ -36,6 +37,7 @@ npx prisma migrate deploy   # then: node dist/index.js
 `prisma migrate deploy` is idempotent and safe under concurrent replica boots —
 replicas that lose the race apply nothing. To run out-of-band, execute the same
 command against the target `DATABASE_URL` before starting the app.
+{%- endif %}
 
 ## Graceful shutdown
 

@@ -73,6 +73,11 @@ jobs:
           - language: vue
             kit: two-apps
             args: --auth --features items,orders --extra-frontend admin:nuxt-ui
+          # The Node template without a database (http-service): its own
+          # entrypoint, error and route tests carry the coverage gate.
+          - language: node
+            kit: http-service
+            args: --app-template http-service
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:

@@ -20,6 +20,7 @@ export const ServerConfigSchema = z.object({
 	port: z.number().int().min(1).max(65535).default(5000),
 	cors: CorsConfigSchema.prefault({}),
 });
+{%- if use_database | default(true) %}
 
 export const DbConfigSchema = z.object({
 	url: z.string().min(1, "db.url is required"),
@@ -27,6 +28,7 @@ export const DbConfigSchema = z.object({
 	poolMax: z.number().int().positive().default(10),
 	statementTimeoutMs: z.number().int().positive().default(30_000),
 });
+{%- endif %}
 
 export const LoggingConfigSchema = z.object({
 	level: z
@@ -57,14 +59,18 @@ export const AppInfoSchema = z.object({
 export const AppConfigSchema = z.object({
 	app: AppInfoSchema.prefault({}),
 	server: ServerConfigSchema.prefault({}),
+{%- if use_database | default(true) %}
 	db: DbConfigSchema,
+{%- endif %}
 	logging: LoggingConfigSchema.prefault({}),
 	security: SecurityConfigSchema.prefault({}),
 });
 
 export type CorsConfig = z.infer<typeof CorsConfigSchema>;
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
+{%- if use_database | default(true) %}
 export type DbConfig = z.infer<typeof DbConfigSchema>;
+{%- endif %}
 export type LoggingConfig = z.infer<typeof LoggingConfigSchema>;
 export type SecurityConfig = z.infer<typeof SecurityConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;

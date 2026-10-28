@@ -8,6 +8,7 @@
  */
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { errorHandler } from "../../src/middleware/error-handler.js";
 import {
 	AppError,
@@ -52,6 +53,10 @@ async function buildTestApp(): Promise<FastifyInstance> {
 
 	app.get("/boom", async () => {
 		throw new Error("kaboom");
+	});
+
+	app.get("/unparsed", async () => {
+		z.object({ email: z.email() }).parse({ email: "not-an-address" });
 	});
 
 	return app;
@@ -125,8 +130,19 @@ describe("E.1.b error-handler runtime wiring", () => {
 		expect(body.error.message).toBe("An unexpected error occurred");
 	});
 
+	it("answers a schema failure 422 with every issue's path", async () => {
+		const response = await app.inject({ method: "GET", url: "/unparsed" });
+		const body = JSON.parse(response.payload) as { error: ErrorBody };
+
+		expect(response.statusCode).toBe(422);
+		expect(body.error.code).toBe("VALIDATION_FAILED");
+		expect(body.error.context.errors).toEqual([
+			expect.objectContaining({ path: ["email"] }),
+		]);
+	});
+
 	it("preserves the RFC-007 shape across every reachable handler path", async () => {
-		for (const url of ["/missing", "/invalid", "/custom", "/boom"]) {
+		for (const url of ["/missing", "/invalid", "/custom", "/boom", "/unparsed"]) {
 			const response = await app.inject({ method: "GET", url });
 			const body = JSON.parse(response.payload) as { error: ErrorBody };
 			expect(Object.keys(body)).toEqual(["error"]);

@@ -60,8 +60,13 @@ services:
     build:
       context: ./services/{{ be.name }}
       dockerfile: Dockerfile
+{% if database_mode != "none" and be.has_migrations %}
       # See the {{ be.name }}-migrate build above — same rationale (the
       # ``packages`` context is only declared when a project-root packages/ ships).
+{% else %}
+      # The ``packages`` context is only declared when a project-root
+      # packages/ ships.
+{% endif %}
       additional_contexts:
 {% if has_project_sdks %}
         packages: ./packages
@@ -82,7 +87,7 @@ services:
       # a non-default port the ``{{ be.port }}:{{ be.port }}`` host map and the
       # Dockerfile healthcheck (both on {{ be.port }}) would hit a closed port.
       APP__SERVER__PORT: "{{ be.port }}"
-{% if database_mode != "none" %}
+{% if database_mode != "none" and be.uses_database | default(true) %}
       APP__DB__URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/{{ be.db_name }}"
 {% endif %}
 {% elif be.language == "node" %}
@@ -93,7 +98,7 @@ services:
       # the schema default (5000) and the host:container port mapping
       # above would land on a closed port inside the container.
       APP__SERVER__PORT: "{{ be.port }}"
-{% if database_mode != "none" %}
+{% if database_mode != "none" and be.uses_database | default(true) %}
       # ``APP__DB__URL`` is consumed by the Zod schema; ``DATABASE_URL``
       # is what Prisma reads. Both must point at the in-network postgres
       # host or boot will fail (Zod) / migrations will misroute (Prisma).
@@ -102,14 +107,14 @@ services:
 {% endif %}
 {% elif be.language == "rust" %}
       PORT: "{{ be.port }}"
-{% if database_mode != "none" %}
+{% if database_mode != "none" and be.uses_database | default(true) %}
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
 {% endif %}
       RUST_LOG: info
 {% elif be.language == "go" %}
       ENV: development
       PORT: "{{ be.port }}"
-{% if database_mode != "none" %}
+{% if database_mode != "none" and be.uses_database | default(true) %}
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
 {% endif %}
 {% endif %}

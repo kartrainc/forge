@@ -1,6 +1,6 @@
-db:
+{% if use_database | default(true) %}db:
   url: "postgresql://postgres:postgres@localhost:5432/{{ project_name }}_test"
 
-logging:
+{% endif %}logging:
   level: "warn"
   pretty: false

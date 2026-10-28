@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from forge.backend_app_templates import backend_uses_database
 from forge.config import (
     BACKEND_REGISTRY,
     BackendConfig,
@@ -170,6 +171,10 @@ def backend_context(
     # build stage when there's no sibling ``packages/`` tree.
     if bc.sdk_consumption is not None:
         ctx["sdk_consumption"] = bc.sdk_consumption
+    # Only a database-free app template passes the key, so crud-service keeps
+    # its template default and its recorded answers byte-identical.
+    if not backend_uses_database(bc.language, bc.app_template):
+        ctx["use_database"] = False
     return ctx
 
 
