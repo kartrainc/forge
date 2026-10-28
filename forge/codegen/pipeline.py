@@ -54,6 +54,7 @@ from forge.codegen.ui_protocol import (
     load_all as load_ui_schemas,
 )
 from forge.config import BackendLanguage
+from forge.config._topology import database_backends
 from forge.domain.emitters import (
     emit_alembic_migration,
     emit_go_struct,
@@ -545,8 +546,9 @@ def _emit_shared_enums(
         # Python / Node / Rust backends — paths are conventional, not
         # registered. Adding a plugin backend needs the same
         # {"services/<name>/..."} shape or a dedicated backend-layout
-        # registry (deferred; no plugin backend ships today).
-        for bc in config.backends:
+        # registry (deferred; no plugin backend ships today). A backend
+        # without a database has no entity to type, so it gets none.
+        for bc in database_backends(config.backends):
             if bc.language is BackendLanguage.PYTHON:
                 path = (
                     project_root
@@ -686,7 +688,7 @@ def _emit_user_entities(
 
     for entity_file in entity_files:
         spec = load_entity_yaml(entity_file)
-        for bc in config.backends:
+        for bc in database_backends(config.backends):
             if bc.language is BackendLanguage.PYTHON:
                 _emit_python_entity(
                     spec,

@@ -289,6 +289,29 @@ Each safeguard below is an option, so a project can choose another strategy.
   re-stamp is automatic, and forge reads every older manifest itself; only a
   tool of your own that checks the version number needs to accept 5.
 
+### Node HTTP service
+
+- Add the `http-service` app template for Node backends: the Node template
+  rendered with `use_database=false`, without Prisma, the migrate step or the
+  sample `items` entity, for stateless services. Compose, `init-db.sh` and the
+  Helm chart wire no database, DB URL or migration for it. The connection
+  pool, background tasks, queue and cache fragments skip it, as the HTTP
+  middleware skips `worker`. Its image keeps only production dependencies.
+  Without `features` it serves none, and naming CRUD features for it is
+  refused: the frontend would get pages for an API it does not serve. No
+  domain enum or entity type is emitted into it.
+- Let an app-template manifest declare `uses_database = false` for a service
+  shape without a database of its own.
+- Render a `.dockerignore` into every Node service, so a host install, build
+  output and local env files stay out of the image's build context.
+- Every Node service's E2E suite runs behind platform auth: it loads the
+  integration tier's issuer and audience defaults, serves its own keys, mints
+  a token and expects the verifier's 401 for an anonymous request. It also
+  starts the entrypoint (listen, drain on SIGTERM), and the error-handler
+  suite covers a schema failure's 422.
+- `scripts/check_generated_quality.py` takes `--app-template`; the
+  generated-quality lanes include a Node `http-service`.
+
 ### Fixed
 
 - One realm name (the project's) in the realm JSON, the gatekeeper, realm sync,
@@ -322,6 +345,21 @@ Each safeguard below is an option, so a project can choose another strategy.
   moves only when each of its re-renders applied (or left sidecars).
 - `frontend.features` in a stack file is read; it was dropped.
 - The Svelte template accepts an empty `features` list.
+- Add `@types/opossum` with the Node circuit breaker. opossum ships no types,
+  so the strict tsconfig stopped `tsc` and the image build with TS7016.
+- Default `GATEKEEPER_ISSUER` and `SERVICE_AUDIENCE` for a Node service's
+  integration suite (`tests/integration/setup-env.ts`), so a service with
+  platform auth no longer fails at `buildApp()` outside the stack. Values the
+  environment sets still win.
+- `forge --update` rebuilds each backend with the app template that rendered
+  it, read back from its `.copier-answers.yml`. It rebuilt every backend as
+  `crud-service`, so fragments that skip a `worker` or an `http-service` were
+  planned for it.
+- The single `backend:` table of a stack file reads `app_template`; it was
+  ignored.
+- A Node service's `docker-compose.yaml` and `docker-compose.fragment.yaml`
+  set `APP__SERVER__PORT`, which its config reads. With `PORT`, a service on a
+  port other than 5000 still listened on 5000.
 - `security.csp` now protects the Vue frontend without the AI chat. The
   frontend's `nginx.conf` and the Helm chart's default server block send a
   nonce-based Content-Security-Policy with `index.html` and defence-in-depth

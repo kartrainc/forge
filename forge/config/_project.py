@@ -895,9 +895,12 @@ class ProjectConfig:
         # Derived database-name collision (audit #20): db_name is
         # ``name.replace('-', '_')`` in both the topology entry and init-db, so
         # distinct names that normalize to the same db_name (e.g. ``my-svc`` and
-        # ``my_svc``) would silently share one Postgres database.
+        # ``my_svc``) would silently share one Postgres database. A backend
+        # without a database of its own (``http-service``) cannot collide.
+        from forge.config._topology import database_backends  # noqa: PLC0415
+
         db_names: dict[str, str] = {}
-        for bc in self.backends:
+        for bc in database_backends(self.backends):
             db_name = bc.name.replace("-", "_")
             if db_name in db_names:
                 raise ValueError(
@@ -1009,10 +1012,13 @@ class ProjectConfig:
         # renders; Redis/Gatekeeper/Keycloak under Keycloak). Derived from the
         # template's actual host binds so we neither reject a free port nor
         # admit a real `docker compose up` collision.
-        from forge.config._topology import compute_render_postgres  # noqa: PLC0415
+        from forge.config._topology import (  # noqa: PLC0415
+            compute_render_postgres,
+            database_backends,
+        )
 
         render_postgres = compute_render_postgres(
-            has_backends=bool(self.backends),
+            has_backends=bool(database_backends(self.backends)),
             database_mode=self.database_mode,
             include_keycloak=self.include_keycloak,
         )

@@ -27,8 +27,10 @@ app:
   name: "svc"
 server:
   port: 5000
+{%- if use_database | default(true) %}
 db:
   url: "postgres://local/defaults"
+{%- endif %}
 logging:
   level: "info"
 `,
@@ -37,11 +39,20 @@ logging:
   level: "warn"
 server:
   port: 6000
+{%- if not (use_database | default(true)) %}
+app:
+  name: "svc-production"
+{%- endif %}
 `,
 			},
 			`
+{%- if use_database | default(true) %}
 db:
   url: "postgres://local/secret"
+{%- else %}
+app:
+  name: "svc-secret"
+{%- endif %}
 `,
 		);
 	});
@@ -72,7 +83,11 @@ db:
 			env: "production",
 			processEnv: {},
 		});
+{%- if use_database | default(true) %}
 		expect(config.db.url).toBe("postgres://local/secret");
+{%- else %}
+		expect(config.app.name).toBe("svc-secret");
+{%- endif %}
 	});
 
 	it("env vars (APP__*) override all yaml layers", () => {
@@ -81,12 +96,16 @@ db:
 			env: "production",
 			processEnv: {
 				APP__SERVER__PORT: "7000",
+{%- if use_database | default(true) %}
 				APP__DB__URL: "postgres://override",
+{%- endif %}
 				APP__LOGGING__PRETTY: "true",
 			},
 		});
 		expect(config.server.port).toBe(7000);
+{%- if use_database | default(true) %}
 		expect(config.db.url).toBe("postgres://override");
+{%- endif %}
 		expect(config.logging.pretty).toBe(true);
 	});
 

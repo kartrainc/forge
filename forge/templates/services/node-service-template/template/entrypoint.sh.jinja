@@ -1,11 +1,15 @@
 #!/bin/sh
+{%- if use_database | default(true) %}
 # Run Prisma migrations before the server comes up. The migrate
 # operation is idempotent — replicas that lose the race simply re-apply
 # nothing.
+{%- endif %}
 set -eu
+{%- if use_database | default(true) %}
 
 echo "[entrypoint] prisma migrate deploy"
 npx prisma migrate deploy
+{%- endif %}
 
 echo "[entrypoint] starting {{ project_slug }} server"
 exec node dist/index.js

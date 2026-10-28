@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader
 
+from forge.backend_app_templates import backend_uses_database
 from forge.config import (
     TRAEFIK_DASHBOARD_PORT,
     BackendLanguage,
@@ -22,6 +23,7 @@ from forge.config._topology import (
     backend_topology_entry,
     compute_render_postgres,
     compute_rendered_infra,
+    database_backends,
     frontend_host_rule,
     frontend_topology_entry,
     option_value,
@@ -193,8 +195,9 @@ def render_compose(
     # per-backend migrate sidecars. Keycloak has its own DB needs, so the
     # postgres service still renders when it's enabled.
     database_mode = config.database_mode
+    owners = database_backends(config.backends)
     render_postgres = compute_render_postgres(
-        has_backends=bool(config.backends),
+        has_backends=bool(owners),
         database_mode=database_mode,
         include_keycloak=config.include_keycloak,
     )
@@ -229,7 +232,10 @@ def render_compose(
         "backend_language": primary.language.value if primary else "python",
         "backend_slug": config.backend_slug,
         "backend_port": primary.server_port if primary else 5000,
-        "db_name": config.backend_slug.replace("-", "_"),
+        # Postgres's own database: the first backend that owns one, so a leading
+        # http-service backend does not leave a stray database behind; with none
+        # (Postgres rendered for Keycloak alone), the image's default database.
+        "db_name": owners[0].name.replace("-", "_") if owners else "postgres",
         "has_frontend": has_frontend,
         "frontend_slug": config.frontend_slug if has_frontend else "",
         "frontend_port": (
@@ -638,6 +644,9 @@ def render_init_db(
     extra_dbs = set()
     if config.database_mode != "none":
         for bc in config.backends:
+            if not backend_uses_database(bc.language, bc.app_template):
+                continue
+
             db_name = bc.name.replace("-", "_")
             extra_dbs.add(db_name)
     if config.include_keycloak:

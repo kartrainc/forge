@@ -7,12 +7,14 @@
 ```bash
 # Install dependencies
 npm install
+{%- if use_database | default(true) %}
 
 # Generate Prisma client
 npm run generate
 
 # Run database migrations
 npm run migrate:dev
+{%- endif %}
 
 # Start development server
 npm run dev
@@ -28,11 +30,13 @@ The server starts on [http://localhost:{{ server_port }}](http://localhost:{{ se
 | GET    | `/api/v1/info`        | Service info       |
 | GET    | `/api/v1/health/live` | Liveness probe     |
 | GET    | `/api/v1/health/ready`| Readiness probe    |
+{%- if use_database | default(true) %}
 | GET    | `/api/v1/{{ entity_plural }}`       | List items         |
 | POST   | `/api/v1/{{ entity_plural }}`       | Create item        |
 | GET    | `/api/v1/{{ entity_plural }}/:id`   | Get item           |
 | PATCH  | `/api/v1/{{ entity_plural }}/:id`   | Update item        |
 | DELETE | `/api/v1/{{ entity_plural }}/:id`   | Delete item        |
+{%- endif %}
 
 ## Scripts
 
@@ -50,4 +54,4 @@ The server starts on [http://localhost:{{ server_port }}](http://localhost:{{ se
 docker compose up -d
 ```
 
-Starts the app, PostgreSQL, and optionally pgAdmin (`--profile tools`).
+{% if use_database | default(true) %}Starts the app, PostgreSQL, and optionally pgAdmin (`--profile tools`).{% else %}Starts the app.{% endif %}

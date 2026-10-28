@@ -24,15 +24,19 @@ workloads:
       pullPolicy: IfNotPresent
     replicaCount: 2
     containerPort: {{ be.port }}
+{%- if be.uses_database | default(true) %}
     # The Postgres database this backend owns (matches the db_name in the DB URL
     # below). When infra.inCluster=true, templates/infra.yaml CREATEs each of
     # these in the in-cluster Postgres before the migrate hook runs.
     dbName: {{ be.db_name }}
+{%- endif %}
     # A migration runs as a pre-install/pre-upgrade Helm hook Job before the
     # Deployment rolls (see templates/jobs.yaml).
     hasMigrations: {{ "true" if be.has_migrations else "false" }}
     migrateCommand:
-{%- if be.language == "python" %}
+{%- if not (be.uses_database | default(true)) %}
+      []
+{%- elif be.language == "python" %}
       ["python", "-m", "app", "db", "upgrade"]
 {%- elif be.language == "node" %}
       ["npx", "prisma", "migrate", "deploy"]
@@ -132,6 +136,7 @@ workloads:
     dbAppRole: ""
 {%- endif %}
     secretEnv:
+{%- if be.uses_database | default(true) %}
 {%- if be.language == "python" %}
       APP__DB__URL: "postgresql+asyncpg://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language == "node" %}
@@ -139,6 +144,7 @@ workloads:
       DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language in ("rust", "go") %}
       DATABASE_URL: "postgresql://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
+{%- endif %}
 {%- endif %}
 {%- endfor %}
 
