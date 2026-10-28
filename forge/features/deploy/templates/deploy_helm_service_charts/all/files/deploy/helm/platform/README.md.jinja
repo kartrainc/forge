@@ -14,7 +14,7 @@ release, named after the service, so it rolls out, fails and rolls back alone, a
 | `deploy/helm/{{ fe.name }}` | `{{ fe.name }}` | the {{ fe.app }} frontend: nginx serving the built SPA |
 {%- endfor %}
 
-Install the platform first, then the services (`make helm-install`), each with its environment's values:
+Install this chart first, then the services (`make helm-install`), each with its environment's values:
 
     helm upgrade --install <chart> deploy/helm/<chart> -f deploy/helm/<chart>/values-<env>.yaml
 

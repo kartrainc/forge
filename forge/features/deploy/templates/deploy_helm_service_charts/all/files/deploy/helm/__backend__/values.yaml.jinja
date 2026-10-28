@@ -88,9 +88,8 @@ env:
   # synthesis_env loop so a multi-service Helm deployment can mint S2S
   # tokens + reach sibling services. Without this, Helm-deployed backends
   # have no GATEKEEPER_CLIENT_*/INTERNAL_SERVICE_URL_*/BUS_URL and fail
-  # inter-service auth at runtime. Credentials here are placeholders;
-  # override the secret values via values-prod.yaml / an ExternalSecret.
-{%- for k, v in service.synthesis_env.items() %}
+  # inter-service auth at runtime. The client secret is under secretEnv.
+{%- for k, v in service.synthesis_env.items() if not k.endswith("_SECRET") %}
   {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
 {%- endfor %}
 {%- endif %}
@@ -106,6 +105,10 @@ secretEnv:
 {%- elif service.language in ("rust", "go") %}
   DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- endif %}
+{%- for k, v in service.synthesis_env.items() if k.endswith("_SECRET") %}
+  # the S2S client secret the in-cluster gatekeeper knows; replace it per environment
+  {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
+{%- endfor %}
 
 # The Service, named after the release on the service's own port: a sibling's
 # INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }} (http://{{ service.name }}:{{ service.port }}) resolves.

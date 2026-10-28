@@ -12,7 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   its own release named after the service, plus `deploy/helm/platform/` for the Ingress and the optional in-cluster
   datastores, Keycloak and gatekeeper. A service rolls out, fails its migration and rolls back alone. Its Service is
   named after it on its own port, so the `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve in the
-  cluster as in compose. Each chart's values carry exactly its umbrella workload entry.
+  cluster as in compose. Each chart's values carry its umbrella workload entry, except that the S2S client secret
+  (`GATEKEEPER_CLIENT_SECRET`) is in `secretEnv`, so it lands in the Secret rather than the ConfigMap.
 - Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
   entry exposed to their Jinja as `service`.
 

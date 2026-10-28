@@ -4,7 +4,7 @@
 # charts (never hand-edit deploy/k8s/rendered.yaml).
 
 NAMESPACE ?= default
-SERVICES := {% for be in topology.backends %}{{ be.name }} {% endfor %}{% for fe in topology.frontends %}{{ fe.name }} {% endfor %}
+SERVICES := {{ (topology.backends | map(attribute='name') | list + topology.frontends | map(attribute='name') | list) | join(' ') }}
 CHARTS := platform $(SERVICES)
 # A chart's environment values, used when present: deploy/helm/<chart>/values-$(ENV).yaml
 ENV ?= prod

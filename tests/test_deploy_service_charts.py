@@ -72,8 +72,11 @@ def test_one_chart_per_service_and_the_platform(per_service: Path) -> None:
     # the realm goes where the in-cluster Keycloak runs
     assert (helm / "platform" / "files" / "keycloak-realm.json").is_file()
     assert not (helm / "files").exists()
+    # deploy/helm/README.md is left to the project, which may already have one
+    assert (helm / "platform" / "README.md").is_file()
+    assert not (helm / "README.md").exists()
     makefile = (per_service / "Makefile").read_text(encoding="utf-8")
-    assert "SERVICES := user-api billing frontend admin" in makefile
+    assert "SERVICES := user-api billing frontend admin\n" in makefile
     assert "CHARTS := platform $(SERVICES)" in makefile
 
 
@@ -81,8 +84,13 @@ def test_a_backend_chart_carries_its_umbrella_workload(per_service: Path, umbrel
     workloads = _values(umbrella / "deploy" / "helm" / "values.yaml")["workloads"]
     for name, workload in workloads.items():
         chart = _values(per_service / "deploy" / "helm" / name / "values.yaml")
+        # the S2S client secret moves from env (a ConfigMap) to secretEnv (a Secret)
+        secrets = {k: v for k, v in workload["env"].items() if k.endswith("_SECRET")}
+        assert chart["env"] == {k: v for k, v in workload["env"].items() if k not in secrets}
+        assert chart["secretEnv"] == {**workload["secretEnv"], **secrets}
         for key, value in workload.items():
-            assert chart[key] == value, f"{name}.{key}"
+            if key not in ("env", "secretEnv"):
+                assert chart[key] == value, f"{name}.{key}"
         # the Service on the service's own port: http://<name>:<port> resolves as in compose
         assert chart["service"] == {"port": workload["containerPort"]}
 
@@ -230,7 +238,7 @@ def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) ->
                 "port": 8001,
                 "db_name": "api",
                 "has_migrations": True,
-                "synthesis_env": {"X_AWKWARD": awkward},
+                "synthesis_env": {"X_AWKWARD": awkward, "X_SECRET": awkward},
             },
         ),
         "frontends": (
@@ -248,5 +256,37 @@ def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) ->
     backend = yaml.safe_load((tmp_path / "out/api/values.yaml").read_text())
     frontend = yaml.safe_load((tmp_path / "out/frontend/values.yaml").read_text())
     assert backend["env"]["X_AWKWARD"] == awkward
+    assert backend["secretEnv"]["X_SECRET"] == awkward
+    assert "X_SECRET" not in backend["env"]
     assert frontend["securityHeaders"] == {"X-Awkward": awkward}
     assert frontend["contentSecurityPolicy"] == awkward
+
+
+def test_the_s2s_client_secret_is_in_the_secret_not_the_configmap() -> None:
+    config = ProjectConfig(
+        project_name="shop",
+        backends=[
+            BackendConfig(
+                name="gateway",
+                language=BackendLanguage.PYTHON,
+                server_port=5010,
+                depends_on=["orders"],
+            ),
+            BackendConfig(name="orders", language=BackendLanguage.PYTHON, server_port=5020),
+        ],
+        include_keycloak=True,
+        options={
+            "deploy.target": "kubernetes",
+            "deploy.helm_layout": "per_service",
+            "auth.service_discovery": True,
+        },
+    )
+    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
+    for name in ("gateway", "orders"):
+        values = _values(helm / name / "values.yaml")
+        assert "GATEKEEPER_CLIENT_SECRET" not in values["env"]
+        assert values["secretEnv"]["GATEKEEPER_CLIENT_SECRET"]
+        assert values["env"]["GATEKEEPER_CLIENT_ID"] == f"svc-{name}"
+    assert _values(helm / "gateway" / "values.yaml")["env"]["INTERNAL_SERVICE_URL_ORDERS"] == (
+        "http://orders:5020"
+    )

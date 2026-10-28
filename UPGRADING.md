@@ -9,11 +9,14 @@ This document lists breaking changes per version and the migration steps for eac
 `deploy.helm_layout: per_service` replaces the umbrella chart with one chart per service and `deploy/helm/platform/`.
 To switch an existing project:
 
-1. Set the option and run the update. The new charts appear under `deploy/helm/<service>/` and `deploy/helm/platform/`;
+1. Set `"deploy.helm_layout" = "per_service"` under `[forge.options]` in `forge.toml` and `"deploy.helm_layout" =
+   "user"` under `[forge.option_origins]`, then update: the update takes options from `forge.toml`, not from the
+   recipe. The new charts appear under `deploy/helm/<service>/` and `deploy/helm/platform/`;
    the umbrella's files (`deploy/helm/Chart.yaml`, `values.yaml`, `values-prod.yaml.example`, `templates/`, `files/`)
    stay on disk, no longer recorded. Delete them once nothing installs them.
 2. Move environment values: what was under `workloads.<service>` goes to the top level of that service's chart, the
-   primary `frontend` and each `frontends.<name>` to their chart, `ingress` and `infra` to the platform's.
+   primary `frontend` and each `frontends.<name>` to their chart, `ingress` and `infra` to the platform's. Edits you
+   made to the umbrella's templates are not carried over: repeat them in the new charts, which are scaffold too.
 3. Install every service as a release named after it (`helm upgrade --install <service> deploy/helm/<service>`),
    beside the umbrella: its objects are `<release>-<service>`, the new ones `<service>`, and the services use its
    in-cluster infrastructure meanwhile. A Service now listens on the service's port, not 80: update anything that

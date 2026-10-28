@@ -332,6 +332,9 @@ def test_every_service_chart_lints_and_validates(name: str, kw: dict, in_cluster
                 assert (kind, chart.name) in kinds
             (service,) = [d for d in docs if d["kind"] == "Service"]
             assert service["spec"]["ports"][0]["port"] == port
+            # no credential in a ConfigMap (the S2S client secret goes to the Secret)
+            for cm in (d for d in docs if d["kind"] == "ConfigMap"):
+                assert not [k for k in cm.get("data") or {} if k.endswith("_SECRET")], cm["metadata"]["name"]
         if _KUBECONFORM:
             kc = subprocess.run(
                 [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
