@@ -1,6 +1,7 @@
 {{- /* The service's migration: a pre-install/pre-upgrade hook, so the schema is current before the Deployment rolls;
        a failed migration fails this release only. The database must exist first: install the platform chart before
-       the services; when it runs the in-cluster Postgres, the Job waits for it (waitForPostgres). */ -}}
+       the services; when it runs the in-cluster Postgres, the Job waits for it (waitForPostgres). With dbAppRole the
+       migration runs as the owner, then the db-role container creates the runtime role and refreshes its grants. */ -}}
 {{- if .Values.hasMigrations }}
 apiVersion: batch/v1
 kind: Job
@@ -25,8 +26,10 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- with .Values.waitForPostgres }}
+      {{- if or .Values.waitForPostgres .Values.dbAppRole }}
       initContainers:
+      {{- end }}
+      {{- with .Values.waitForPostgres }}
         - name: wait-for-postgres
           image: {{ $.Values.postgresImage | quote }}
           command:
@@ -39,7 +42,9 @@ spec:
                 echo "{{ . }} does not resolve: no in-cluster Postgres to wait for"
               fi
       {{- end }}
+      {{- if not .Values.dbAppRole }}
       containers:
+      {{- end }}
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -51,4 +56,29 @@ spec:
                 # the hook copy of secretEnv, or the external Secret that replaces it (secretEnv: null)
                 name: {{ include "svc.child" (dict "root" . "suffix" (ternary "migrate-secret" "secret" (not (empty .Values.secretEnv)))) }}
                 optional: true
+            {{- if .Values.dbAppRole }}
+            - secretRef:
+                # the owner's DB URL overrides the runtime role's
+                name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+            {{- end }}
+      {{- if .Values.dbAppRole }}
+      containers:
+        - name: db-role
+          image: {{ .Values.postgresImage | quote }}
+          command: ["sh", "/scripts/db-app-role.sh"]
+          env:
+            - name: APP_DB_ROLE
+              value: {{ .Values.dbAppRole | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+          volumeMounts:
+            - name: db-app-role
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: db-app-role
+          configMap:
+            name: {{ include "svc.child" (dict "root" . "suffix" "db-app-role") }}
+      {{- end }}
 {{- end }}

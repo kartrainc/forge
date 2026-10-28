@@ -34,4 +34,40 @@ stringData:
   {{ $k }}: {{ $v | quote }}
   {{- end }}
 {{- end }}
+{{- if .Values.dbAppRole }}
+{{- /* database.rls_app_role: the owner credentials the migration and the role script use; the service never reads them.
+       migrateSecretEnv: null leaves the name to an external Secret. */}}
+{{- with .Values.migrateSecretEnv }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "svc.child" (dict "root" $ "suffix" "migrate-owner") }}
+  labels:
+    {{- include "svc.labels" $ | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+type: Opaque
+stringData:
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "db-app-role") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  db-app-role.sh: |
+{{ required "files/db-app-role.sh is missing" (.Files.Get "files/db-app-role.sh") | indent 4 }}
+{{- end }}
 {{- end }}

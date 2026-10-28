@@ -11,7 +11,7 @@
 [![ci](https://img.shields.io/github/actions/workflow/status/cchifor/forge/ci.yml?branch=main&label=ci&style=flat-square)](https://github.com/cchifor/forge/actions/workflows/ci.yml)
 [![backends](https://img.shields.io/badge/backends-4-informational?style=flat-square)](docs/FEATURES.md)
 [![frontends](https://img.shields.io/badge/frontends-3-informational?style=flat-square)](docs/FEATURES.md)
-[![options](https://img.shields.io/badge/options-65-informational?style=flat-square)](docs/FEATURES.md)
+[![options](https://img.shields.io/badge/options-70-informational?style=flat-square)](docs/FEATURES.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 
 </div>

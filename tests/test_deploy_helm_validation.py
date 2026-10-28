@@ -461,3 +461,86 @@ def test_http_service_workload_has_no_database_or_migration() -> None:
     assert not capture["secretEnv"]
     assert store["dbName"] == "store"
     assert store["migrateCommand"] == ["npx", "prisma", "migrate", "deploy"]
+
+
+def _render_named(chart: Path, release: str, *set_args: str) -> dict[tuple[str, str], dict]:
+    out = subprocess.run(
+        ["helm", "template", release, str(chart), *set_args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(out) if d}
+
+
+def test_a_backend_with_an_app_role_migrates_as_the_owner_then_creates_the_role() -> None:
+    config = ProjectConfig(
+        project_name="iso",
+        backends=[
+            BackendConfig(
+                name="api", language=BackendLanguage.PYTHON, features=["items"], server_port=8200
+            )
+        ],
+        frontends=[],
+        options={
+            "deploy.target": "kubernetes",
+            "deploy.helm_layout": "per_service",
+            "database.multitenancy": "shared_rls",
+        },
+    )
+    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
+    # the role script ships in the chart that runs it
+    assert (helm / "api" / "files" / "db-app-role.sh").is_file()
+    assert not (helm / "files").exists()
+    docs = _render_named(helm / "api", "api")
+    pod = docs[("Job", "api-migrate")]["spec"]["template"]["spec"]
+    # the platform's Postgres exists before this release, so the pre-install Job does both steps
+    assert [c["name"] for c in pod["initContainers"]] == ["wait-for-postgres", "migrate"]
+    (role,) = pod["containers"]
+    assert role["name"] == "db-role"
+    assert role["env"] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
+    owner = [r["secretRef"]["name"] for r in pod["initContainers"][1]["envFrom"] if "secretRef" in r]
+    assert owner[-1] == "api-migrate-owner"
+    for kind, name in (("Secret", "api-migrate-owner"), ("ConfigMap", "api-db-app-role")):
+        annotations = docs[(kind, name)]["metadata"]["annotations"]
+        assert annotations["helm.sh/hook"] == "pre-install,pre-upgrade", name
+        assert annotations["helm.sh/hook-weight"] == "-10", name
+    # the service serves as the role and never sees the owner's credentials
+    (service,) = docs[("Deployment", "api")]["spec"]["template"]["spec"]["containers"]
+    assert "api-migrate-owner" not in str(service["envFrom"])
+    assert docs[("ConfigMap", "api-config")]["data"]["MIGRATE_ON_START"] == "false"
+    assert "//api_app:" in docs[("Secret", "api-secret")]["stringData"]["APP__DB__URL"]
+    # owner credentials from an ExternalSecret: no hook Secret, the Job reads the name
+    external = _render_named(helm / "api", "api", "--set", "migrateSecretEnv=null")
+    assert ("Secret", "api-migrate-owner") not in external
+    assert ("Job", "api-migrate") in external
+    if _KUBECONFORM:
+        rendered = subprocess.run(
+            ["helm", "template", "api", str(helm / "api")], capture_output=True, text=True, check=True
+        ).stdout
+        kc = subprocess.run(
+            [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
+            input=rendered,
+            capture_output=True,
+            text=True,
+        )
+        assert kc.returncode == 0, kc.stdout
+
+
+def test_the_platform_imports_the_realm_with_the_app_hosts() -> None:
+    helm = _gen_service_charts(**dict(_scenarios())["py_two_vue_keycloak"])
+    docs = _render_named(helm / "platform", "rel", *_GATEKEEPER_ON)
+    # one realm ConfigMap: Keycloak imports it and the realm-sync Job reads it
+    realms = [k for k in docs if k == ("ConfigMap", "rel-keycloak-realm")]
+    assert len(realms) == 1
+    realm = docs[("ConfigMap", "rel-keycloak-realm")]["data"]["keycloak-realm.json"]
+    assert "__APP_HOST" not in realm
+    assert "https://admin.shop.example.com" in realm
+    (keycloak,) = docs[("Deployment", "keycloak")]["spec"]["template"]["spec"]["containers"]
+    assert "--import-realm" in keycloak["args"]
+    gatekeeper = _gatekeeper_env([d for d in docs.values()])
+    assert gatekeeper["TENANT_SOURCE"] == "organization"
+    assert gatekeeper["SELF_REGISTRATION"] == "off"
+    assert gatekeeper["KEYCLOAK_ADMIN_REALM"] == docs[("Job", "rel-realm-sync")]["spec"]["template"][
+        "spec"
+    ]["containers"][0]["env"][2]["value"]

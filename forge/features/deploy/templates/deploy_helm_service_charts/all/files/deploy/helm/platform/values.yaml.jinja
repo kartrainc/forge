@@ -65,8 +65,10 @@ infra:
   redis:
     image: redis:7-alpine
   keycloak:
-    image: quay.io/keycloak/keycloak:25.0
-    realm: forge
+    image: quay.io/keycloak/keycloak:26.6
+    # The project's realm: the realm JSON, the gatekeeper and the backends'
+    # auth env all use this name.
+    realm: {{ topology.keycloak_realm }}
   # In-cluster Gatekeeper (OIDC ForwardAuth + S2S token authority). OFF by
   # default even with infra.inCluster — production uses an external/managed
   # gatekeeper. Enable for a full in-cluster auth demo AFTER building+pushing
@@ -80,6 +82,10 @@ infra:
       pullPolicy: IfNotPresent
     # S2S client secret — placeholder; override or wire an ExternalSecret.
     clientSecret: "CHANGEME"
+    # auth.keycloak_tenant_source: organization | user_attribute.
+    tenantSource: {{ topology.keycloak_tenant_source }}
+    # auth.keycloak_self_registration: off | own_organization | default_tenant.
+    selfRegistration: {{ topology.keycloak_self_registration }}
 {%- endif %}
 
 # Pod security: non-root by default (matches the raw-k8s + compose posture).

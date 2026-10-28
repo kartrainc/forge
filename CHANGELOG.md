@@ -17,6 +17,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Service listens on its `containerPort` and the platform's Ingress routes to the port named `http`, so no release
   repeats a port. The migrate Job waits for the platform's in-cluster Postgres when `postgres` resolves and skips the
   wait otherwise. `secretEnv: null`, not `{}`, drops a chart's Secret for an external one.
+  Under `database.rls_app_role`, a backend's migrate Job migrates as the owner (`migrateSecretEnv`), then creates
+  the runtime role it serves as; the platform's in-cluster Keycloak imports the project's realm.
 - Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
   entry exposed to their Jinja as `service`.
 ### Tenant isolation and Keycloak strategies

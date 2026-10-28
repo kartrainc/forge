@@ -53,6 +53,10 @@ env:
   ENV: "production"
   LOG_LEVEL: "info"
   APP__SERVER__PORT: "{{ service.port }}"
+{%- if service.db_app_role %}
+  # The migrate step runs as the owner; {{ service.db_app_role }} cannot create tables.
+  MIGRATE_ON_START: "false"
+{%- endif %}
 {%- elif service.language == "node" %}
   NODE_ENV: "production"
   LOG_LEVEL: "info"
@@ -101,15 +105,34 @@ env:
 # NEVER bakes a real credential into the chart. Override per environment, or
 # set secretEnv: null and wire an ExternalSecret (see templates/secret.yaml);
 # an empty map does not remove these defaults, Helm merges it into them.
+{%- if service.db_app_role %}
+# database.rls_app_role: the Deployment connects as this role, which cannot
+# bypass RLS. The migrate Job runs the migrations with the owner credentials
+# in migrateSecretEnv, then files/db-app-role.sh creates the role and refreshes
+# its grants. APP_DB_PASSWORD must match the password in the DB URL below. For
+# owner credentials from an ExternalSecret, set migrateSecretEnv: null and
+# name that Secret {{ service.name }}-migrate-owner.
+dbAppRole: {{ service.db_app_role }}
+migrateSecretEnv:
+{%- if service.language == "python" %}
+  APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- else %}
+  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+{%- endif %}
+  DB_OWNER_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+  APP_DB_PASSWORD: "CHANGEME"
+{%- else %}
+dbAppRole: ""
+{%- endif %}
 secretEnv:
 {%- if service.uses_database | default(true) %}
 {%- if service.language == "python" %}
-  APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
+  APP__DB__URL: "postgresql+asyncpg://{{ (service.db_app_role ~ ':') if service.db_app_role }}CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- elif service.language == "node" %}
   APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
   DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- elif service.language in ("rust", "go") %}
-  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
+  DATABASE_URL: "postgresql://{{ (service.db_app_role ~ ':') if service.db_app_role }}CHANGEME@postgres:5432/{{ service.db_name }}"
 {%- endif %}
 {%- endif %}
 {%- for k, v in service.synthesis_env.items() if k.endswith("_SECRET") %}

@@ -289,6 +289,7 @@ def test_header_csp_and_synthesis_values_are_escaped_for_yaml(tmp_path: Path) ->
                 "port": 8001,
                 "db_name": "api",
                 "has_migrations": True,
+                "db_app_role": "",
                 "synthesis_env": {"X_AWKWARD": awkward, "X_SECRET": awkward},
             },
         ),
@@ -341,3 +342,30 @@ def test_the_s2s_client_secret_is_in_the_secret_not_the_configmap() -> None:
     assert _values(helm / "gateway" / "values.yaml")["env"]["INTERNAL_SERVICE_URL_ORDERS"] == (
         "http://orders:5020"
     )
+
+
+def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
+    def gen(layout: str | None) -> Path:
+        options: dict[str, object] = {
+            "deploy.target": "kubernetes",
+            "database.multitenancy": "shared_rls",
+        }
+        if layout:
+            options["deploy.helm_layout"] = layout
+        config = ProjectConfig(
+            project_name="iso",
+            backends=[
+                BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8200),
+                BackendConfig(name="mail", language=BackendLanguage.NODE, server_port=8201),
+            ],
+            frontends=[],
+            options=options,
+        )
+        return generate(config, quiet=True, dry_run=True)
+
+    per_service = gen("per_service")
+    _assert_backends_carry_their_umbrella_workloads(per_service, gen(None))
+    assert (
+        _values(per_service / "deploy" / "helm" / "api" / "values.yaml")["dbAppRole"] == "api_app"
+    )
+    assert _values(per_service / "deploy" / "helm" / "mail" / "values.yaml")["dbAppRole"] == ""

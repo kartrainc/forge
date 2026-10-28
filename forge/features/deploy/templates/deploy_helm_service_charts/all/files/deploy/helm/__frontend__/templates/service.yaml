@@ -10,6 +10,6 @@ spec:
     {{- include "svc.selector" . | nindent 4 }}
   ports:
     - name: http
-      port: 80
+      port: {{ .Values.port }}
       targetPort: http
       protocol: TCP

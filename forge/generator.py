@@ -879,12 +879,11 @@ def _apply_project_scope(
     # deploy target with keycloak — the realm JSON was rendered into
     # deploy/infra/ in the docker phase above.
     if plan.option_values.get("deploy.target") == "kubernetes":
+        _per_service = plan.option_values.get("deploy.helm_layout") == "per_service"
         _realm = project_root / "deploy" / "infra" / "keycloak-realm.json"
         if _realm.is_file():
             # per_service: the in-cluster Keycloak lives in the platform chart
-            _chart = (
-                "platform" if plan.option_values.get("deploy.helm_layout") == "per_service" else ""
-            )
+            _chart = "platform" if _per_service else ""
             _realm_dst = project_root / "deploy" / "helm" / _chart / "files" / "keycloak-realm.json"
             _realm_dst.parent.mkdir(parents=True, exist_ok=True)
             from forge.docker_manager import helm_realm_json  # noqa: PLC0415
@@ -895,10 +894,24 @@ def _apply_project_scope(
             collector.record(_realm_dst, origin="base-template")
         _role_script = project_root / "deploy" / "compose" / "db-app-role.sh"
         if _role_script.is_file():
-            _role_dst = project_root / "deploy" / "helm" / "files" / "db-app-role.sh"
-            _role_dst.parent.mkdir(parents=True, exist_ok=True)
-            _role_dst.write_bytes(_role_script.read_bytes())
-            collector.record(_role_dst, origin="base-template")
+            # per_service: each backend chart whose migrate Job creates a runtime role
+            if _per_service:
+                from forge.config._topology import db_app_role  # noqa: PLC0415
+
+                _role_charts = [
+                    bc.name
+                    for bc in config.backends
+                    if db_app_role(bc, plan.option_values, config.database_mode)
+                ]
+            else:
+                _role_charts = [""]
+            for _role_chart in _role_charts:
+                _role_dst = (
+                    project_root / "deploy" / "helm" / _role_chart / "files" / "db-app-role.sh"
+                )
+                _role_dst.parent.mkdir(parents=True, exist_ok=True)
+                _role_dst.write_bytes(_role_script.read_bytes())
+                collector.record(_role_dst, origin="base-template")
 
     # Drop shared quality-signal files (.editorconfig, .gitignore, CI, pre-commit)
     # if the per-template generators haven't already provided them.
