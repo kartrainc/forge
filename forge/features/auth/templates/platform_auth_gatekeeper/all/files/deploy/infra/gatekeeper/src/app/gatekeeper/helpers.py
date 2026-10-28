@@ -66,6 +66,21 @@ def extract_tenant(forwarded_host: str | None, host: str | None = None) -> str:
 # ── Login URL construction ─────────────────────────────────────────────────
 
 
+def public_realm_url(tenant: str, issuer_url: str | None = None) -> str:
+    """The realm URL as browsers reach Keycloak, which is also the issuer.
+
+    ``KEYCLOAK_PUBLIC_BASE_URL`` takes the place of ``KEYCLOAK_BASE_URL`` at
+    the start of the realm URL; an issuer elsewhere is kept as it is.
+    """
+    cfg = get_settings()
+    realm_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
+    internal = cfg.keycloak_base_url.rstrip("/")
+    public = cfg.keycloak_public_base_url.rstrip("/")
+    if public and realm_url.startswith(f"{internal}/"):
+        return public + realm_url[len(internal) :]
+    return realm_url
+
+
 def build_login_url(
     tenant: str,
     redirect_uri: str,
@@ -94,7 +109,8 @@ def build_login_url(
         defense); the originally-requested return URI lives inside that
         envelope, not here.
     issuer_url:
-        Per-tenant issuer URL from TMS.  Falls back to static config.
+        Per-tenant issuer URL from TMS.  Falls back to static config; the
+        browser is sent to its :func:`public_realm_url`.
     client_id:
         Per-tenant OIDC client ID.  Falls back to static config.
     nonce:
@@ -118,7 +134,7 @@ def build_login_url(
         provider (an organization's IdP, for instance). Omitted when ``None``.
     """
     cfg = get_settings()
-    base_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
+    base_url = public_realm_url(tenant, issuer_url)
     cid = client_id or cfg.gatekeeper_client_id
     base = f"{base_url}/protocol/openid-connect/auth"
     params_dict: dict[str, str] = {
@@ -155,7 +171,7 @@ def build_logout_url(
     the client's ``post.logout.redirect.uris``) it sends the browser back.
     """
     cfg = get_settings()
-    base_url = issuer_url or f"{cfg.keycloak_base_url}/{tenant}"
+    base_url = public_realm_url(tenant, issuer_url)
     url = f"{base_url}/protocol/openid-connect/logout"
     params = {
         name: value

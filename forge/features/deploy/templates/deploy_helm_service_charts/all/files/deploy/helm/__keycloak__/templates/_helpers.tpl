@@ -65,7 +65,8 @@ Takes (dict "root" $ "image" <the image values> "field" <their values path>).
 
 {{/*
 The realm to import: files/keycloak-realm.json with the app hosts filled in and the confidential clients' secrets
-from realm.clientSecrets; "" when the chart has no realm file.
+from realm.clientSecrets; in mode production without the dev users (service accounts only) and HTTPS required
+outside private networks. "" when the chart has no realm file.
 */}}
 {{- define "keycloak.realmJson" -}}
 {{- $json := .Files.Get "files/keycloak-realm.json" -}}
@@ -86,6 +87,27 @@ from realm.clientSecrets; "" when the chart has no realm file.
 {{- with index $secrets $client.clientId -}}
 {{- $_ := set $client "secret" . -}}
 {{- end -}}
+{{- end -}}
+{{- if eq .Values.mode "production" -}}
+{{- $users := list -}}
+{{- $usernames := list -}}
+{{- range $user := dig "users" (list) $realm -}}
+{{- if dig "serviceAccountClientId" "" $user -}}
+{{- $users = append $users $user -}}
+{{- $usernames = append $usernames $user.username -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $realm "users" $users -}}
+{{- range $org := dig "organizations" (list) $realm -}}
+{{- $members := list -}}
+{{- range $member := dig "members" (list) $org -}}
+{{- if has (dig "username" "" $member) $usernames -}}
+{{- $members = append $members $member -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $org "members" $members -}}
+{{- end -}}
+{{- $_ := set $realm "sslRequired" "external" -}}
 {{- end -}}
 {{- toPrettyJson $realm -}}
 {{- end -}}

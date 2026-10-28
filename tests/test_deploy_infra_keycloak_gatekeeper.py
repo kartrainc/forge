@@ -134,7 +134,7 @@ def test_keycloak_values_come_from_the_topology(project: Path) -> None:
     values = _values(project, "keycloak")
     assert values["partOf"] == "shop"
     assert values["mode"] == "development"
-    assert values["hostname"] == ""
+    assert values["hostname"] == "https://auth.shop.example.com"
     assert values["realm"]["name"] == "shop-users"
     assert values["realm"]["appHost"] == "shop.example.com"
     assert values["realm"]["frontendHosts"] == {"admin": "admin.shop.example.com"}
@@ -178,11 +178,22 @@ def test_gatekeeper_values_come_from_the_topology(project: Path) -> None:
     assert all(isinstance(v, str) for v in data.values())
     assert values["container"]["port"] == 5000
     assert values["signingKeys"] == {"generate": True, "existingSecret": ""}
-    assert values["authMiddlewares"]["enabled"] is False
+    # the backend charts' routes name these Middlewares
+    assert values["authMiddlewares"]["enabled"] is True
     (route,) = values["ingressRoute"]["routes"]
     hosts, paths = route["match"].split(" && ")
     assert hosts == "(Host(`shop.example.com`) || Host(`admin.shop.example.com`))"
     assert paths == "(" + " || ".join(f"Path(`{p}`)" for p in _BROWSER_PATHS) + ")"
+
+
+def test_browsers_reach_keycloak_at_its_public_host(project: Path) -> None:
+    keycloak = _values(project, "keycloak")
+    gatekeeper = _values(project, "gatekeeper")["configMap"]["data"]
+    assert gatekeeper["KEYCLOAK_PUBLIC_BASE_URL"] == keycloak["hostname"] + "/realms"
+    (route,) = keycloak["ingressRoute"]["routes"]
+    assert route["match"].startswith(
+        "Host(`" + keycloak["hostname"].removeprefix("https://") + "`)"
+    )
 
 
 def test_the_gatekeeper_credentials_are_secret_and_agree_with_keycloak(project: Path) -> None:
@@ -199,8 +210,13 @@ def test_the_gatekeeper_credentials_are_secret_and_agree_with_keycloak(project: 
         "SESSION_FERNET_KEY",
         "DELEGATION_GRANT_FERNET_KEY",
     }
-    assert not any(c in v for c in credentials.values() for v in data.values())
+    assert not any(c in v for c in credentials.values() if c for v in data.values())
     assert secret["REDIS_URL"] == "redis://:CHANGEME@redis:6379/0"
+    # generated at install, never the compose dev keys
+    assert (secret["SESSION_FERNET_KEY"], secret["DELEGATION_GRANT_FERNET_KEY"]) == ("", "")
+    text = (project / "deploy" / "helm" / "gatekeeper" / "values.yaml").read_text(encoding="utf-8")
+    assert "L9dXzDhH" not in text
+    assert "UVEc0SmY" not in text
     keycloak = _values(project, "keycloak")
     # a fresh install with the defaults signs in end to end
     assert secret["GATEKEEPER_CLIENT_SECRET"] == keycloak["realm"]["clientSecrets"]["gatekeeper"]

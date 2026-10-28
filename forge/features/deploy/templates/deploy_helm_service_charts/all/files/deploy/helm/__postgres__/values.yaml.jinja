@@ -13,7 +13,7 @@
 # connect to {{ service.name }}-rw:5432, the primary.
 {%- set backend_databases = topology.backends | map(attribute="db_name") | list %}
 
-partOf: {{ topology.project_slug | replace("_", "-") }}
+partOf: {{ topology.project_slug | replace("_", "-") | tojson }}
 imagePullSecrets: []
 imagePolicy:
   requireDigest: false

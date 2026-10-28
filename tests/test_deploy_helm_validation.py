@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from forge.appliers.files import copy_files
 from forge.config import BackendConfig, BackendLanguage, FrontendConfig, ProjectConfig
 from forge.config._frontend import FrontendFramework
 from forge.config._topology import compute_topology
@@ -27,6 +28,10 @@ from forge.generator import generate
 pytestmark = pytest.mark.skipif(shutil.which("helm") is None, reason="helm not installed")
 
 _KUBECONFORM = shutil.which("kubeconform")
+_BACKEND_TEMPLATES = (
+    Path(__file__).resolve().parents[1]
+    / "forge/features/deploy/templates/deploy_helm_service_charts/all/files/deploy/helm/__backend__"
+)
 
 
 def _gen_chart(**kw) -> Path:
@@ -393,6 +398,13 @@ def test_every_service_chart_lints_renders_and_validates(name: str, kw: dict) ->
         chart = helm / chart_name
         values = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
         port = values["container"]["port"]
+        migration = values.get("migration", {})
+        if migration.get("enabled"):
+            # the migration's wait connects with the URL its env carries
+            url_env = migration["databaseUrlEnv"]
+            assert url_env in values["secret"]["stringData"], chart_name
+            if migration["dbAppRole"]:
+                assert url_env in migration["ownerSecret"]["stringData"], chart_name
         for extra in ((), ("-f", str(chart / "ci" / "everything-values.yaml"))):
             what = f"{chart_name} ({'everything' if extra else 'defaults'})"
             lint = _helm("lint", "--strict", str(chart), *extra)
@@ -512,10 +524,14 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
         docs = _render_named(user_api, "user-api", *set_args)
         return docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
 
-    (wait,) = job()["initContainers"]
-    # the in-cluster Postgres when postgres-rw resolves; the pod's uid has no passwd entry, so pg_isready gets a user
+    pod = job()
+    (wait,) = pod["initContainers"]
+    (migrate,) = pod["containers"]
+    # the in-cluster Postgres when postgres-rw resolves, through the migration's own env
     assert "getent hosts postgres-rw" in wait["command"][-1]
-    assert "pg_isready -h postgres-rw -p 5432 -U postgres" in wait["command"][-1]
+    assert '"$APP__DB__URL"' in wait["command"][-1]
+    assert _env_refs(wait) == _env_refs(migrate)
+    assert "env" not in wait
     assert wait["image"] == "pgvector/pgvector:pg16"
     assert "initContainers" not in job("--set", "migration.waitForPostgres=")
 
@@ -552,9 +568,118 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
         ("user-api-migrate-config", None),
         ("user-api-migrate-secret", False),
     ]
-    # the service itself reads the release's
+    # the service itself reads the release's, and waits for it
     (service,) = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]["containers"]
-    assert _env_refs(service) == [("user-api-config", None), ("user-api-secret", True)]
+    assert _env_refs(service) == [("user-api-config", None), ("user-api-secret", False)]
+
+
+# Stand-ins for the wait container's tools: getent resolves (or not), sleep returns at once, and psql answers each
+# call with the next line of $STUB/steps (the last one repeats): "fail" fails to connect, anything else is its output.
+_PSQL_STUB = r"""#!/bin/sh
+n=$(($(cat "$STUB/calls" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$STUB/calls"
+printf '%s\n' "$@" > "$STUB/args.$n"
+cat > "$STUB/stdin.$n"
+step=$(sed -n "${n}p" "$STUB/steps")
+[ -n "$step" ] || step=$(tail -n 1 "$STUB/steps")
+if [ "$step" = fail ]; then
+    echo 'psql: error: connection to server at "postgres-rw", port 5432 failed: FATAL:  database "db" does not exist' >&2
+    exit 2
+fi
+echo "$step"
+"""
+
+
+def _run_wait(
+    wait: dict, tmp_path: Path, steps: list[str], env: dict[str, str], *, resolves: bool = True
+) -> tuple[subprocess.CompletedProcess[str], list[tuple[list[str], str]]]:
+    """Run the wait-for-postgres container's script; returns the run and each psql call's (args, stdin)."""
+    stub = tmp_path / "stub"
+    stub.mkdir(parents=True)
+    for tool, body in (
+        ("psql", _PSQL_STUB),
+        ("getent", f"#!/bin/sh\nexit {0 if resolves else 2}\n"),
+        ("sleep", "#!/bin/sh\n"),
+    ):
+        (stub / tool).write_text(body, encoding="utf-8")
+        (stub / tool).chmod(0o755)
+    (stub / "steps").write_text("\n".join(steps) + "\n", encoding="utf-8")
+    container_env = {e["name"]: e["value"] for e in wait.get("env", [])}
+    run = subprocess.run(
+        [shutil.which("dash") or "sh", "-c", wait["command"][-1]],
+        env={"PATH": f"{stub}:/usr/bin:/bin", "STUB": str(stub), **container_env, **env},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    calls_file = stub / "calls"
+    calls = int(calls_file.read_text(encoding="utf-8")) if calls_file.exists() else 0
+    return run, [
+        (
+            (stub / f"args.{n}").read_text(encoding="utf-8").splitlines(),
+            (stub / f"stdin.{n}").read_text(encoding="utf-8"),
+        )
+        for n in range(1, calls + 1)
+    ]
+
+
+def test_the_migration_waits_until_its_own_url_reaches_its_database(
+    user_api: Path, tmp_path: Path
+) -> None:
+    def wait(*set_args: str) -> dict:
+        docs = _render_named(user_api, "user-api", *set_args)
+        (container,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"][
+            "initContainers"
+        ]
+        return container
+
+    assert "is not ready after 300s" in wait()["command"][-1]
+    env = {
+        "APP__DB__URL": "postgresql+asyncpg://user_api:hunter2@postgres-rw:5432/user_api?ssl=require"
+    }
+    # CloudNativePG creates the role and the database after the primary: retried until they connect
+    run, calls = _run_wait(wait(), tmp_path / "late", ["fail", "fail", "ready"], env)
+    assert run.returncode == 0, run.stderr
+    assert len(calls) == 3
+    for args, stdin in calls:
+        # psql's form of the URL, without the driver or its query parameters
+        assert args[0] == "postgresql://user_api:hunter2@postgres-rw:5432/user_api"
+        assert "-w" in args
+        assert "pg_roles" not in stdin
+
+    # bounded by migration.waitTimeoutSeconds, then the last error
+    run, calls = _run_wait(
+        wait("--set", "migration.waitTimeoutSeconds=0"), tmp_path / "never", ["fail"], env
+    )
+    assert run.returncode == 1
+    assert len(calls) == 1
+    assert "APP__DB__URL is not ready after 0s" in run.stderr
+    assert 'database "db" does not exist' in run.stderr
+    assert "hunter2" not in run.stdout + run.stderr
+
+    # no in-cluster Postgres: nothing to wait for
+    run, calls = _run_wait(wait(), tmp_path / "external", ["fail"], env, resolves=False)
+    assert run.returncode == 0
+    assert calls == []
+    assert "postgres-rw does not resolve" in run.stdout
+
+    run, calls = _run_wait(wait(), tmp_path / "unset", ["ready"], {})
+    assert run.returncode == 1
+    assert calls == []
+    assert "APP__DB__URL is not set" in run.stderr
+
+    for bad, message in (
+        (("--set", "migration.databaseUrlEnv=A-B"), "migration.databaseUrlEnv must name"),
+        (("--set", "migration.databaseUrlEnv="), "migration.databaseUrlEnv is required"),
+        (
+            ("--set", "migration.waitTimeoutSeconds=null"),
+            "migration.waitTimeoutSeconds is required",
+        ),
+    ):
+        out = _helm("template", "user-api", str(user_api), *bad)
+        assert out.returncode != 0, bad
+        assert message in out.stderr, out.stderr
 
 
 def test_an_external_secret_needs_the_chart_secret_off(user_api: Path) -> None:
@@ -656,8 +781,17 @@ def test_http_service_workload_has_no_database_or_migration() -> None:
     assert store["migrateCommand"] == ["npx", "prisma", "migrate", "deploy"]
 
 
-def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role() -> None:
-    config = ProjectConfig(
+def _generate_into(config: ProjectConfig, dest: Path) -> Path:
+    """Generate ``config`` into ``dest``, leaving no dry-run directory behind."""
+    root = generate(config, quiet=True, dry_run=True)
+    shutil.move(root, dest)
+    if root.parent.name.startswith("forge-dry-"):
+        shutil.rmtree(root.parent, ignore_errors=True)
+    return dest
+
+
+def _app_role_config() -> ProjectConfig:
+    return ProjectConfig(
         project_name="iso",
         backends=[
             BackendConfig(
@@ -671,12 +805,23 @@ def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role()
             "database.multitenancy": "shared_rls",
         },
     )
-    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
+
+
+def _migration_pod(docs: dict[tuple[str, str], dict]) -> dict:
+    return docs[("Job", "api-migrate")]["spec"]["template"]["spec"]
+
+
+def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role(
+    tmp_path: Path,
+) -> None:
+    helm = _generate_into(_app_role_config(), tmp_path / "iso") / "deploy" / "helm"
     # the role script ships in the chart that runs it
     assert (helm / "api" / "files" / "db-app-role.sh").is_file()
     assert not (helm / "files").exists()
+    values = yaml.safe_load((helm / "api" / "values.yaml").read_text(encoding="utf-8"))
+    assert values["migration"]["dbAppRoleManaged"] is True
     docs = _render_named(helm / "api", "api")
-    pod = docs[("Job", "api-migrate")]["spec"]["template"]["spec"]
+    pod = _migration_pod(docs)
     # the postgres release exists before this one, so the pre-install Job does both steps
     assert [c["name"] for c in pod["initContainers"]] == ["wait-for-postgres", "migrate"]
     (role,) = pod["containers"]
@@ -697,8 +842,37 @@ def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role()
     script = docs[("ConfigMap", "api-db-app-role")]["data"]["db-app-role.sh"]
     assert script == (helm / "api" / "files" / "db-app-role.sh").read_text(encoding="utf-8")
     owner = docs[("Secret", "api-migrate-owner")]["stringData"]
-    assert owner["DB_OWNER_URL"] == "postgresql://api:CHANGEME@postgres-rw:5432/api"
-    assert owner["APP__DB__URL"] == "postgresql+asyncpg://api:CHANGEME@postgres-rw:5432/api"
+    assert owner == {
+        "DB_OWNER_URL": "postgresql://api:CHANGEME@postgres-rw:5432/api",
+        "APP__DB__URL": "postgresql+asyncpg://api:CHANGEME@postgres-rw:5432/api",
+    }
+    # the operator creates the runtime role after the primary too: the wait covers it, as the owner
+    wait = pod["initContainers"][0]
+    assert wait["env"] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
+    assert _env_refs(wait)[-1] == ("api-migrate-owner", None)
+    run, calls = _run_wait(
+        wait,
+        tmp_path / "managed",
+        ["role api_app does not exist", "ready"],
+        {"APP__DB__URL": owner["APP__DB__URL"]},
+    )
+    assert run.returncode == 0, run.stderr
+    assert len(calls) == 2
+    for args, stdin in calls:
+        assert args[0] == "postgresql://api:CHANGEME@postgres-rw:5432/api"
+        assert "role=api_app" in args
+        assert "FROM pg_roles WHERE rolname = :'role'" in stdin
+    (impatient, _) = _migration_pod(
+        _render_named(helm / "api", "api", "--set", "migration.waitTimeoutSeconds=0")
+    )["initContainers"]
+    run, _ = _run_wait(
+        impatient,
+        tmp_path / "missing",
+        ["role api_app does not exist"],
+        {"APP__DB__URL": owner["APP__DB__URL"]},
+    )
+    assert run.returncode == 1
+    assert "role api_app does not exist" in run.stderr
     # the service serves as the role and never sees the owner's credentials
     (service,) = docs[("Deployment", "api")]["spec"]["template"]["spec"]["containers"]
     assert "api-migrate-owner" not in str(service["envFrom"])
@@ -714,6 +888,61 @@ def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role()
         _helm("template", "api", str(helm / "api")).stdout,
         "api with an app role",
     )
+
+
+def test_without_the_postgres_chart_the_migration_creates_the_app_role(tmp_path: Path) -> None:
+    config = _app_role_config()
+    helm = _generate_into(config, tmp_path / "iso") / "deploy" / "helm"
+    # a Postgres the project does not deploy (RDS, ...): forge renders the values without the postgres chart
+    src = tmp_path / "src" / "__backend__"
+    src.mkdir(parents=True)
+    shutil.copy(_BACKEND_TEMPLATES / "values.yaml.jinja", src / "values.yaml.jinja")
+    copy_files(
+        src.parent,
+        tmp_path / "out",
+        render_context={"topology": {**compute_topology(config), "helm_postgres": []}},
+    )
+    chart = tmp_path / "api"
+    shutil.copytree(helm / "api", chart)
+    shutil.copy(tmp_path / "out" / "api" / "values.yaml", chart / "values.yaml")
+    migration = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))["migration"]
+    assert migration["dbAppRoleManaged"] is False
+    # the password the service's DB URL carries, as the postgres chart's roleSecrets would
+    assert migration["ownerSecret"]["stringData"]["APP_DB_PASSWORD"] == "CHANGEME"
+
+    docs = _render_named(chart, "api")
+    pod = _migration_pod(docs)
+    (role,) = pod["containers"]
+    # no APP_DB_ROLE_MANAGED: db-app-role.sh creates the role with APP_DB_PASSWORD from the owner's Secret
+    assert role["env"] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
+    assert _env_refs(role) == [("api-migrate-owner", None)]
+    assert docs[("Secret", "api-migrate-owner")]["stringData"]["APP_DB_PASSWORD"] == "CHANGEME"
+    # nothing creates the role before the Job: the wait does not look for it
+    assert "env" not in pod["initContainers"][0]
+    _kubeconform(_helm("template", "api", str(chart)).stdout, "api creating its app role")
+
+    # the same switch on the generated values: the chart wants the password
+    unmanaged = ("--set", "migration.dbAppRoleManaged=false")
+    missing = _helm("template", "api", str(helm / "api"), *unmanaged)
+    assert missing.returncode != 0
+    assert "migration.ownerSecret.stringData.APP_DB_PASSWORD is required" in missing.stderr
+    docs = _render_named(
+        helm / "api",
+        "api",
+        *unmanaged,
+        "--set",
+        "migration.ownerSecret.stringData.APP_DB_PASSWORD=s3cret",
+    )
+    assert _migration_pod(docs)["containers"][0]["env"] == [
+        {"name": "APP_DB_ROLE", "value": "api_app"}
+    ]
+    # or from a Secret provided elsewhere
+    elsewhere = _render_named(
+        helm / "api", "api", *unmanaged, "--set", "migration.ownerSecret.enabled=false"
+    )
+    assert _migration_pod(elsewhere)["containers"][0]["env"] == [
+        {"name": "APP_DB_ROLE", "value": "api_app"}
+    ]
 
 
 def test_routes_and_middlewares_render_with_the_ingress_route() -> None:
@@ -926,3 +1155,59 @@ def test_a_long_release_name_keeps_every_name_within_63_characters(user_api: Pat
         if doc["kind"] in ("Job",):
             labels |= doc["spec"]["template"]["metadata"]["labels"]
         assert all(len(str(v)) <= 63 for v in labels.values()), labels
+
+
+def test_the_makefile_renders_each_chart_as_it_installs_it(tmp_path: Path) -> None:
+    config = ProjectConfig(
+        options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"},
+        **dict(_scenarios())["multi_py_node_vue_keycloak"],
+    )
+    project = _generate_into(config, tmp_path / "shop")
+    if shutil.which("make") is None:
+        pytest.skip("make not installed")
+    # the same namespace and values file as helm-install
+    for target in ("helm-template", "k8s-manifests", "helm-install"):
+        dry = subprocess.run(
+            ["make", "-n", target, "NAMESPACE=shop", "ENV=dev"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+        )
+        assert dry.returncode == 0, dry.stderr
+        assert (
+            '--namespace shop $( [ -f deploy/helm/$c/values-dev.yaml ] && echo "-f '
+            'deploy/helm/$c/values-dev.yaml" )'
+        ) in dry.stdout, f"make -n {target}:\n{dry.stdout}"
+    gatekeeper = project / "deploy" / "helm" / "gatekeeper"
+    port = yaml.safe_load((gatekeeper / "values.yaml").read_text(encoding="utf-8"))["container"][
+        "port"
+    ]
+    (gatekeeper / "values-dev.yaml").write_text(
+        "authMiddlewares:\n  enabled: true\n  clusterDomain: dev.example\n", encoding="utf-8"
+    )
+    address = f"http://gatekeeper.shop.svc.dev.example:{port}/auth"
+    for target in ("helm-template", "k8s-manifests"):
+        run = subprocess.run(
+            ["make", target, "NAMESPACE=shop", "ENV=dev"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+        )
+        assert run.returncode == 0, f"make {target} failed:\n{run.stdout}\n{run.stderr}"
+        rendered = (
+            run.stdout
+            if target == "helm-template"
+            else (project / "deploy" / "k8s" / "rendered.yaml").read_text(encoding="utf-8")
+        )
+        docs = {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(rendered) if d}
+        auth = docs[("Middleware", "gatekeeper-auth")]
+        assert auth["spec"]["forwardAuth"]["address"] == address, target
+    # without the environment's file, its defaults
+    run = subprocess.run(
+        ["make", "helm-template", "NAMESPACE=shop", "ENV=prod"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 0, run.stderr
+    assert "dev.example" not in run.stdout

@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from forge.capability_resolver import ResolvedPlan
     from forge.config import ProjectConfig
 
@@ -156,6 +158,23 @@ class PlatformSynthesis:
         return env
 
 
+def synthesis_active(config: ProjectConfig, option_values: Mapping[str, object]) -> bool:
+    """Whether :func:`compute_platform_synthesis` computes one for ``config``.
+
+    ``auth.service_discovery`` on, more than one backend, and the gatekeeper as
+    the RESOLVED (coerced) ``auth.provider``: the resolver coerces it to
+    ``none`` whenever the gatekeeper stack isn't generated (``include_keycloak=
+    False`` / ``auth.mode!=generate``), and a synthesis there would emit an
+    orphan ``service_registry.yaml`` + ``GATEKEEPER_*`` env into a project that
+    ships no gatekeeper/realm.
+    """
+    return (
+        bool(option_values.get("auth.service_discovery"))
+        and len(config.backends) > 1
+        and option_values.get("auth.provider") == "gatekeeper"
+    )
+
+
 def compute_platform_synthesis(
     config: ProjectConfig,
     plan: ResolvedPlan,
@@ -184,18 +203,9 @@ def compute_platform_synthesis(
     so unknown ``depends_on`` targets are skipped defensively rather than
     re-validated.
     """
-    if not plan.option_values.get("auth.service_discovery"):
-        return None
-    if len(config.backends) <= 1:
-        return None
-    # Gate on the RESOLVED (coerced) provider, not the raw option: the resolver
-    # coerces ``auth.provider``->``none`` whenever the gatekeeper stack isn't
-    # generated (``include_keycloak=False`` / ``auth.mode!=generate``). Without
-    # this guard, synthesis would emit an orphan ``service_registry.yaml`` +
-    # ``GATEKEEPER_*`` env into a project that ships no gatekeeper/realm. Self-
-    # disable instead — defence-in-depth that holds even when ProjectConfig
-    # .validate is bypassed (headless / matrix callers).
-    if plan.option_values.get("auth.provider") != "gatekeeper":
+    # Defence-in-depth that holds even when ProjectConfig.validate is bypassed
+    # (headless / matrix callers).
+    if not synthesis_active(config, plan.option_values):
         return None
 
     from forge.config._topology import project_keycloak_realm  # noqa: PLC0415

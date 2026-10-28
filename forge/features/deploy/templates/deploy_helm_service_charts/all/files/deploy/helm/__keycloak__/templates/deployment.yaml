@@ -6,6 +6,20 @@
 {{- if and $production (not .Values.hostname) }}
 {{- fail "keycloak: hostname is required in mode production (the public URL, e.g. https://auth.example.com)" }}
 {{- end }}
+{{- if $production }}
+{{- $placeholders := dict }}
+{{- if not .Values.admin.existingSecret }}
+{{- $_ := set $placeholders "admin.password" .Values.admin.password }}
+{{- end }}
+{{- range $client, $secret := .Values.realm.clientSecrets }}
+{{- $_ := set $placeholders (printf "realm.clientSecrets.%s" $client) $secret }}
+{{- end }}
+{{- range $field, $value := $placeholders }}
+{{- if or (empty $value) (eq (toString $value) "CHANGEME") }}
+{{- fail (printf "keycloak: mode production needs %s set, not empty or CHANGEME" $field) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if and (not $production) (gt (int .Values.replicas) 1) }}
 {{- fail "keycloak: mode development keeps sign-ins in each pod's memory; run one replica" }}
 {{- end }}
@@ -24,6 +38,10 @@ spec:
     metadata:
       labels:
         {{- include "keycloak.labels" . | nindent 8 }}
+      {{- if $realm }}
+      annotations:
+        checksum/realm: {{ include (print $.Template.BasePath "/secret-realm.yaml") . | sha256sum }}
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -121,8 +139,8 @@ spec:
       {{- if $realm }}
       volumes:
         - name: realm
-          configMap:
-            name: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
+          secret:
+            secretName: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
             items:
               - key: keycloak-realm.json
                 path: {{ printf "%s-realm.json" .Values.realm.name }}

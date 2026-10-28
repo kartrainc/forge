@@ -9,7 +9,7 @@
 #
 #     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
 
-partOf: {{ topology.project_slug | replace("_", "-") }}
+partOf: {{ q(topology.project_slug | replace("_", "-")) }}
 
 image:
   repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.app }}

@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs
 from uuid import UUID
 
 import httpx
@@ -1429,3 +1430,184 @@ async def test_logout_returns_over_the_requests_own_scheme(runtime, monkeypatch)
         await secure.aclose()
     location = httpx.URL(response.headers["location"])
     assert location.params["post_logout_redirect_uri"] == "https://app.localhost/"
+
+
+# ── Keycloak at a public URL beside the in-cluster one ──────────────────────
+
+PUBLIC_ISSUER = "https://auth.test/realms/app"
+
+
+def _keycloak_token(r, issuer, *, expires_in=600, tenant=TENANT):
+    payload = {
+        "sub": "admin",
+        "iss": issuer,
+        "aud": "gatekeeper",
+        "exp": int(time.time()) + expires_in,
+        "realm_access": {"roles": ["admin"]},
+    }
+    if tenant is not None:
+        payload["https://forge/tenant_id"] = tenant
+    return jwt.encode(payload, r.rsa_key, algorithm="RS256", headers={"kid": "oidc-test"})
+
+
+@pytest.fixture
+async def public_keycloak(runtime, monkeypatch):
+    """Browsers reach Keycloak at auth.test; the gatekeeper calls it at issuer.test."""
+    monkeypatch.setattr(runtime.cfg, "keycloak_public_base_url", "https://auth.test/realms/")
+    jwk = jwt.algorithms.RSAAlgorithm.to_jwk(runtime.rsa_key.public_key(), as_dict=True)
+    jwk["kid"] = "oidc-test"
+    calls = []
+    grants = {"client_credentials": {"access_token": "admin", "expires_in": 300}}
+
+    def keycloak(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.copy_with(query=None)}")
+        path = request.url.path
+        if path.endswith("/certs"):
+            return httpx.Response(200, json={"keys": [jwk]})
+        if path.endswith("/token"):
+            grant = parse_qs(request.content.decode())["grant_type"][0]
+            return httpx.Response(200, json=grants[grant])
+        if request.method == "GET" and "/admin/realms/" in path:
+            return httpx.Response(200, json={"id": "admin", "attributes": {}})
+        return httpx.Response(204)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(keycloak))
+    set_http_client(http)
+    yield SimpleNamespace(runtime=runtime, calls=calls, grants=grants)
+    await http.aclose()
+
+
+async def _sign_in(k, access_token):
+    r = k.runtime
+    r.client.cookies.clear()
+    login = await r.client.get("/auth/login")
+    params = httpx.URL(login.headers["location"]).params
+    id_token = jwt.encode({"nonce": params["nonce"]}, r.rsa_key, algorithm="RS256")
+    k.grants["authorization_code"] = {
+        "access_token": access_token,
+        "refresh_token": "refresh",
+        "id_token": id_token,
+    }
+    return await r.client.get("/callback", params={"code": "code", "state": params["state"]})
+
+
+async def test_browser_redirects_go_to_the_public_keycloak(public_keycloak):
+    k = public_keycloak
+    r = k.runtime
+    login = await r.client.get("/auth/login")
+    assert login.headers["location"].startswith(PUBLIC_ISSUER + "/protocol/openid-connect/auth?")
+    sid = r.client.cookies["tenant_session_id"]
+    r.client.cookies.set("tenant_session_id", "gone")
+    expired = await r.client.get("/auth", headers={"X-Forwarded-Uri": "/dashboard"})
+    assert expired.status_code == 302
+    assert expired.headers["location"].startswith(PUBLIC_ISSUER + "/protocol/openid-connect/auth?")
+    r.client.cookies.set("tenant_session_id", sid)
+    logout = await r.client.get("/logout")
+    assert logout.headers["location"].startswith(PUBLIC_ISSUER + "/protocol/openid-connect/logout?")
+    # The Keycloak session itself ends over the back channel, in the cluster.
+    assert k.calls == [f"POST {ISSUER}/protocol/openid-connect/logout"]
+
+
+@pytest.mark.parametrize(("issuer", "expected"), [(PUBLIC_ISSUER, 302), (ISSUER, 401)])
+async def test_tokens_carry_the_public_issuer_but_come_from_the_cluster(
+    public_keycloak, issuer, expected
+):
+    # Keycloak names the URL the browser signed in at (KC_HOSTNAME) as issuer,
+    # even when the code is exchanged in the cluster.
+    k = public_keycloak
+    callback = await _sign_in(k, _keycloak_token(k.runtime, issuer))
+    assert callback.status_code == expected, callback.text
+    assert k.calls == [
+        f"POST {ISSUER}/protocol/openid-connect/token",
+        f"GET {ISSUER}/protocol/openid-connect/certs",
+    ]
+
+
+async def test_refresh_stays_in_the_cluster(public_keycloak):
+    k = public_keycloak
+    r = k.runtime
+    sid = await r.sessions.issue(
+        access_token=_keycloak_token(r, PUBLIC_ISSUER, expires_in=-60),
+        refresh_token="old",
+        tenant_id=TENANT,
+        sub="admin",
+        idle_timeout_seconds=600,
+        absolute_timeout_seconds=600,
+    )
+    r.client.cookies.set("tenant_session_id", sid)
+    k.grants["refresh_token"] = {
+        "access_token": _keycloak_token(r, PUBLIC_ISSUER),
+        "refresh_token": "new",
+    }
+    assert (await r.client.get("/auth/userinfo")).status_code == 200
+    assert k.calls == [
+        f"GET {ISSUER}/protocol/openid-connect/certs",
+        f"POST {ISSUER}/protocol/openid-connect/token",
+    ]
+    assert (await r.sessions.get(sid)).refresh_token == "new"
+
+
+async def test_tenant_route_issuers_move_to_the_public_keycloak(public_keycloak):
+    k = public_keycloak
+    r = k.runtime
+    for host, issuer_url, browser in (
+        ("tms.localhost", "https://issuer.test/realms/tms", "https://auth.test/realms/tms"),
+        ("idp.localhost", "https://idp.test/realms/other", "https://idp.test/realms/other"),
+    ):
+        await r.redis.set(
+            f"tenant-route:{host}",
+            json.dumps(
+                {
+                    "tenant_id": TENANT,
+                    "realm_name": issuer_url.rsplit("/", 1)[1],
+                    "issuer_url": issuer_url,
+                    "client_id": "gatekeeper",
+                    "client_secret": "fixture",
+                }
+            ),
+        )
+        login = await r.client.get("/auth/login", headers={"Host": host})
+        assert login.headers["location"].startswith(browser + "/protocol/openid-connect/auth?")
+        logout = await r.client.get("/logout", headers={"Host": host})
+        assert logout.headers["location"].startswith(browser + "/protocol/openid-connect/logout?")
+    assert k.calls == ["POST https://issuer.test/realms/tms/protocol/openid-connect/logout"]
+
+
+async def test_admin_api_and_realm_probe_stay_in_the_cluster(public_keycloak, monkeypatch):
+    from app.core.lifecycle import AppLifecycle
+    from app.gatekeeper import http_client, realm_invariants
+
+    k = public_keycloak
+    r = k.runtime
+    monkeypatch.setattr(r.cfg, "self_registration", "default_tenant")
+    k.grants["refresh_token"] = {
+        "access_token": _keycloak_token(r, PUBLIC_ISSUER),
+        "refresh_token": "assigned",
+    }
+    callback = await _sign_in(k, _keycloak_token(r, PUBLIC_ISSUER, tenant=None))
+    assert callback.status_code == 302, callback.text
+    assert k.calls == [
+        f"POST {ISSUER}/protocol/openid-connect/token",
+        f"GET {ISSUER}/protocol/openid-connect/certs",
+        f"POST {ISSUER}/protocol/openid-connect/token",
+        "GET https://issuer.test/admin/realms/app/users/admin",
+        "PUT https://issuer.test/admin/realms/app/users/admin",
+        f"POST {ISSUER}/protocol/openid-connect/token",
+    ]
+
+    probed = []
+
+    async def probe(*, server_url, **kwargs):
+        probed.append(server_url)
+        raise RealmInvariantError("probed")
+
+    async def no_client():
+        return None
+
+    monkeypatch.setattr(r.cfg, "gatekeeper_skip_realm_invariant", False)
+    monkeypatch.setattr(realm_invariants, "verify_user_profile_active", probe)
+    monkeypatch.setattr(http_client, "init_http_client", no_client)
+    with pytest.raises(RealmInvariantError, match="probed"):
+        async with AppLifecycle.lifespan(FastAPI()):
+            pass
+    assert probed == ["https://issuer.test"]

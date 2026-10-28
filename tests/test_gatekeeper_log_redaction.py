@@ -223,6 +223,26 @@ class TestSessionFingerprint:
         assert out.replace("...", "") == "abc"
 
 
+# -- redact_url --------------------------------------------------------------
+
+
+class TestRedactUrl:
+    def test_password_redacted(self, redaction) -> None:
+        out = redaction.redact_url("redis://:s3cr3t@redis:6379/0")
+        assert out == "redis://:<redacted>@redis:6379/0"
+
+    def test_user_kept_password_redacted(self, redaction) -> None:
+        out = redaction.redact_url("redis://default:s3cr3t@redis.example.com:6380/2")
+        assert out == "redis://default:<redacted>@redis.example.com:6380/2"
+        assert "s3cr3t" not in out
+
+    def test_url_without_password_unchanged(self, redaction) -> None:
+        assert redaction.redact_url("redis://redis:6379") == "redis://redis:6379"
+
+    def test_unparsable_url_redacted_whole(self, redaction) -> None:
+        assert redaction.redact_url("redis://:pw@[::1") == REDACTED
+
+
 # -- purity guard ------------------------------------------------------------
 
 
@@ -349,3 +369,15 @@ def test_sensitive_session_log_calls_are_fingerprinted() -> None:
         assert not re.search(r"\n\s*session_id,\s*\n", call), (
             f"the {keyword!r} log call still passes a bare session_id"
         )
+
+
+# -- STRUCTURAL: redis.py logs the URL without its password --------------------
+
+
+def test_redis_client_never_logs_the_raw_url() -> None:
+    src = (_GK_GATEKEEPER / "redis.py").read_text(encoding="utf-8")
+    log_calls = re.findall(r"logger\.\w+\((?:[^()]|\([^()]*\))*\)", src)
+    url_calls = [c for c in log_calls if "redis_url" in c]
+    assert url_calls, "redis.py should still log the Redis endpoint"
+    raw = [c for c in url_calls if not re.search(r"redact_url\([^)]*redis_url\)", c)]
+    assert raw == [], f"redis.py logs a Redis URL without redact_url(): {raw}"

@@ -1,6 +1,8 @@
-{{- /* The migration, a pre-install/pre-upgrade hook: a failed one fails this release only. It waits for
-       migration.waitForPostgres while that name resolves; with migration.dbAppRole it migrates as the owner, then the
-       db-role container refreshes the grants of the runtime role the postgres chart creates. */ -}}
+{{- /* The migration, a pre-install/pre-upgrade hook: a failed one fails this release only. While
+       migration.waitForPostgres resolves, it waits until its own database URL connects, and the runtime role exists
+       under migration.dbAppRoleManaged: CloudNativePG creates both after the primary. With migration.dbAppRole it
+       migrates as the owner, then the db-role container grants the runtime role, which it creates first unless the
+       postgres chart does (migration.dbAppRoleManaged). */ -}}
 {{- if .Values.migration.enabled }}
 {{- $m := .Values.migration }}
 apiVersion: batch/v1
@@ -41,17 +43,48 @@ spec:
       {{- if or $m.waitForPostgres $m.dbAppRole }}
       initContainers:
         {{- with $m.waitForPostgres }}
+        {{- $urlEnv := required (printf "%s: migration.databaseUrlEnv is required while migration.waitForPostgres is set" $.Chart.Name) $m.databaseUrlEnv }}
+        {{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $urlEnv) }}
+        {{- fail (printf "%s: migration.databaseUrlEnv must name an environment variable, not %q" $.Chart.Name $urlEnv) }}
+        {{- end }}
+        {{- $timeout := int (required (printf "%s: migration.waitTimeoutSeconds is required while migration.waitForPostgres is set" $.Chart.Name) $m.waitTimeoutSeconds) }}
+        {{- $role := and $m.dbAppRole $m.dbAppRoleManaged }}
         - name: wait-for-postgres
           image: {{ include "svc.auxImage" (dict "root" $ "key" "migration.postgresImage" "image" $m.postgresImage) | quote }}
           command:
             - sh
             - -c
             - |
-              if getent hosts {{ . }} >/dev/null; then
-                until pg_isready -h {{ . }} -p 5432 -U postgres; do echo "waiting for postgres"; sleep 2; done
-              else
+              if ! getent hosts {{ . }} >/dev/null; then
                 echo "{{ . }} does not resolve: no in-cluster Postgres to wait for"
+                exit 0
               fi
+              url=$(printf '%s' "${{ $urlEnv }}" | sed -e 's|^postgresql+[a-z0-9]*://|postgresql://|' -e 's|?.*$||')
+              if [ -z "$url" ]; then
+                echo "{{ $urlEnv }} is not set" >&2
+                exit 1
+              fi
+              {{- if $role }}
+              check="SELECT CASE WHEN EXISTS (SELECT FROM pg_roles WHERE rolname = :'role') THEN 'ready' ELSE 'role ' || :'role' || ' does not exist' END;"
+              {{- else }}
+              check="SELECT 'ready';"
+              {{- end }}
+              deadline=$(( $(date +%s) + {{ $timeout }} ))
+              until out=$(echo "$check" | psql "$url" -w -At -v role="${APP_DB_ROLE:-}" 2>&1) && [ "$out" = ready ]; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "{{ $urlEnv }} is not ready after {{ $timeout }}s: $out" >&2
+                  exit 1
+                fi
+                echo "waiting for the database of {{ $urlEnv }}"
+                sleep 2
+              done
+          {{- if $role }}
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $m.dbAppRole | quote }}
+          {{- end }}
+          envFrom:
+            {{- include "svc.migrateEnvFrom" $ | nindent 12 }}
           securityContext:
             {{- toYaml $.Values.securityContext | nindent 12 }}
         {{- end }}
@@ -67,9 +100,11 @@ spec:
           env:
             - name: APP_DB_ROLE
               value: {{ $m.dbAppRole | quote }}
+            {{- if $m.dbAppRoleManaged }}
             # the postgres chart creates the role and owns its password: only grant
             - name: APP_DB_ROLE_MANAGED
               value: "true"
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}

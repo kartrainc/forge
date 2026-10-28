@@ -22,7 +22,8 @@ spec:
       annotations:
         # an upgrade that changes only the ConfigMap or the Secret rolls the pods
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- /* The values, not the Secret: the keys it generates hold for the release. */}}
+        checksum/secret: {{ .Values.secret | toJson | sha256sum }}
         {{- with .Values.deployment.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -82,7 +83,8 @@ spec:
                 name: {{ include "svc.child" (dict "root" . "suffix" "config") }}
             - secretRef:
                 name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
-                optional: true
+                # Under externalSecret the pod waits for ESO's Secret: env is read only at container start.
+                optional: {{ not .Values.externalSecret.enabled }}
             {{- with .Values.container.envFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

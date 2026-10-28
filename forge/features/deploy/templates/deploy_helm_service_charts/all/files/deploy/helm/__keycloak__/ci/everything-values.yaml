@@ -7,7 +7,11 @@ imagePullSecrets:
   - name: registry
 mode: production
 hostname: https://auth.example.com
+admin:
+  password: ci-admin-password
 realm:
+  clientSecrets:
+    gatekeeper: ci-gatekeeper-secret
   sync:
     enabled: true
     image:

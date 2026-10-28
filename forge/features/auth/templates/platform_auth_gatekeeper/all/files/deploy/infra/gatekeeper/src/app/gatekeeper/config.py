@@ -18,8 +18,9 @@ class GatekeeperSettings(BaseSettings):
 
     | Variable                  | Description                                  |
     |---------------------------|----------------------------------------------|
-    | KEYCLOAK_BASE_URL         | Keycloak realms URL — same string for browser|
-    |                           | and Docker-DNS callers (KC_HOSTNAME pinned). |
+    | KEYCLOAK_BASE_URL         | Keycloak realms URL the gatekeeper calls     |
+    | KEYCLOAK_PUBLIC_BASE_URL  | Realms URL of browsers and token issuers     |
+    |                           | (KC_HOSTNAME); unset: KEYCLOAK_BASE_URL      |
     | GATEKEEPER_CLIENT_ID      | OIDC client ID registered in Keycloak        |
     | GATEKEEPER_CLIENT_SECRET  | OIDC client secret                           |
     | COOKIE_NAME               | Name of the session cookie (access token)    |
@@ -54,6 +55,10 @@ class GatekeeperSettings(BaseSettings):
     )
 
     keycloak_base_url: str = "http://keycloak:9180/realms"
+    # Realms URL as browsers reach Keycloak when the gatekeeper calls it at
+    # another one: sign-in and sign-out redirects, and the tokens' issuer
+    # (Keycloak's KC_HOSTNAME). Back-channel calls keep keycloak_base_url.
+    keycloak_public_base_url: str = ""
     gatekeeper_client_id: str = "multi-tenant-gateway"
     gatekeeper_client_secret: str = ""
     cookie_name: str = "tenant_session"

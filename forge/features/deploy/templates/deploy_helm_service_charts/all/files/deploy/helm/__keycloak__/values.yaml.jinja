@@ -18,11 +18,14 @@ imagePolicy:
   requireDigest: false
 imagePullSecrets: []
 
-# development runs start-dev, one replica; production runs start and needs hostname. No clustering setup yet.
+# development runs start-dev, one replica; production runs start, needs hostname and set credentials, and imports the
+# realm without its dev user and with sslRequired external. No clustering setup yet.
 mode: development
 replicas: 1
-# KC_HOSTNAME, e.g. https://auth.{{ e(host) }}; "" derives the URLs from each request.
-hostname: ""
+# KC_HOSTNAME: the public URL, so the issuer of every token whichever URL issued it. The gatekeeper chart's
+# KEYCLOAK_PUBLIC_BASE_URL is this plus /realms: change them together. "" derives the URLs from each request, and
+# refreshing a token through the in-cluster URL then fails.
+hostname: "https://auth.{{ e(host) }}"
 
 # The database and role the postgres chart creates for Keycloak.
 db:
@@ -35,7 +38,7 @@ db:
     key: password
 
 # The master realm's bootstrap admin, created on the first start. existingSecret names a Secret with the keys
-# username and password to use instead.
+# username and password to use instead. Mode production refuses the CHANGEME password.
 admin:
   username: admin
   password: CHANGEME
@@ -56,7 +59,7 @@ realm:
   frontendHosts: {}
 {%- endif %}
   # Secrets of the realm's confidential clients, by clientId. gatekeeper must equal the gatekeeper chart's
-  # GATEKEEPER_CLIENT_SECRET.
+  # GATEKEEPER_CLIENT_SECRET. Mode production refuses CHANGEME.
   clientSecrets:
     gatekeeper: CHANGEME
   # A post-install/post-upgrade Job that applies the realm file's User-Profile to an existing realm, run with the

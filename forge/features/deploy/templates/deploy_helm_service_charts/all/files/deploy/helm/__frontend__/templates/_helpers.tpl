@@ -19,7 +19,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "svc.selectorLabels" . }}
 app.kubernetes.io/component: frontend
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
@@ -27,7 +27,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "svc.podLabels" -}}
 {{ include "svc.selectorLabels" . }}
 app.kubernetes.io/component: frontend
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 {{- with .Values.deployment.podLabels }}
 {{ toYaml . }}
 {{- end }}
@@ -38,7 +38,7 @@ app.kubernetes.io/part-of: {{ .Values.partOf }}
 app.kubernetes.io/name: {{ include "svc.child" (dict "root" . "suffix" "test") }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: test
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 

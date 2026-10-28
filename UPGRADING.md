@@ -12,22 +12,35 @@ CloudNativePG operator and Traefik (their CRDs). To switch an existing project:
 
 1. Set `"deploy.helm_layout" = "per_service"` under `[forge.options]` in `forge.toml` and `"deploy.helm_layout" =
    "user"` under `[forge.option_origins]`, then update: the update takes options from `forge.toml`, not from the
-   recipe. The new charts appear under `deploy/helm/<chart>/`; the umbrella's files (`deploy/helm/Chart.yaml`,
-   `values.yaml`, `values-prod.yaml.example`, `templates/`, `files/`) stay on disk, no longer recorded. Delete them
-   once nothing installs them.
-2. Move environment values. For `workloads.<service>`: `env` goes to that chart's `configMap.data`, `secretEnv` to
-   `secret.stringData`, `replicaCount` to `deployment.replicas`, `containerPort` to `container.port`,
-   `migrateCommand` and `hasMigrations` to `migration`. The frontends go to their charts, `infra` to the `postgres`,
+   recipe. The new charts appear under `deploy/helm/<chart>/`. With the ownership recipe (`.forge/quality.json`) the
+   umbrella's files (`deploy/helm/Chart.yaml`, `.helmignore`, `values.yaml`, `values-prod.yaml.example`,
+   `templates/`, `files/`) stay on disk, no longer recorded; without it the update deletes those you did not edit,
+   except `files/`. Delete what is left once nothing installs the umbrella.
+2. Move environment values to each chart's `values-<env>.yaml`, which `make helm-install ENV=<env>` passes (`prod` by
+   default). For `workloads.<service>`: `env` goes to that chart's `configMap.data`, `secretEnv` to
+   `secret.stringData`, `replicaCount` to `deployment.replicas`, `containerPort` to `container.port`, `resources` to
+   `container.resources`, `migrateCommand` to `migration.command`, `hasMigrations` to `migration.enabled`,
+   `migrateSecretEnv` to `migration.ownerSecret.stringData` and `dbAppRole` to `migration.dbAppRole`. With the
+   postgres chart, `migration.dbAppRoleManaged` is `true`: the chart creates the runtime role and holds its password,
+   so `APP_DB_PASSWORD` goes. With an external Postgres, set it `false` and keep `APP_DB_PASSWORD`, the password in
+   the service's DB URL; the owner needs `CREATEROLE`. The frontends go to their charts, `infra` to the `postgres`,
    `redis`, `keycloak` and `gatekeeper` charts, and the umbrella's Ingress to each chart's `ingressRoute`. Edits you
    made to the umbrella's templates are not carried over: repeat them in the new charts, which are scaffold too.
 3. The services now reach Postgres at `postgres-rw` (CloudNativePG), as an owner role named after the database for
-   migrations and, under `database.rls_app_role`, a runtime role for serving, which the postgres chart creates. Redis
-   requires a password: set it in the redis chart and in every service's Redis URLs. Data in the umbrella's
-   in-cluster Postgres does not move by itself: dump it and restore it into the new cluster.
+   migrations and, under `database.rls_app_role`, a runtime role for serving, which the postgres chart creates. Each
+   role's password lives in the postgres chart's `roleSecrets.passwords` (or, with `roleSecrets.create: false`, in
+   Secrets `postgres-<role>` of your own, `-` for `_`) and must match every URL that names the role: the services' DB
+   URLs, the `migration.ownerSecret` URLs and the event bus's `APP__EVENTS__BUS_URL` (role `events`). Redis requires a
+   password: set it in the redis chart and in every Redis URL, the gatekeeper's included. The keycloak chart's
+   `admin.password` and `realm.clientSecrets.gatekeeper` must equal the gatekeeper chart's `KC_ADMIN_PASSWORD` and
+   `GATEKEEPER_CLIENT_SECRET`. Data in the umbrella's in-cluster Postgres does not move by itself: dump it and restore
+   it into the new cluster.
 4. Uninstall the umbrella, then run `make helm-install`, which installs every chart in dependency order. With
    `infra.inCluster` the two claim the same `redis`, `keycloak` and `gatekeeper` names, and both route the same
    hosts, so they cannot run together. A Service now listens on the service's port, not 80, and a frontend's on
-   8080: update anything that called `<release>-<service>:80`.
+   8080: update anything that called `<release>-<service>:80`. Browsers reach Keycloak at `auth.<host>`, the keycloak
+   chart's `hostname`: change it together with the gatekeeper chart's `KEYCLOAK_PUBLIC_BASE_URL`, that URL plus
+   `/realms`.
 
 ### Tenant isolation and Keycloak strategies (unreleased)
 

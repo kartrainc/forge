@@ -4,7 +4,7 @@ Kept deliberately dependency-free (no fastapi / starlette / redis) so the
 logic is unit-testable in forge CI via importlib -- mirrors the MCP audit
 module's "pure helper, importlib-loaded" pattern.
 
-Two leaks this module closes:
+Three leaks this module closes:
 
 * The access-log formatter records the request query string. The OIDC
   callback carries ``?code=...&state=...`` (and, on some flows, a
@@ -15,6 +15,8 @@ Two leaks this module closes:
   failure. A session id IS the bearer credential, so a log reader holds a
   live session. :func:`session_fp` keeps a short prefix for correlation and
   never the full value.
+* The Redis client logs the URL it connects to, which carries the password
+  when Redis requires one. :func:`redact_url` masks it.
 
 Denylist, not allowlist: a brand-new, non-sensitive query param still gets
 logged (observability is the goal -- WS-10.3 builds dashboards over these
@@ -24,7 +26,7 @@ lines), only the known-sensitive keys are masked.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 REDACTED = "<redacted>"
 
@@ -100,9 +102,28 @@ def session_fp(session_id: str | None) -> str:
     return session_id[:_FP_PREFIX_LEN] + "..."
 
 
+def redact_url(url: str) -> str:
+    """Return ``url`` with the password of its userinfo replaced by ``"<redacted>"``.
+
+    A URL without a password is returned unchanged; one that cannot be parsed
+    is replaced whole, so logging can never leak or raise.
+    """
+    try:
+        parts = urlsplit(url)
+        if parts.password is None:
+            return url
+    except ValueError:
+        return REDACTED
+    host = parts.netloc.rpartition("@")[2]
+    return urlunsplit(
+        parts._replace(netloc=f"{parts.username or ''}:{REDACTED}@{host}")
+    )
+
+
 __all__ = [
     "REDACTED",
     "SENSITIVE_QUERY_KEYS",
     "redact_query_params",
+    "redact_url",
     "session_fp",
 ]

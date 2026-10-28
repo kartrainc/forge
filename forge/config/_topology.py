@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from forge.config._backend import BackendLanguage
 from forge.config._frontend import PRIMARY_LOCAL_HOST, FrontendFramework
 from forge.config._validators import DEFAULT_REALM
+from forge.synthesis.platform import synthesis_active
 
 if TYPE_CHECKING:
     from forge.capability_resolver import ResolvedPlan
@@ -252,12 +253,17 @@ def compute_topology(
         )
         for bc in config.backends
     )
-    # The Redis URLs each backend's fragments default to, which a Redis with a password must override.
-    for be in backends:
+    # The Redis URLs each backend's fragments and app template default to, which a Redis with a password must
+    # override, and the Keycloak admin access its app template reads from the env.
+    for bc, be in zip(config.backends, backends, strict=True):
+        infra_env = _APP_TEMPLATE_INFRA_ENV.get((bc.language, bc.app_template or ""), {})
         be["redis_env"] = (
-            _redis_env_defaults(plan, be["language"])
-            if plan is not None and "redis" in rendered_infra
+            _redis_env_defaults(plan, bc) | infra_env.get("redis", {})
+            if "redis" in rendered_infra
             else {}
+        )
+        be["keycloak_admin_env"] = (
+            dict(infra_env.get("keycloak", {})) if "keycloak" in rendered_infra else {}
         )
     # Frontends beside the primary; the primary keeps the scalar keys below.
     extra_frontends = tuple(
@@ -386,16 +392,35 @@ def _helm_infra_charts(
     }
 
 
-def _redis_env_defaults(plan: ResolvedPlan, language: str) -> dict[str, str]:
-    """The env vars the backend fragments of ``language`` default to ``redis://redis:6379/<db>``."""
-    lang = BackendLanguage(language)
+def _redis_env_defaults(plan: ResolvedPlan | None, bc: BackendConfig) -> dict[str, str]:
+    """The env vars the backend fragments ``bc`` receives default to ``redis://redis:6379/<db>``."""
     env: dict[str, str] = {}
-    for resolved in plan.ordered:
-        impl = resolved.fragment.implementations.get(lang)
-        if impl is None or impl.scope != "backend" or lang not in resolved.target_backends:
+    for resolved in plan.ordered if plan is not None else ():
+        impl = resolved.fragment.implementations.get(bc.language)
+        if (
+            impl is None
+            or impl.scope != "backend"
+            or bc.language not in resolved.target_backends
+            or (bc.app_template or "") in resolved.fragment.excluded_app_templates
+        ):
             continue
         env.update({k: v for k, v in impl.env_vars if v.startswith("redis://redis:6379")})
     return env
+
+
+# What an app template reads from the redis and keycloak charts only through the env in production:
+# tenant-management-service's production.yaml resolves ${REDIS_URL} and ${KEYCLOAK_ADMIN_*}, which APP__TMS__*
+# override. The values are the charts' Services and placeholder credentials.
+_APP_TEMPLATE_INFRA_ENV: dict[tuple[BackendLanguage, str], dict[str, dict[str, str]]] = {
+    (BackendLanguage.PYTHON, "tenant-management-service"): {
+        "redis": {"APP__TMS__REDIS_URL": "redis://redis:6379"},
+        "keycloak": {
+            "APP__TMS__KEYCLOAK_ADMIN_URL": "http://keycloak:8080",
+            "APP__TMS__KEYCLOAK_ADMIN_USER": "admin",
+            "APP__TMS__KEYCLOAK_ADMIN_PASSWORD": "CHANGEME",
+        },
+    },
+}
 
 
 # Roles Postgres or CloudNativePG own, and the suffixes of the Secrets CloudNativePG names <cluster>-<suffix>.
@@ -403,17 +428,24 @@ _POSTGRES_RESERVED_ROLES = frozenset({"postgres", "streaming_replica"})
 _CNPG_SECRET_SUFFIXES = frozenset({"ca", "server", "replication", "superuser"})
 
 
-def helm_postgres_conflict(config: ProjectConfig, topology: Mapping[str, Any]) -> str | None:
+def helm_postgres_conflict(
+    config: ProjectConfig, topology: Mapping[str, Any], option_values: Mapping[str, object]
+) -> str | None:
     """Why the postgres chart of the per-service layout cannot create the project's roles, if it can't.
 
     Each role is named after a backend's database (``-`` as ``_``), its runtime role adds
     ``_app``, and its Secret is ``postgres-<role>`` (``_`` as ``-``). ``topology`` is computed
-    without the synthesis, as the resolver does, so the event bus's role is added here.
+    without the synthesis, as the resolver does, so the event bus's role is added here when
+    the synthesis (``option_values``, resolved) gives the bus its database.
     """
     if not topology["helm_postgres"]:
         return None
+    release = topology["helm_postgres"][0]["name"]
     roles = [role["name"] for role in topology["helm_postgres"][0]["roles"]]
-    if option_value(config.options, "infrastructure.event_bus") == "postgres_notify":
+    if (
+        synthesis_active(config, option_values)
+        and option_values.get("infrastructure.event_bus") == "postgres_notify"
+    ):
         roles.append("events")
     seen: set[str] = set()
     for role in roles:
@@ -425,5 +457,7 @@ def helm_postgres_conflict(config: ProjectConfig, topology: Mapping[str, Any]) -
             return (
                 f"the Secret of the Postgres role {role!r} would replace one CloudNativePG creates"
             )
+        if len(f"{release}-{role}") > 63:
+            return f"the Secret of the Postgres role {role!r} would be cut to 63 characters"
         seen.add(role)
     return None

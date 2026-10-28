@@ -17,7 +17,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "redis.selector" . }}
 app.kubernetes.io/component: cache
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}

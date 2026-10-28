@@ -48,6 +48,7 @@ securityContext:
 deployment:
   # More than one needs signingKeys.existingSecret: generated keys differ per pod.
   replicas: 1
+  # Recreate instead while the keys are generated, so two pods never sign with different keys.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -93,8 +94,11 @@ service:
 # Non-secret env, as compose runs the gatekeeper with the in-cluster hosts.
 configMap:
   data:
+    # The dev posture: any other ENV refuses SVC_AUTH_BACKEND=preshared, the only S2S auth the backends' clients have.
     ENV: "development"
     KEYCLOAK_BASE_URL: "http://keycloak:8080/realms"
+    # Where browsers reach Keycloak, the issuer of its tokens: the keycloak chart's hostname plus /realms.
+    KEYCLOAK_PUBLIC_BASE_URL: "https://auth.{{ e(host) }}/realms"
     KEYCLOAK_ADMIN_REALM: "{{ e(topology.keycloak_realm) }}"
     GATEKEEPER_CLIENT_ID: "gatekeeper"
     TENANT_SOURCE: "{{ e(topology.keycloak_tenant_source) }}"
@@ -133,9 +137,10 @@ secret:
     # The keycloak chart's admin, for the boot-time check of the realm.
     KC_ADMIN_USER: "admin"
     KC_ADMIN_PASSWORD: "CHANGEME"
-    # The compose dev keys (Fernet keys; CHANGEME is not one), refused outside ENV=development.
-    SESSION_FERNET_KEY: "L9dXzDhHXxIbDpzmUrNSCMUgCl0rYmQ6j6lwtWXH_A4="
-    DELEGATION_GRANT_FERNET_KEY: "UVEc0SmYvD9UcwKTlz_fMTusqFVVTNLliJ96ChlPDCI="
+    # Fernet keys (32 bytes, URL-safe base64). "" generates one at install and keeps it across upgrades; the compose
+    # dev keys are refused.
+    SESSION_FERNET_KEY: ""
+    DELEGATION_GRANT_FERNET_KEY: ""
 
 # An external-secrets.io ExternalSecret writing {{ service.name }}-secret instead.
 externalSecret:
@@ -162,7 +167,7 @@ serviceRegistry:
 # The Traefik Middlewares the backend charts' routes use: {{ service.name }}-auth (ForwardAuth to /auth),
 # {{ service.name }}-strip-api-key and {{ service.name }}-untrusted-headers.
 authMiddlewares:
-  enabled: false
+  enabled: true
   clusterDomain: cluster.local
   # What /auth sets on the forwarded request.
   authResponseHeaders:

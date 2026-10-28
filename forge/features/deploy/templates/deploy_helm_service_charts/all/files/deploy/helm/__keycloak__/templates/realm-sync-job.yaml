@@ -62,8 +62,8 @@ spec:
               readOnly: true
       volumes:
         - name: realm
-          configMap:
-            name: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
+          secret:
+            secretName: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

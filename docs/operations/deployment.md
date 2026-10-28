@@ -31,13 +31,16 @@ path. Tenant quotas are generated; per-key quotas require additional policy.
 Validate [S2S](../guides/service-to-service.md) and [API-key](../guides/api-keys.md)
 allowed/denied journeys, including attempts to bypass ingress, before release.
 
-OIDC verification requires the exact issuer advertised by Keycloak. Configure a
-canonical issuer URL reachable by both browsers and Gatekeeper; if setting
-`KC_HOSTNAME`, align the tenant route's `issuer_url` (or the fallback
-`KEYCLOAK_BASE_URL/<realm>`) with its discovery document. Do not disable issuer
-verification to accommodate separate internal/public hostnames. The default
-Compose uses `http://keycloak:8080/realms/app` inside its network; browser-facing
-DNS/ingress and auth/callback routes still require deliberate configuration.
+OIDC verification requires the exact issuer advertised by Keycloak. The default
+Compose uses `http://keycloak:8080/realms/app` inside its network; a browser on
+the host reaches it only after deliberate DNS/ingress configuration.
+Where browsers reach Keycloak at another URL (Kubernetes: `https://auth.<host>`),
+set Keycloak's `KC_HOSTNAME` to it and Gatekeeper's `KEYCLOAK_PUBLIC_BASE_URL` to
+its `/realms`. Sign-in and sign-out redirects and the expected issuer use that
+URL; token, JWKS and Admin API calls keep the in-cluster `KEYCLOAK_BASE_URL`. A
+tenant route's `issuer_url` under `KEYCLOAK_BASE_URL` maps the same way, any
+other is used as given. Without `KC_HOSTNAME`, Keycloak names the sign-in's host
+as issuer and refuses the in-cluster refresh. Do not disable issuer verification.
 
 The generated default realm, Gatekeeper `KEYCLOAK_ADMIN_REALM`, and realm-sync
 target are all `app`. Despite its name, Gatekeeper uses this setting for the
@@ -68,8 +71,8 @@ secret checks.
 | --- | --- | --- |
 | `GATEKEEPER_CLIENT_SECRET` | Random string, 32+ chars | Must not be empty or `super-secret-string` |
 | `COOKIE_SECURE` | `true` | Defaults to `true`; set `false` only for non-HTTPS dev envs |
-| `SESSION_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Required for BFF session encryption |
-| `DELEGATION_GRANT_FERNET_KEY` | Same as above | Required for delegation grants |
+| `SESSION_FERNET_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | Required for BFF session encryption. The per-service `gatekeeper` chart generates it when left empty and keeps it across upgrades, except when rendered without cluster access (`helm template`, Argo CD) |
+| `DELEGATION_GRANT_FERNET_KEY` | Same as above | Required for delegation grants. Generated like `SESSION_FERNET_KEY` |
 | `SIGNING_KEY_DIR` | Path to directory containing `.pem` files | Gatekeeper keygen init-container creates these |
 
 ### MCP-enabled projects

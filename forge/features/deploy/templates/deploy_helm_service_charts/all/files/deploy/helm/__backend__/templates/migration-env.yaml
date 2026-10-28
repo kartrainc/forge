@@ -16,7 +16,8 @@ data:
   {{ $k }}: {{ $v | quote }}
   {{- end }}
 {{- end }}
-{{- if and .Values.secret.enabled .Values.secret.stringData }}
+{{- $data := include "svc.secretData" . | fromJson }}
+{{- if and .Values.secret.enabled $data }}
 ---
 apiVersion: v1
 kind: Secret
@@ -28,7 +29,7 @@ metadata:
     {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
 type: Opaque
 stringData:
-  {{- range $k, $v := .Values.secret.stringData }}
+  {{- range $k, $v := $data }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
 {{- end }}
@@ -48,6 +49,9 @@ spec:
 {{- end }}
 {{- if $m.dbAppRole }}
 {{- if ($m.ownerSecret | default dict).enabled }}
+{{- if and (not $m.dbAppRoleManaged) (not (index ($m.ownerSecret.stringData | default dict) "APP_DB_PASSWORD")) }}
+{{- fail (printf "%s: migration.ownerSecret.stringData.APP_DB_PASSWORD is required while migration.dbAppRoleManaged is false: the password db-app-role.sh gives %s" .Chart.Name $m.dbAppRole) }}
+{{- end }}
 ---
 {{- /* the owner's credentials: the migration and the role script use them, the service never does */}}
 apiVersion: v1

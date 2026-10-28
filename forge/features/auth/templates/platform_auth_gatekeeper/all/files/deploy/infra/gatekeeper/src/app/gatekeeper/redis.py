@@ -27,6 +27,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from app.gatekeeper.config import get_settings
+from app.middleware.log_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,9 @@ class ResilientRedis:
             await self._redis_client.ping()  # type: ignore[misc]  # ty:ignore[invalid-await]
             self._using_redis = True
             self._attempt = 0
-            logger.info("Redis connection established at %s", self._redis_url)
+            logger.info(
+                "Redis connection established at %s", redact_url(self._redis_url)
+            )
         except _RECONNECT_ERRORS as exc:
             logger.warning(
                 "Cannot connect to Redis (%s). Using in-memory fallback.", exc
@@ -624,7 +627,7 @@ async def init_redis() -> ResilientRedis:
         return _client  # type: ignore[return-value]
 
     cfg = get_settings()
-    logger.info("Initialising Redis connection to %s …", cfg.redis_url)
+    logger.info("Initialising Redis connection to %s …", redact_url(cfg.redis_url))
     _client = ResilientRedis(cfg.redis_url)
     await _client.connect()
     return _client

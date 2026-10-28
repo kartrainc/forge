@@ -10,6 +10,8 @@ CHARTS := $(INFRA) $(SERVICES)
 REVERSED := $(SERVICES) {{ (topology.helm_postgres + topology.helm_redis + topology.helm_keycloak + topology.helm_gatekeeper) | map(attribute='name') | reverse | join(' ') }}
 # A chart's environment values, used when present: deploy/helm/<chart>/values-$(ENV).yaml
 ENV ?= prod
+# What every loop below passes helm for its chart $$c: the namespace, and the chart's environment values
+RELEASE_ARGS = --namespace $(NAMESPACE) $$( [ -f deploy/helm/$$c/values-$(ENV).yaml ] && echo "-f deploy/helm/$$c/values-$(ENV).yaml" )
 
 .PHONY: help compose-up compose-down helm-lint helm-template k8s-manifests helm-install helm-uninstall
 
@@ -25,19 +27,16 @@ compose-down: ## Stop the local stack
 helm-lint: ## Lint every chart
 	@for c in $(CHARTS); do helm lint deploy/helm/$$c || exit 1; done
 
-helm-template: ## Render every chart to stdout
-	@for c in $(CHARTS); do helm template $$c deploy/helm/$$c || exit 1; done
+helm-template: ## Render every chart to stdout, as helm-install would install it
+	@for c in $(CHARTS); do helm template $$c deploy/helm/$$c $(RELEASE_ARGS) || exit 1; done
 
 k8s-manifests: ## Render raw manifests to deploy/k8s/rendered.yaml (derived from the charts)
 	@mkdir -p deploy/k8s
-	@for c in $(CHARTS); do helm template $$c deploy/helm/$$c || exit 1; done > deploy/k8s/rendered.yaml
+	@for c in $(CHARTS); do helm template $$c deploy/helm/$$c $(RELEASE_ARGS) || exit 1; done > deploy/k8s/rendered.yaml
 	@echo "Wrote deploy/k8s/rendered.yaml"
 
 helm-install: ## Install/upgrade every chart in dependency order (each with its values-$(ENV).yaml if present)
-	@for c in $(CHARTS); do \
-	  v=deploy/helm/$$c/values-$(ENV).yaml; \
-	  helm upgrade --install $$c deploy/helm/$$c --namespace $(NAMESPACE) --create-namespace $$( [ -f $$v ] && echo "-f $$v" ) || exit 1; \
-	done
+	@for c in $(CHARTS); do helm upgrade --install $$c deploy/helm/$$c $(RELEASE_ARGS) --create-namespace || exit 1; done
 
 helm-uninstall: ## Remove every release
 	@for c in $(REVERSED); do helm uninstall $$c --namespace $(NAMESPACE) || true; done

@@ -31,9 +31,13 @@
 {%- set _ = plain_env.update({k: v}) -%}
 {%- endif -%}
 {%- endfor -%}
-{#- the Redis URLs the backend's fragments default to, with the redis chart's password -#}
+{#- the Redis URLs the backend's fragments and app template default to, with the redis chart's password -#}
 {%- for k, v in (service.redis_env | default({})).items() -%}
 {%- set _ = secret_env.update({k: v | replace("redis://redis:6379", "redis://:CHANGEME@redis:6379")}) -%}
+{%- endfor -%}
+{#- the keycloak chart's admin, which the app template reads from the env -#}
+{%- for k, v in (service.keycloak_admin_env | default({})).items() -%}
+{%- set _ = (secret_env if k.endswith("_PASSWORD") else plain_env).update({k: v}) -%}
 {%- endfor -%}
 # Values of the {{ service.name }} chart, one service of {{ topology.project_slug }}.
 #
@@ -44,7 +48,7 @@
 #
 #     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
 
-partOf: {{ topology.project_slug | replace("_", "-") }}
+partOf: {{ q(topology.project_slug | replace("_", "-")) }}
 
 image:
   repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.name }}
@@ -120,7 +124,13 @@ container:
     httpGet:
       path: /api/v1/health/ready
       port: http
-  startupProbe: {}
+  # Liveness only once this passes: up to 3 minutes for the first start.
+  startupProbe:
+    httpGet:
+      path: /api/v1/health/live
+      port: http
+    periodSeconds: 5
+    failureThreshold: 36
   volumeMounts: []
 initContainers: []
 volumes: []
@@ -189,6 +199,15 @@ secret:
 {%- else %}
   stringData: {}
 {%- endif %}
+{%- if service.language == "python" %}
+  # Filled with a random value when stringData leaves them out, kept across upgrades: the service refuses
+  # placeholders outside ENV=development.
+  generate:
+    - APP__SECURITY__SECRET_KEY
+    - APP__SECURITY__AUTH__CLIENT_SECRET
+{%- else %}
+  generate: []
+{%- endif %}
 
 # An ExternalSecret that writes {{ service.name }}-secret; needs secret.enabled: false.
 externalSecret:
@@ -216,15 +235,23 @@ migration:
 {%- else %}
   command: []
 {%- endif %}
-  # The Job waits for this host while it resolves (the postgres chart's Service); "" never waits.
+{%- set url_env = "APP__DB__URL" if service.language == "python" else "DATABASE_URL" %}
+  # While this host resolves (the postgres chart's Service), the Job first waits until the migration's DB URL, the
+  # env var databaseUrlEnv, connects: the operator creates the database and its roles after the primary. It fails
+  # after waitTimeoutSeconds; "" never waits.
   waitForPostgres: postgres-rw
+  databaseUrlEnv: {{ url_env }}
+  waitTimeoutSeconds: 300
   postgresImage: pgvector/pgvector:pg16
 {%- if service.db_app_role %}
-  # database.rls_app_role: the service connects as this role, which cannot bypass RLS. The postgres chart
-  # creates it; the migration runs as the owner (ownerSecret), then files/db-app-role.sh refreshes the role's
-  # grants. For owner credentials from elsewhere, set ownerSecret.enabled: false and provide the Secret
+  # database.rls_app_role: the service connects as this role, which cannot bypass RLS. The migration runs as the
+  # owner (ownerSecret), then files/db-app-role.sh grants the role. dbAppRoleManaged: the postgres chart creates
+  # the role and owns its password. Without that chart (RDS, ...) set it false: the script creates the role, as an
+  # owner with CREATEROLE, with ownerSecret's APP_DB_PASSWORD, the password of the service's DB URL. For owner
+  # credentials from elsewhere, set ownerSecret.enabled: false and provide the Secret
   # {{ service.name }}-migrate-owner.
   dbAppRole: {{ service.db_app_role }}
+  dbAppRoleManaged: {{ "true" if topology.helm_postgres else "false" }}
   ownerSecret:
     enabled: true
     stringData:
@@ -234,6 +261,9 @@ migration:
       DATABASE_URL: "postgresql://{{ service.db_name }}:CHANGEME@postgres-rw:5432/{{ service.db_name }}"
 {%- endif %}
       DB_OWNER_URL: "postgresql://{{ service.db_name }}:CHANGEME@postgres-rw:5432/{{ service.db_name }}"
+{%- if not topology.helm_postgres %}
+      APP_DB_PASSWORD: "CHANGEME"
+{%- endif %}
 {%- else %}
   dbAppRole: ""
 {%- endif %}

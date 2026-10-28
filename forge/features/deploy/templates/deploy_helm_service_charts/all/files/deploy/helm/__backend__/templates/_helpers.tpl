@@ -11,6 +11,19 @@
 {{- printf "%s-%s" (include "svc.fullname" .root | trunc (int (sub 62 (len .suffix))) | trimSuffix "-") .suffix -}}
 {{- end -}}
 
+{{/* secret.stringData plus a random value for each secret.generate key it leaves out, the installed release's value
+     when there is one. As JSON. */}}
+{{- define "svc.secretData" -}}
+{{- $data := deepCopy (.Values.secret.stringData | default dict) -}}
+{{- $existing := dig "data" (dict) (lookup "v1" "Secret" .Release.Namespace (include "svc.child" (dict "root" . "suffix" "secret"))) -}}
+{{- range $key := .Values.secret.generate | default list -}}
+{{- if not (index $data $key) -}}
+{{- $_ := set $data $key (index $existing $key | default "" | b64dec | default (randAlphaNum 64)) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $data -}}
+{{- end -}}
+
 {{- define "svc.selectorLabels" -}}
 app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -20,7 +33,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "svc.selectorLabels" . }}
 app.kubernetes.io/component: backend
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
@@ -28,7 +41,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "svc.podLabels" -}}
 {{ include "svc.selectorLabels" . }}
 app.kubernetes.io/component: backend
-app.kubernetes.io/part-of: {{ .Values.partOf }}
+app.kubernetes.io/part-of: {{ .Values.partOf | quote }}
 {{- with .Values.deployment.podLabels }}
 {{ toYaml . }}
 {{- end }}
@@ -40,7 +53,7 @@ app.kubernetes.io/part-of: {{ .Values.partOf }}
 app.kubernetes.io/name: {{ include "svc.child" (dict "root" .root "suffix" .suffix) }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
-app.kubernetes.io/part-of: {{ .root.Values.partOf }}
+app.kubernetes.io/part-of: {{ .root.Values.partOf | quote }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{- end -}}
 
@@ -127,8 +140,30 @@ dataFrom:
 {{- end }}
 {{- end -}}
 
-{{/* The migrate container: the migration command with the service's env from the hook copies, and, under
-     migration.dbAppRole, the owner's credentials over the runtime role's. */}}
+{{/* The migration's env sources: the service's env from the hook copies, and, under migration.dbAppRole, the
+     owner's credentials over the runtime role's. */}}
+{{- define "svc.migrateEnvFrom" -}}
+- configMapRef:
+    name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
+- secretRef:
+    {{- if or .Values.secret.enabled .Values.externalSecret.enabled }}
+    name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
+    {{- else }}
+    # secret.enabled false: the Secret of that name provided outside the chart
+    name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
+    {{- end }}
+    {{- /* an ExternalSecret's copy appears once synced: the pod waits for it */}}
+    optional: {{ not .Values.externalSecret.enabled }}
+{{- with .Values.container.envFrom }}
+{{ toYaml . }}
+{{- end }}
+{{- if .Values.migration.dbAppRole }}
+- secretRef:
+    name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+{{- end }}
+{{- end -}}
+
+{{/* The migrate container: the migration command with the migration's env. */}}
 {{- define "svc.migrateContainer" -}}
 {{- $m := .Values.migration -}}
 {{- if not $m.command -}}
@@ -139,24 +174,7 @@ dataFrom:
   imagePullPolicy: {{ .Values.image.pullPolicy }}
   command: {{ toJson $m.command }}
   envFrom:
-    - configMapRef:
-        name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
-    - secretRef:
-        {{- if or .Values.secret.enabled .Values.externalSecret.enabled }}
-        name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
-        {{- else }}
-        # secret.enabled false: the Secret of that name provided outside the chart
-        name: {{ include "svc.child" (dict "root" . "suffix" "secret") }}
-        {{- end }}
-        {{- /* an ExternalSecret's copy appears once synced: the pod waits for it */}}
-        optional: {{ not .Values.externalSecret.enabled }}
-    {{- with .Values.container.envFrom }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-    {{- if $m.dbAppRole }}
-    - secretRef:
-        name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
-    {{- end }}
+    {{- include "svc.migrateEnvFrom" . | nindent 4 }}
   securityContext:
     {{- toYaml .Values.securityContext | nindent 4 }}
 {{- end -}}

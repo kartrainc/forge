@@ -8,6 +8,9 @@ tests/test_deploy_helm_validation.py lints, renders and validates the charts.
 
 from __future__ import annotations
 
+import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -91,14 +94,26 @@ def _config(layout: str | None, **options: object) -> ProjectConfig:
     )
 
 
-@pytest.fixture(scope="module")
-def per_service() -> Path:
-    return generate(_config("per_service"), quiet=True, dry_run=True)
+@contextmanager
+def _generated(config: ProjectConfig) -> Iterator[Path]:
+    root = generate(config, quiet=True, dry_run=True)
+    try:
+        yield root
+    finally:
+        if root.parent.name.startswith("forge-dry-"):
+            shutil.rmtree(root.parent, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
-def umbrella() -> Path:
-    return generate(_config(None), quiet=True, dry_run=True)
+def per_service() -> Iterator[Path]:
+    with _generated(_config("per_service")) as root:
+        yield root
+
+
+@pytest.fixture(scope="module")
+def umbrella() -> Iterator[Path]:
+    with _generated(_config(None)) as root:
+        yield root
 
 
 def _values(path: Path) -> dict:
@@ -177,8 +192,11 @@ def _db_url(url: str, user: str) -> str:
     return f"{scheme}://{user}:CHANGEME@postgres-rw:5432/{location.split('/', 1)[1]}"
 
 
-def _assert_backends_carry_their_umbrella_workloads(per_service: Path, umbrella: Path) -> None:
+def _assert_backends_carry_their_umbrella_workloads(
+    config: ProjectConfig, per_service: Path, umbrella: Path
+) -> None:
     workloads = _values(umbrella / "deploy" / "helm" / "values.yaml")["workloads"]
+    topology = {be["name"]: be for be in compute_topology(config, resolve(config))["backends"]}
     for name, workload in workloads.items():
         chart = _values(per_service / "deploy" / "helm" / name / "values.yaml")
         assert list(chart) == _BACKEND_BLOCKS, name
@@ -189,16 +207,13 @@ def _assert_backends_carry_their_umbrella_workloads(per_service: Path, umbrella:
             "data": {k: v for k, v in workload["env"].items() if k not in secrets}
         }, name
         runtime = {k: _db_url(v, role or db) for k, v in (workload["secretEnv"] or {}).items()}
-        # and the Redis URLs the fragments default to, with the redis chart's password
+        # and the Redis URLs the backend's fragments default to, with the redis chart's password
         redis = {
-            k: v
-            for k, v in chart["secret"]["stringData"].items()
-            if v.startswith("redis://:CHANGEME@redis:6379/")
+            k: v.replace("redis://redis:6379", "redis://:CHANGEME@redis:6379")
+            for k, v in topology[name]["redis_env"].items()
         }
-        assert chart["secret"] == {
-            "enabled": True,
-            "stringData": {**runtime, **secrets, **redis},
-        }, name
+        assert chart["secret"]["enabled"] is True, name
+        assert chart["secret"]["stringData"] == {**runtime, **secrets, **redis}, name
         assert chart["image"] == {**workload["image"], "digest": ""}
         assert chart["deployment"]["replicas"] == workload["replicaCount"]
         assert chart["container"]["port"] == workload["containerPort"]
@@ -229,32 +244,37 @@ def _assert_backends_carry_their_umbrella_workloads(per_service: Path, umbrella:
 
 
 def test_a_backend_chart_carries_its_umbrella_workload(per_service: Path, umbrella: Path) -> None:
-    _assert_backends_carry_their_umbrella_workloads(per_service, umbrella)
+    _assert_backends_carry_their_umbrella_workloads(_config("per_service"), per_service, umbrella)
+
+
+def _capture(
+    layout: str | None, *, include_keycloak: bool = False, **options: object
+) -> ProjectConfig:
+    """A Node CRUD service beside a stateless http-service."""
+    opts: dict[str, object] = {"deploy.target": "kubernetes", **options}
+    if layout:
+        opts["deploy.helm_layout"] = layout
+    return ProjectConfig(
+        project_name="capture",
+        backends=[
+            BackendConfig(name="store", language=BackendLanguage.NODE, server_port=8010),
+            BackendConfig(
+                name="capture",
+                language=BackendLanguage.NODE,
+                app_template="http-service",
+                server_port=8011,
+            ),
+        ],
+        include_keycloak=include_keycloak,
+        options=opts,
+    )
 
 
 def test_a_backend_without_a_database_carries_its_umbrella_workload() -> None:
-    def gen(layout: str | None) -> Path:
-        options: dict[str, object] = {"deploy.target": "kubernetes"}
-        if layout:
-            options["deploy.helm_layout"] = layout
-        config = ProjectConfig(
-            project_name="capture",
-            backends=[
-                BackendConfig(name="store", language=BackendLanguage.NODE, server_port=8010),
-                BackendConfig(
-                    name="capture",
-                    language=BackendLanguage.NODE,
-                    app_template="http-service",
-                    server_port=8011,
-                ),
-            ],
-            options=options,
-        )
-        return generate(config, quiet=True, dry_run=True)
-
-    per_service = gen("per_service")
-    _assert_backends_carry_their_umbrella_workloads(per_service, gen(None))
-    capture = _values(per_service / "deploy" / "helm" / "capture" / "values.yaml")
+    config = _capture("per_service")
+    with _generated(config) as per_service, _generated(_capture(None)) as umbrella:
+        _assert_backends_carry_their_umbrella_workloads(config, per_service, umbrella)
+        capture = _values(per_service / "deploy" / "helm" / "capture" / "values.yaml")
     assert capture["secret"]["stringData"] == {}
     # without a frontend the API is served on the project's host, and without a gatekeeper only rewritten
     assert capture["ingressRoute"]["routes"] == [
@@ -265,15 +285,40 @@ def test_a_backend_without_a_database_carries_its_umbrella_workload() -> None:
     ]
 
 
+def test_a_backend_gets_the_redis_urls_of_the_fragments_it_receives() -> None:
+    redis: dict[str, Any] = {
+        "include_keycloak": True,
+        "async.task_queue": True,
+        "reliability.cache": "redis",
+    }
+    config = _capture("per_service", **redis)
+    topology = compute_topology(config, resolve(config))
+    assert {be["name"]: be["redis_env"] for be in topology["backends"]} == {
+        "store": {
+            "TASKIQ_BROKER_URL": "redis://redis:6379/2",
+            "CACHE_REDIS_URL": "redis://redis:6379/3",
+        },
+        # the http-service app template receives neither the task queue nor the cache
+        "capture": {},
+    }
+    with _generated(config) as per_service, _generated(_capture(None, **redis)) as umbrella:
+        _assert_backends_carry_their_umbrella_workloads(config, per_service, umbrella)
+        helm = per_service / "deploy" / "helm"
+        capture = _values(helm / "capture" / "values.yaml")
+        store = _values(helm / "store" / "values.yaml")
+    assert capture["secret"]["stringData"] == {}
+    assert store["secret"]["stringData"]["CACHE_REDIS_URL"] == "redis://:CHANGEME@redis:6379/3"
+
+
 def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
-    def gen(layout: str | None) -> Path:
+    def config(layout: str | None) -> ProjectConfig:
         options: dict[str, object] = {
             "deploy.target": "kubernetes",
             "database.multitenancy": "shared_rls",
         }
         if layout:
             options["deploy.helm_layout"] = layout
-        config = ProjectConfig(
+        return ProjectConfig(
             project_name="iso",
             backends=[
                 BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8200),
@@ -283,12 +328,15 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
             frontends=[],
             options=options,
         )
-        return generate(config, quiet=True, dry_run=True)
 
-    per_service = gen("per_service")
-    _assert_backends_carry_their_umbrella_workloads(per_service, gen(None))
-    helm = per_service / "deploy" / "helm"
-    api = _values(helm / "api" / "values.yaml")
+    with _generated(config("per_service")) as per_service, _generated(config(None)) as umbrella:
+        _assert_backends_carry_their_umbrella_workloads(
+            config("per_service"), per_service, umbrella
+        )
+        helm = per_service / "deploy" / "helm"
+        api = _values(helm / "api" / "values.yaml")
+        gosvc = _values(helm / "gosvc" / "values.yaml")
+        mail = _values(helm / "mail" / "values.yaml")
     assert api["migration"]["dbAppRole"] == "api_app"
     # the service connects as the runtime role, the migration as the owner
     assert api["secret"]["stringData"]["APP__DB__URL"] == (
@@ -297,8 +345,8 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
     assert api["migration"]["ownerSecret"]["stringData"]["DB_OWNER_URL"] == (
         "postgresql://api:CHANGEME@postgres-rw:5432/api"
     )
-    assert _values(helm / "gosvc" / "values.yaml")["migration"]["dbAppRole"] == "gosvc_app"
-    assert _values(helm / "mail" / "values.yaml")["migration"]["dbAppRole"] == ""
+    assert gosvc["migration"]["dbAppRole"] == "gosvc_app"
+    assert mail["migration"]["dbAppRole"] == ""
 
 
 def test_a_backend_of_a_project_without_a_database_has_no_database_values() -> None:
@@ -311,12 +359,14 @@ def test_a_backend_of_a_project_without_a_database_has_no_database_values() -> N
             "database.mode": "none",
         },
     )
-    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
-    api = _values(helm / "api" / "values.yaml")
+    with _generated(config) as root:
+        helm = root / "deploy" / "helm"
+        api = _values(helm / "api" / "values.yaml")
+        has_postgres = (helm / "postgres").exists()
     # as in compose: no DB URL and no migration, since no postgres chart runs beside it
     assert api["secret"]["stringData"] == {}
     assert api["migration"] == {"enabled": False, "command": []}
-    assert not (helm / "postgres").exists()
+    assert not has_postgres
 
 
 def test_a_frontend_chart_carries_its_umbrella_frontend(per_service: Path, umbrella: Path) -> None:
@@ -507,9 +557,12 @@ def test_the_s2s_client_secret_and_credentialed_urls_are_in_the_secret() -> None
             "infrastructure.event_bus": "postgres_notify",
         },
     )
-    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
-    for name in ("gateway", "orders"):
-        values = _values(helm / name / "values.yaml")
+    with _generated(config) as root:
+        charts = {
+            name: _values(root / "deploy" / "helm" / name / "values.yaml")
+            for name in ("gateway", "orders")
+        }
+    for name, values in charts.items():
         data, secret = values["configMap"]["data"], values["secret"]["stringData"]
         assert "GATEKEEPER_CLIENT_SECRET" not in data
         assert secret["GATEKEEPER_CLIENT_SECRET"]
@@ -520,7 +573,7 @@ def test_the_s2s_client_secret_and_credentialed_urls_are_in_the_secret() -> None
             secret["APP__EVENTS__BUS_URL"] == "postgresql://events:CHANGEME@postgres-rw:5432/events"
         )
         assert not [v for v in data.values() if "@" in v]
-    gateway = _values(helm / "gateway" / "values.yaml")["configMap"]["data"]
+    gateway = charts["gateway"]["configMap"]["data"]
     assert gateway["INTERNAL_SERVICE_URL_ORDERS"] == "http://orders:5020"
 
 
@@ -692,6 +745,10 @@ def test_platform_is_no_longer_a_reserved_name() -> None:
     resolve(_named_config([("platform", 8001)], None))
 
 
+# The event bus has its database only under the platform synthesis: service discovery between several backends.
+_SERVICE_BUS = {"infrastructure.event_bus": "postgres_notify", "auth.service_discovery": True}
+
+
 @pytest.mark.parametrize(
     "names,options,message",
     [
@@ -701,14 +758,28 @@ def test_platform_is_no_longer_a_reserved_name() -> None:
         (["cnpg-sync"], {}, "reserves"),
         (["streaming-replica"], {}, "reserves"),
         (["orders", "orders-app"], {"database.multitenancy": "shared_rls"}, "'orders_app'"),
-        (["events"], {"infrastructure.event_bus": "postgres_notify"}, "'events'"),
+        (["events", "api"], _SERVICE_BUS, "'events'"),
+        (["a" * 53], {"database.multitenancy": "shared_rls"}, "cut to 63 characters"),
     ],
-    ids=["cnpg-server", "cnpg-ca", "pg-prefix", "cnpg-prefix", "replica", "runtime-role", "bus"],
+    ids=[
+        "cnpg-server",
+        "cnpg-ca",
+        "pg-prefix",
+        "cnpg-prefix",
+        "replica",
+        "runtime-role",
+        "bus",
+        "secret-name-too-long",
+    ],
 )
 def test_postgres_role_names_must_not_collide(
     names: list[str], options: dict[str, object], message: str
 ) -> None:
-    config = _named_config([(n, 8001 + i) for i, n in enumerate(names)], None)
+    config = _named_config(
+        [(n, 8001 + i) for i, n in enumerate(names)],
+        None,
+        include_keycloak=bool(options.get("auth.service_discovery")),
+    )
     config.options.update(options)
     with pytest.raises(OptionsError, match=message):
         resolve(config)
@@ -719,19 +790,42 @@ def test_postgres_role_names_must_not_collide(
     [
         (["events"], {}),
         (["orders", "orders-app"], {}),
-        (["api"], {"infrastructure.event_bus": "postgres_notify"}),
+        (["api", "orders"], _SERVICE_BUS),
+        (["events"], {"infrastructure.event_bus": "postgres_notify"}),
+        (["events", "api"], {"infrastructure.event_bus": "postgres_notify"}),
+        (["a" * 53], {}),
     ],
-    ids=["events-without-bus", "app-suffix-without-runtime-role", "bus-alone"],
+    ids=[
+        "events-without-bus",
+        "app-suffix-without-runtime-role",
+        "bus-alone",
+        "events-beside-the-bus-of-one-backend",
+        "events-beside-the-bus-without-service-discovery",
+        "longest-name-without-runtime-role",
+    ],
 )
 def test_postgres_role_names_that_do_not_collide(
     names: list[str], options: dict[str, object]
 ) -> None:
-    config = _named_config([(n, 8001 + i) for i, n in enumerate(names)], None)
+    config = _named_config(
+        [(n, 8001 + i) for i, n in enumerate(names)],
+        None,
+        include_keycloak=bool(options.get("auth.service_discovery")),
+    )
     config.options.update(options)
     resolve(config)
 
 
-def _named_config(backends: list, extra: str | None) -> ProjectConfig:
+def test_a_further_frontend_cannot_take_the_keycloak_host() -> None:
+    # the keycloak chart serves auth.<host>, a further frontend <name>.<host>
+    with pytest.raises(OptionsError, match="frontend 'auth' .* keycloak chart"):
+        resolve(_named_config([("api", 8001)], "auth", include_keycloak=True))
+    resolve(_named_config([("api", 8001)], "auth"))
+
+
+def _named_config(
+    backends: list, extra: str | None, *, include_keycloak: bool = False
+) -> ProjectConfig:
     frontends = [FrontendConfig(framework=FrontendFramework.VUE, project_name="shop")]
     if extra:
         frontends.append(
@@ -750,6 +844,7 @@ def _named_config(backends: list, extra: str | None) -> ProjectConfig:
             for n, p in backends
         ],
         frontends=frontends,
+        include_keycloak=include_keycloak,
         options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"},
     )
 
@@ -769,8 +864,54 @@ def test_the_redis_urls_of_a_backend_carry_the_password() -> None:
     expected = compute_topology(config, resolve(config))["backends"][0]["redis_env"]
     assert expected["TASKIQ_BROKER_URL"] == "redis://redis:6379/2"
     assert expected["CACHE_REDIS_URL"] == "redis://redis:6379/3"
-    values = _values(generate(config, quiet=True, dry_run=True) / "deploy/helm/api/values.yaml")
+    with _generated(config) as root:
+        values = _values(root / "deploy/helm/api/values.yaml")
     secret, data = values["secret"]["stringData"], values["configMap"]["data"]
     for name, url in expected.items():
         assert secret[name] == url.replace("redis://", "redis://:CHANGEME@"), name
         assert name not in data
+
+
+def test_a_tenant_management_service_gets_the_redis_and_keycloak_admin_access() -> None:
+    config = ProjectConfig(
+        project_name="saas",
+        backends=[
+            BackendConfig(
+                name="tenants",
+                language=BackendLanguage.PYTHON,
+                app_template="tenant-management-service",
+                server_port=8001,
+            ),
+            BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8002),
+        ],
+        include_keycloak=True,
+        options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"},
+    )
+    with _generated(config) as root:
+        helm = root / "deploy" / "helm"
+        tenants, api, redis, keycloak = (
+            _values(helm / name / "values.yaml") for name in ("tenants", "api", "redis", "keycloak")
+        )
+
+    def tms(env: dict[str, str]) -> dict[str, str]:
+        return {k: v for k, v in env.items() if k.startswith("APP__TMS__")}
+
+    # its production.yaml reads ${REDIS_URL} and ${KEYCLOAK_ADMIN_*}, which APP__TMS__* override: the redis and
+    # keycloak charts' Services and credentials, the credentials in the Secret
+    assert tms(tenants["secret"]["stringData"]) == {
+        "APP__TMS__REDIS_URL": f"redis://:{redis['auth']['password']}@redis:6379",
+        "APP__TMS__KEYCLOAK_ADMIN_PASSWORD": keycloak["admin"]["password"],
+    }
+    assert tms(tenants["configMap"]["data"]) == {
+        "APP__TMS__KEYCLOAK_ADMIN_URL": "http://keycloak:8080",
+        "APP__TMS__KEYCLOAK_ADMIN_USER": keycloak["admin"]["username"],
+    }
+    assert not tms({**api["secret"]["stringData"], **api["configMap"]["data"]})
+    # without the charts there is nothing to point it at
+    bare = compute_topology(
+        ProjectConfig(project_name="saas", backends=config.backends, options=config.options)
+    )
+    assert [(be["redis_env"], be["keycloak_admin_env"]) for be in bare["backends"]] == [
+        ({}, {}),
+        ({}, {}),
+    ]

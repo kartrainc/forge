@@ -1,8 +1,9 @@
 """deploy.helm_layout=per_service: the keycloak and gatekeeper charts under helm.
 
 helm lint --strict, helm template and (when installed) kubeconform with the default values and
-ci/everything-values.yaml, then what the manifests do: the realm import, the admin console kept off the public route,
-production mode's hostname, the gatekeeper's Middlewares, signing keys, S2S registry, credentials and image digests.
+ci/everything-values.yaml, then what the manifests do: the realm import (a Secret), the admin console kept off the
+public route, production mode's hostname, users and credentials, the Middlewares every route names, the gatekeeper's
+signing keys and rollout, S2S registry, credentials, Fernet keys and image digests.
 """
 
 from __future__ import annotations
@@ -53,7 +54,10 @@ def helm() -> Iterator[Path]:
     root = generate(
         ProjectConfig(
             project_name="shop",
-            backends=[BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8001)],
+            backends=[
+                BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=8001),
+                BackendConfig(name="billing", language=BackendLanguage.PYTHON, server_port=8002),
+            ],
             frontends=[
                 FrontendConfig(framework=FrontendFramework.VUE, project_name="shop"),
                 FrontendConfig(
@@ -66,7 +70,11 @@ def helm() -> Iterator[Path]:
                 ),
             ],
             include_keycloak=True,
-            options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"},
+            options={
+                "deploy.target": "kubernetes",
+                "deploy.helm_layout": "per_service",
+                "auth.service_discovery": True,
+            },
         ),
         quiet=True,
         dry_run=True,
@@ -115,8 +123,12 @@ def _env(container: dict) -> dict[str, dict]:
     return {e["name"]: e for e in container["env"]}
 
 
+def _realm_text(docs: list[dict]) -> str:
+    return _get(docs, "Secret", "keycloak-realm")["stringData"]["keycloak-realm.json"]
+
+
 def _realm(docs: list[dict]) -> dict:
-    return json.loads(_get(docs, "ConfigMap", "keycloak-realm")["data"]["keycloak-realm.json"])
+    return json.loads(_realm_text(docs))
 
 
 def _client(realm: dict, client_id: str) -> dict:
@@ -173,8 +185,7 @@ def test_pods_run_restricted(helm: Path) -> None:
 
 def test_the_realm_is_imported_with_the_app_hosts(helm: Path) -> None:
     docs = _render(helm / "keycloak")
-    text = _get(docs, "ConfigMap", "keycloak-realm")["data"]["keycloak-realm.json"]
-    assert "__APP_HOST" not in text
+    assert "__APP_HOST" not in _realm_text(docs)
     realm = _realm(docs)
     client = _client(realm, "gatekeeper")
     assert {
@@ -197,12 +208,23 @@ def test_the_realm_is_imported_with_the_app_hosts(helm: Path) -> None:
     assert pod["volumes"] == [
         {
             "name": "realm",
-            "configMap": {
-                "name": "keycloak-realm",
+            "secret": {
+                "secretName": "keycloak-realm",
                 "items": [{"key": "keycloak-realm.json", "path": f"{realm['realm']}-realm.json"}],
             },
         }
     ]
+    # the pods roll when the realm changes
+    annotations = _get(docs, "Deployment", "keycloak")["spec"]["template"]["metadata"][
+        "annotations"
+    ]
+    changed = _render(helm / "keycloak", "--set", "realm.clientSecrets.gatekeeper=other")
+    assert (
+        _get(changed, "Deployment", "keycloak")["spec"]["template"]["metadata"]["annotations"][
+            "checksum/realm"
+        ]
+        != annotations["checksum/realm"]
+    )
 
 
 def test_the_realm_follows_the_host_values(helm: Path) -> None:
@@ -223,6 +245,27 @@ def test_the_realm_follows_the_host_values(helm: Path) -> None:
     assert client["secret"] == "s3cret"
     err = _refused(chart, "--set", "realm.frontendHosts=null")
     assert "realm.frontendHosts has no host for the placeholder __APP_HOST_admin__" in err
+
+
+@pytest.mark.parametrize("values", ["default", "everything"])
+def test_no_configmap_holds_a_credential(helm: Path, values: str) -> None:
+    chart = helm / "keycloak"
+    files = [chart / "values.yaml"]
+    if values == "everything":
+        files.append(chart / "ci" / "everything-values.yaml")
+    source = json.loads((chart / "files" / "keycloak-realm.json").read_text(encoding="utf-8"))
+    # the svc-<backend> S2S clients' and the gatekeeper's, the dev user's password, the overrides
+    credentials = {c["secret"] for c in source["clients"] if c.get("secret")}
+    assert {"svc-api", "svc-billing"} <= {c["clientId"] for c in source["clients"]}
+    credentials |= {c["value"] for u in source["users"] for c in u.get("credentials", [])}
+    for path in files:
+        overrides = yaml.safe_load(path.read_text(encoding="utf-8")).get("realm", {})
+        credentials |= set(overrides.get("clientSecrets", {}).values())
+    docs = _render(chart, *[arg for path in files[1:] for arg in ("-f", str(path))])
+    for cm in (d for d in docs if d["kind"] == "ConfigMap"):
+        text = json.dumps(cm.get("data") or {})
+        assert not [c for c in credentials if c in text], cm["metadata"]["name"]
+    assert _client(_realm(docs), "svc-api")["secret"] in credentials
 
 
 def test_without_a_realm_file_keycloak_starts_empty(helm: Path, tmp_path: Path) -> None:
@@ -262,23 +305,94 @@ def test_the_admin_console_stays_off_the_public_route(helm: Path) -> None:
         assert not admin.search(public), public
 
 
+_PRODUCTION = (
+    "--set",
+    "mode=production",
+    "--set",
+    "hostname=https://auth.example.com",
+    "--set",
+    "admin.password=adm1n-pw",
+    "--set",
+    "realm.clientSecrets.gatekeeper=gk-s3cret",
+)
+
+
 def test_production_mode_needs_a_hostname(helm: Path) -> None:
     chart = helm / "keycloak"
-    assert "hostname is required in mode production" in _refused(chart, "--set", "mode=production")
-    assert "mode must be development or production" in _refused(chart, "--set", "mode=prod")
-    container = _container(
-        _render(chart, "--set", "mode=production", "--set", "hostname=https://auth.example.com"),
-        "keycloak",
+    assert "hostname is required in mode production" in _refused(
+        chart, "--set", "mode=production", "--set", "hostname="
     )
+    assert "mode must be development or production" in _refused(chart, "--set", "mode=prod")
+    container = _container(_render(chart, *_PRODUCTION), "keycloak")
     assert container["args"] == ["start", "--import-realm"]
     env = _env(container)
     assert env["KC_HOSTNAME"]["value"] == "https://auth.example.com"
     assert "KC_HOSTNAME_STRICT" not in env
     env = _env(_container(_render(chart), "keycloak"))
+    assert env["KC_HOSTNAME"]["value"] == "https://auth.shop.example.com"
+    env = _env(_container(_render(chart, "--set", "hostname="), "keycloak"))
     assert env["KC_HOSTNAME_STRICT"]["value"] == "false"
     assert "KC_HOSTNAME" not in env
     # start-dev keeps sign-in state in the pod
     assert "run one replica" in _refused(chart, "--set", "replicas=2")
+
+
+def test_production_mode_imports_only_the_service_accounts(helm: Path) -> None:
+    chart = helm / "keycloak"
+    dev = _realm(_render(chart))
+    assert "dev@localhost" in {u["username"] for u in dev["users"]}
+    assert dev["sslRequired"] == "none"
+    realm = _realm(_render(chart, *_PRODUCTION))
+    assert realm["users"]
+    assert all(u.get("serviceAccountClientId") for u in realm["users"])
+    assert {u["username"] for u in realm["users"]} == {
+        u["username"] for u in dev["users"] if u.get("serviceAccountClientId")
+    }
+    assert realm["sslRequired"] == "external"
+    # no organization keeps a member the import no longer creates
+    for org in realm.get("organizations", []):
+        assert not [m for m in org.get("members", []) if m["username"] == "dev@localhost"]
+    assert "devpass" not in json.dumps(realm)
+    assert {c["clientId"] for c in realm["clients"]} == {c["clientId"] for c in dev["clients"]}
+
+
+@pytest.mark.parametrize(
+    "override,message",
+    [
+        ("admin.password=CHANGEME", "mode production needs admin.password"),
+        # refused in every mode
+        ("admin.password=", "admin.password is required"),
+        (
+            "realm.clientSecrets.gatekeeper=CHANGEME",
+            "mode production needs realm.clientSecrets.gatekeeper",
+        ),
+        ("realm.clientSecrets.gatekeeper=", "mode production needs realm.clientSecrets.gatekeeper"),
+        (
+            "realm.clientSecrets.svc-api=CHANGEME",
+            "mode production needs realm.clientSecrets.svc-api",
+        ),
+    ],
+)
+def test_production_mode_refuses_placeholder_credentials(
+    helm: Path, override: str, message: str
+) -> None:
+    err = _refused(helm / "keycloak", *_PRODUCTION, "--set", override)
+    assert f"keycloak: {message}" in err
+
+
+def test_production_mode_takes_the_admin_from_an_existing_secret(helm: Path) -> None:
+    docs = _render(
+        helm / "keycloak",
+        *_PRODUCTION,
+        "--set",
+        "admin.password=CHANGEME",
+        "--set",
+        "admin.existingSecret=keycloak-bootstrap",
+    )
+    assert ("Secret", "keycloak-admin") not in _kinds(docs)
+    # development mode keeps the placeholders
+    admin = _get(_render(helm / "keycloak"), "Secret", "keycloak-admin")
+    assert admin["stringData"]["password"] == "CHANGEME"
 
 
 def test_keycloak_takes_its_database_and_admin_from_secrets(helm: Path) -> None:
@@ -296,7 +410,7 @@ def test_keycloak_takes_its_database_and_admin_from_secrets(helm: Path) -> None:
         "KC_METRICS_ENABLED": "true",
         "KC_HTTP_ENABLED": "true",
         "KC_PROXY_HEADERS": "xforwarded",
-        "KC_HOSTNAME_STRICT": "false",
+        "KC_HOSTNAME": "https://auth.shop.example.com",
     }
     assert env["KC_DB_PASSWORD"]["valueFrom"] == {
         "secretKeyRef": {"name": "postgres-keycloak", "key": "password"}
@@ -352,7 +466,7 @@ def test_the_realm_sync_hook(helm: Path) -> None:
     assert env["KC_ADMIN_PASSWORD"]["valueFrom"] == {
         "secretKeyRef": {"name": "keycloak-admin", "key": "password"}
     }
-    assert pod["spec"]["volumes"] == [{"name": "realm", "configMap": {"name": "keycloak-realm"}}]
+    assert pod["spec"]["volumes"] == [{"name": "realm", "secret": {"secretName": "keycloak-realm"}}]
     # the gatekeeper image's uid
     assert pod["spec"]["securityContext"]["runAsUser"] == 10001
 
@@ -366,8 +480,9 @@ def _compose_auth_response_headers() -> list[str]:
 
 def test_the_auth_middlewares(helm: Path) -> None:
     chart = helm / "gatekeeper"
-    assert not [d for d in _render(chart) if d["kind"] == "Middleware"]
-    docs = _render(chart, "--set", "authMiddlewares.enabled=true", namespace="platform")
+    off = _render(chart, "--set", "authMiddlewares.enabled=false")
+    assert not [d for d in off if d["kind"] == "Middleware"]
+    docs = _render(chart, namespace="platform")
     middlewares = {d["metadata"]["name"]: d["spec"] for d in docs if d["kind"] == "Middleware"}
     assert set(middlewares) == {
         "gatekeeper-auth",
@@ -391,6 +506,31 @@ def test_the_auth_middlewares(helm: Path) -> None:
     assert middlewares["gatekeeper-untrusted-headers"] == {
         "headers": {"customRequestHeaders": {"Forwarded": "", **dict.fromkeys(identity, "")}}
     }
+
+
+def test_every_middleware_a_route_names_is_rendered(helm: Path) -> None:
+    namespace = "apps"
+    rendered: set[tuple[str, str]] = set()
+    referenced: dict[tuple[str, str], str] = {}
+    routers: set[str] = set()
+    for chart in sorted(p for p in helm.iterdir() if (p / "Chart.yaml").is_file()):
+        for doc in _render(chart, "--set", "ingressRoute.enabled=true", namespace=namespace):
+            meta = doc["metadata"]
+            if doc["kind"] == "Middleware":
+                rendered.add((meta.get("namespace", namespace), meta["name"]))
+            elif doc["kind"] == "IngressRoute":
+                routers.add(chart.name)
+                for route in doc["spec"]["routes"]:
+                    for ref in route.get("middlewares") or []:
+                        key = (ref.get("namespace", meta.get("namespace", namespace)), ref["name"])
+                        referenced[key] = chart.name
+    assert {"api", "billing", "frontend", "admin", "keycloak", "gatekeeper"} <= routers
+    assert {
+        "gatekeeper-untrusted-headers",
+        "gatekeeper-auth",
+        "gatekeeper-strip-api-key",
+    } <= {name for _, name in referenced}
+    assert {ref: chart for ref, chart in referenced.items() if ref not in rendered} == {}
 
 
 def test_the_browser_endpoints_are_routed_on_the_app_hosts(helm: Path) -> None:
@@ -449,6 +589,23 @@ def test_signing_keys_from_an_existing_secret_replace_the_keygen(helm: Path) -> 
         "secret": {"secretName": "gatekeeper-keys"},
     }
     assert mount in pod["containers"][0]["volumeMounts"]
+
+
+def test_generated_signing_keys_never_run_two_pods_at_once(helm: Path) -> None:
+    chart = helm / "gatekeeper"
+
+    def strategy(*args: str) -> dict:
+        return _get(_render(chart, *args), "Deployment", "gatekeeper")["spec"]["strategy"]
+
+    # two pods with different keys behind one Service: a token from one fails on the other
+    assert strategy() == {"type": "Recreate"}
+    assert strategy("--set", "deployment.strategy.type=RollingUpdate") == {"type": "Recreate"}
+    configured = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))["deployment"][
+        "strategy"
+    ]
+    assert configured["type"] == "RollingUpdate"
+    assert strategy("--set", "signingKeys.existingSecret=gatekeeper-keys") == configured
+    assert strategy("--set", "signingKeys.generate=false") == configured
 
 
 def test_the_service_registry_is_a_mounted_secret(helm: Path, tmp_path: Path) -> None:
@@ -518,6 +675,61 @@ def test_credentials_stay_out_of_the_configmap(helm: Path) -> None:
     )
 
 
+_FERNET_KEYS = ("SESSION_FERNET_KEY", "DELEGATION_GRANT_FERNET_KEY")
+
+
+def _compose_fernet_keys() -> set[str]:
+    environment = yaml.safe_load(_GATEKEEPER_COMPOSE.read_text(encoding="utf-8"))["service"][
+        "environment"
+    ]
+    return {environment[k] for k in _FERNET_KEYS}
+
+
+def _fernet_keys(docs: list[dict]) -> dict[str, str]:
+    data = _get(docs, "Secret", "gatekeeper-secret")["stringData"]
+    return {k: data[k] for k in _FERNET_KEYS}
+
+
+def test_the_fernet_keys_are_generated_at_install(helm: Path) -> None:
+    chart = helm / "gatekeeper"
+    dev = _compose_fernet_keys()
+    assert len(dev) == 2
+    assert not [k for k in dev if k in (chart / "values.yaml").read_text(encoding="utf-8")]
+    docs = _render(chart)
+    keys = _fernet_keys(docs)
+    assert not set(keys.values()) & dev
+    for key in keys.values():
+        assert re.fullmatch(r"[A-Za-z0-9_-]{43}=", key), key
+        assert len(base64.urlsafe_b64decode(key)) == 32
+    assert len(set(keys.values())) == 2
+    again = _render(chart)
+    assert not set(_fernet_keys(again).values()) & set(keys.values())
+    # the generated keys never roll the pods: a running release keeps them
+    assert (
+        _get(docs, "Deployment", "gatekeeper")["spec"]["template"]["metadata"]["annotations"]
+        == _get(again, "Deployment", "gatekeeper")["spec"]["template"]["metadata"]["annotations"]
+    )
+
+
+def test_a_given_fernet_key_is_kept(helm: Path) -> None:
+    chart = helm / "gatekeeper"
+    key = base64.urlsafe_b64encode(bytes(range(32))).decode()
+    keys = _fernet_keys(
+        _render(chart, "--set-string", f"secret.stringData.SESSION_FERNET_KEY={key}")
+    )
+    assert keys["SESSION_FERNET_KEY"] == key
+    assert keys["DELEGATION_GRANT_FERNET_KEY"] != key
+    err = _refused(chart, "--set", "secret.stringData.DELEGATION_GRANT_FERNET_KEY=CHANGEME")
+    assert "secret.stringData.DELEGATION_GRANT_FERNET_KEY must be a Fernet key" in err
+
+
+@pytest.mark.parametrize("name", _FERNET_KEYS)
+def test_the_compose_dev_fernet_keys_are_refused(helm: Path, name: str) -> None:
+    for dev in sorted(_compose_fernet_keys()):
+        err = _refused(helm / "gatekeeper", "--set-string", f"secret.stringData.{name}={dev}")
+        assert f"secret.stringData.{name} is a compose dev key" in err
+
+
 def test_an_external_secret_replaces_the_secret(helm: Path) -> None:
     chart = helm / "gatekeeper"
     args = (
@@ -531,6 +743,8 @@ def test_an_external_secret_replaces_the_secret(helm: Path) -> None:
     assert "both write the Secret gatekeeper-secret" in _refused(chart, *args)
     docs = _render(chart, *args, "--set", "secret.enabled=false")
     assert ("Secret", "gatekeeper-secret") not in _kinds(docs)
+    # no key generated: the ExternalSecret brings them
+    assert "FERNET" not in json.dumps(docs)
     external = _get(docs, "ExternalSecret", "gatekeeper-secret")
     assert external["apiVersion"] == "external-secrets.io/v1"
     assert external["spec"]["target"]["name"] == "gatekeeper-secret"

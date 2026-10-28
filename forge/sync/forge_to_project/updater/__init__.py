@@ -243,6 +243,10 @@ def _update_locked(
         project_name=data.project_name or project_root.name,
         backends=resolver_backends,
         frontends=[fc for fc, _ in recorded],
+        # The manifest does not record it; generation renders the realm only
+        # with Keycloak. Without it the resolver would turn the auth stack off
+        # and this update would uninstall it.
+        include_keycloak=(project_root / "deploy" / "infra" / "keycloak-realm.json").is_file(),
         options=dict(data.options),
         # Carry origins through so the resolver can distinguish user-set
         # options from defaulted-but-persisted ones. Without this, a
@@ -598,6 +602,16 @@ def _update_locked(
             else None
         ),
     )
+    # As generation does: the synthesized S2S registry replaces the gatekeeper
+    # fragment's baseline just re-applied, then the Helm charts get the realm,
+    # the runtime-role script and the registry.
+    from forge.docker_manager import render_service_registry  # noqa: PLC0415
+    from forge.generator import copy_helm_chart_files  # noqa: PLC0415
+
+    registry_path = render_service_registry(config, _synthesis, project_root)
+    if registry_path is not None:
+        collector.record(registry_path, origin="base-template")
+    copy_helm_chart_files(config, plan.option_values, project_root, collector)
 
     # Re-run schema-driven codegen so template/codegen changes reach existing
     # projects on ``forge --update`` (historically codegen ran only at fresh
