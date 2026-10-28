@@ -18,8 +18,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
 import forge
 from forge.config import BackendConfig, BackendLanguage, FrontendConfig, ProjectConfig
@@ -619,14 +617,24 @@ def _signing_key(docs: list[dict]) -> str:
     return base64.b64decode(secret["data"]["active.pem"]).decode()
 
 
+def _assert_p256(pem: str) -> None:
+    try:  # not a forge dependency: CI's plain test environments lack it
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+    except ImportError:
+        return
+    key = serialization.load_pem_private_key(pem.encode(), password=None)
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    assert isinstance(key.curve, ec.SECP256R1)
+
+
 def test_the_signing_key_is_a_chart_secret_every_replica_mounts(helm: Path) -> None:
     chart = helm / "gatekeeper"
     docs = _render(chart)
     pem = _signing_key(docs)
     # what the gatekeeper's FileKeyRing loads: an unencrypted ECDSA P-256 private key
-    key = serialization.load_pem_private_key(pem.encode(), password=None)
-    assert isinstance(key, ec.EllipticCurvePrivateKey)
-    assert isinstance(key.curve, ec.SECP256R1)
+    assert pem.startswith("-----BEGIN EC PRIVATE KEY-----")
+    _assert_p256(pem)
     pod = _pod(docs, "gatekeeper")
     assert "initContainers" not in pod
     volumes = {v["name"]: v for v in pod["volumes"]}
