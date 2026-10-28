@@ -1,0 +1,80 @@
+{{- /* The migration's own copies of the env: hooks at weight -10, before the Job (-5), so they exist on a first install,
+       deleted once every hook of the release succeeded. A failed migration leaves the runtime objects untouched. */ -}}
+{{- if .Values.migration.enabled }}
+{{- $m := .Values.migration }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-config") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
+{{- with .Values.configMap.data }}
+data:
+  {{- range $k, $v := . }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.secret.enabled .Values.secret.stringData }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
+type: Opaque
+stringData:
+  {{- range $k, $v := .Values.secret.stringData }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- if .Values.externalSecret.enabled }}
+---
+{{- /* the release's ExternalSecret only exists after the pre-install hooks: the migration syncs its own copy */}}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-secret") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
+spec:
+  {{- include "svc.externalSecretSpec" (dict "root" . "target" "migrate-secret") | nindent 2 }}
+{{- end }}
+{{- if $m.dbAppRole }}
+{{- if ($m.ownerSecret | default dict).enabled }}
+---
+{{- /* the owner's credentials: the migration and the role script use them, the service never does */}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
+type: Opaque
+stringData:
+  {{- range $k, $v := $m.ownerSecret.stringData }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "db-app-role") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-10" | nindent 4 }}
+data:
+  db-app-role.sh: |
+{{ required "files/db-app-role.sh is missing" (.Files.Get "files/db-app-role.sh") | indent 4 }}
+{{- end }}
+{{- end }}

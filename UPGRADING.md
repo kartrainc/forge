@@ -6,26 +6,29 @@ This document lists breaking changes per version and the migration steps for eac
 
 ### Per-service Helm charts (optional)
 
-`deploy.helm_layout: per_service` replaces the umbrella chart with one chart per service and `deploy/helm/platform/`.
-To switch an existing project:
+`deploy.helm_layout: per_service` replaces the umbrella chart with one chart per component: one per backend and
+per frontend, plus `postgres`, `redis`, `keycloak` and `gatekeeper` when the project has them. The cluster needs the
+CloudNativePG operator and Traefik (their CRDs). To switch an existing project:
 
 1. Set `"deploy.helm_layout" = "per_service"` under `[forge.options]` in `forge.toml` and `"deploy.helm_layout" =
    "user"` under `[forge.option_origins]`, then update: the update takes options from `forge.toml`, not from the
-   recipe. The new charts appear under `deploy/helm/<service>/` and `deploy/helm/platform/`;
-   the umbrella's files (`deploy/helm/Chart.yaml`, `values.yaml`, `values-prod.yaml.example`, `templates/`, `files/`)
-   stay on disk, no longer recorded. Delete them once nothing installs them.
-2. Move environment values: what was under `workloads.<service>` goes to the top level of that service's chart, the
-   primary `frontend` and each `frontends.<name>` to their chart, `ingress` and `infra` to the platform's. Edits you
+   recipe. The new charts appear under `deploy/helm/<chart>/`; the umbrella's files (`deploy/helm/Chart.yaml`,
+   `values.yaml`, `values-prod.yaml.example`, `templates/`, `files/`) stay on disk, no longer recorded. Delete them
+   once nothing installs them.
+2. Move environment values. For `workloads.<service>`: `env` goes to that chart's `configMap.data`, `secretEnv` to
+   `secret.stringData`, `replicaCount` to `deployment.replicas`, `containerPort` to `container.port`,
+   `migrateCommand` and `hasMigrations` to `migration`. The frontends go to their charts, `infra` to the `postgres`,
+   `redis`, `keycloak` and `gatekeeper` charts, and the umbrella's Ingress to each chart's `ingressRoute`. Edits you
    made to the umbrella's templates are not carried over: repeat them in the new charts, which are scaffold too.
-3. Install every service as a release named after it (`helm upgrade --install <service> deploy/helm/<service>`),
-   beside the umbrella: its objects are `<release>-<service>`, the new ones `<service>`, and the services use its
-   in-cluster infrastructure meanwhile. A Service now listens on the service's port, not 80: update anything that
-   called `<release>-<service>:80`.
-4. Uninstall the umbrella, then install `platform`. The two claim the same Ingress hosts and paths and, with
-   `infra.inCluster`, the same `postgres`, `redis`, `keycloak` and `gatekeeper`, so they cannot run together: the
-   routes are down until `platform` is ready. In-cluster Postgres keeps its data, since the `data-postgres-0` volume
-   outlives the umbrella and the platform's `postgres` mounts it again. From then on `make helm-install` installs
-   `platform`, then every service.
+3. The services now reach Postgres at `postgres-rw` (CloudNativePG), as an owner role named after the database for
+   migrations and, under `database.rls_app_role`, a runtime role for serving, which the postgres chart creates. Redis
+   requires a password: set it in the redis chart and in every service's Redis URLs. Data in the umbrella's
+   in-cluster Postgres does not move by itself: dump it and restore it into the new cluster.
+4. Uninstall the umbrella, then run `make helm-install`, which installs every chart in dependency order. With
+   `infra.inCluster` the two claim the same `redis`, `keycloak` and `gatekeeper` names, and both route the same
+   hosts, so they cannot run together. A Service now listens on the service's port, not 80, and a frontend's on
+   8080: update anything that called `<release>-<service>:80`.
+
 ### Tenant isolation and Keycloak strategies (unreleased)
 
 The new safeguards are options with safe defaults. Set them in `forge.toml` to

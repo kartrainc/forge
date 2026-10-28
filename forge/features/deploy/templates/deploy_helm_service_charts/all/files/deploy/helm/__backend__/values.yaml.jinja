@@ -1,3 +1,40 @@
+{#- Generation-time data: whether this backend has a database, its DB user, the hosts of its routes, and which of its
+    S2S values are credentials. -#}
+{%- macro q(v) -%}"{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"{%- endmacro -%}
+{%- set uses_db = (service.uses_database | default(true)) and topology.database_mode != "none" -%}
+{%- set db_user = service.db_app_role or service.db_name -%}
+{%- set base_host = topology.project_slug | replace("_", "-") ~ ".example.com" -%}
+{%- set hosts = [] -%}
+{%- for fe in topology.frontends -%}
+{%- set _ = hosts.append(fe.host or (base_host if fe.primary else fe.name ~ "." ~ base_host)) -%}
+{%- endfor -%}
+{%- if not hosts -%}{%- set _ = hosts.append(base_host) -%}{%- endif -%}
+{%- set host_rules = [] -%}
+{%- for h in hosts -%}{%- set _ = host_rules.append("Host(`" ~ h ~ "`)") -%}{%- endfor -%}
+{%- set host_rule = host_rules[0] if host_rules | length == 1 else "(" ~ host_rules | join(" || ") ~ ")" -%}
+{%- set secret_env = {} -%}
+{%- set plain_env = {} -%}
+{%- if uses_db -%}
+{%- set url = db_user ~ ":CHANGEME@postgres-rw:5432/" ~ service.db_name -%}
+{%- if service.language == "python" -%}
+{%- set _ = secret_env.update({"APP__DB__URL": "postgresql+asyncpg://" ~ url}) -%}
+{%- elif service.language == "node" -%}
+{%- set _ = secret_env.update({"APP__DB__URL": "postgresql://" ~ url, "DATABASE_URL": "postgresql://" ~ url}) -%}
+{%- elif service.language in ("rust", "go") -%}
+{%- set _ = secret_env.update({"DATABASE_URL": "postgresql://" ~ url}) -%}
+{%- endif -%}
+{%- endif -%}
+{%- for k, v in service.synthesis_env.items() -%}
+{%- if k.endswith("_SECRET") or ("://" in v and "@" in v) -%}
+{%- set _ = secret_env.update({k: v | replace("://postgres:postgres@postgres:5432/", "://events:CHANGEME@postgres-rw:5432/")}) -%}
+{%- else -%}
+{%- set _ = plain_env.update({k: v}) -%}
+{%- endif -%}
+{%- endfor -%}
+{#- the Redis URLs the backend's fragments default to, with the redis chart's password -#}
+{%- for k, v in (service.redis_env | default({})).items() -%}
+{%- set _ = secret_env.update({k: v | replace("redis://redis:6379", "redis://:CHANGEME@redis:6379")}) -%}
+{%- endfor -%}
 # Values of the {{ service.name }} chart, one service of {{ topology.project_slug }}.
 #
 # THIS FILE IS FORGE-OWNED. It is re-rendered from the project's deployment
@@ -8,150 +45,247 @@
 #     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
 
 partOf: {{ topology.project_slug | replace("_", "-") }}
-language: {{ service.language }}
+
 image:
   repository: ghcr.io/example/{{ topology.project_slug }}-{{ service.name }}
   tag: latest
+  # sha256:<64 hex>; wins over the tag
+  digest: ""
   pullPolicy: IfNotPresent
-replicaCount: 2
-containerPort: {{ service.port }}
-{%- if service.uses_database | default(true) %}
-# The Postgres database this backend owns (matches the db_name in the DB URL
-# below); the platform chart's in-cluster Postgres creates it (infra.databases).
-dbName: {{ service.db_name }}
+imagePullSecrets: []
+imagePolicy:
+  # refuse to render without image.digest (and a pinned migration.postgresImage and test.image)
+  requireDigest: false
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+  automountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+deployment:
+  # unused while autoscaling.enabled
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  podAnnotations: {}
+  podLabels: {}
+  terminationGracePeriodSeconds: 30
+  priorityClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+container:
+  # The port the service listens on and its Service exposes, the one its siblings call
+  # (INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }} = http://{{ service.name }}:{{ service.port }}): change it in forge (server_port), never here alone.
+  port: {{ service.port }}
+  command: []
+  args: []
+  env: []
+  # extra sources after the chart's ConfigMap and Secret; the migration reads them too
+  envFrom: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  livenessProbe:
+    httpGet:
+      path: /api/v1/health/live
+      port: http
+  readinessProbe:
+    httpGet:
+      path: /api/v1/health/ready
+      port: http
+  startupProbe: {}
+  volumeMounts: []
+initContainers: []
+volumes: []
+
+service:
+  type: ClusterIP
+  annotations: {}
+  labels: {}
+
+# Non-secret env, the ConfigMap {{ service.name }}-config.
+configMap:
+  data:
+{%- if service.language == "python" %}
+    ENV: "production"
+    LOG_LEVEL: "info"
+    APP__SERVER__PORT: "{{ service.port }}"
+{%- if service.db_app_role %}
+    # the migration runs as the owner; {{ service.db_app_role }} cannot create tables
+    MIGRATE_ON_START: "false"
 {%- endif %}
-# A migration runs as a pre-install/pre-upgrade Helm hook Job before the
-# Deployment rolls (templates/migrate-job.yaml).
-hasMigrations: {{ "true" if service.has_migrations else "false" }}
-migrateCommand:
-{%- if not (service.uses_database | default(true)) %}
-  []
-{%- elif service.language == "python" %}
-  ["python", "-m", "app", "db", "upgrade"]
 {%- elif service.language == "node" %}
-  ["npx", "prisma", "migrate", "deploy"]
-{%- elif service.language in ("rust", "go") %}
-  ["/app/migrate"]
+    NODE_ENV: "production"
+    LOG_LEVEL: "info"
+    APP__SERVER__PORT: "{{ service.port }}"
+{%- elif service.language == "rust" %}
+    PORT: "{{ service.port }}"
+    RUST_LOG: "info"
+{%- elif service.language == "go" %}
+    ENV: "production"
+    PORT: "{{ service.port }}"
+    APP__LOGGING__LEVEL: "info"
 {%- else %}
-  []
+    ENV: "production"
 {%- endif %}
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 512Mi
+{%- if topology.include_keycloak %}
+    # The gatekeeper is the sole issuer: the backend validates its JWTs (JWKS at /auth/jwks, pinned because
+    # forge_core would otherwise derive Keycloak's path). Point these at an external gatekeeper per environment.
+    APP__SECURITY__AUTH__ENABLED: "true"
+    APP__SECURITY__AUTH__SERVER_URL: "http://gatekeeper:5000"
+    APP__SECURITY__AUTH__AUDIENCE: "forge-services"
+    APP__SECURITY__AUTH__JWKS_URI: "http://gatekeeper:5000/auth/jwks"
+    APP__SECURITY__AUTH__REALM: {{ q(topology.keycloak_realm) }}
+    APP__SECURITY__AUTH__CLIENT_ID: {{ q(topology.keycloak_client_id) }}
+    GATEKEEPER_ISSUER: "http://gatekeeper:5000"
+    SERVICE_AUDIENCE: "forge-services"
+{%- endif %}
+{%- if plain_env %}
+    # Inter-service (S2S) env, as in docker-compose: the gatekeeper client and the sibling URLs.
+{%- for k, v in plain_env.items() %}
+    {{ k }}: {{ q(v) }}
+{%- endfor %}
+{%- endif %}
+
+# DB URLs and credentials, the Secret {{ service.name }}-secret. Placeholders only: override them per
+# environment, or set enabled: false and provide that Secret elsewhere (externalSecret below).
+secret:
+  enabled: true
+{%- if secret_env %}
+  stringData:
+{%- for k, v in secret_env.items() %}
+{%- if k.endswith("_SECRET") %}
+    # the S2S client secret the gatekeeper knows; replace it per environment
+{%- endif %}
+    {{ k }}: {{ q(v) }}
+{%- endfor %}
+{%- else %}
+  stringData: {}
+{%- endif %}
+
+# An ExternalSecret that writes {{ service.name }}-secret; needs secret.enabled: false.
+externalSecret:
+  enabled: false
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: ""
+  refreshInterval: 1h
+  data: []
+  dataFrom: []
+
+# The migration: a pre-install/pre-upgrade hook Job (templates/migration-job.yaml), so the schema is current
+# before the Deployment rolls.
+migration:
+  enabled: {{ "true" if (uses_db and service.has_migrations) else "false" }}
+{%- if not uses_db %}
+  command: []
+{%- else %}
+{%- if service.language == "python" %}
+  command: ["python", "-m", "app", "db", "upgrade"]
+{%- elif service.language == "node" %}
+  command: ["npx", "prisma", "migrate", "deploy"]
+{%- elif service.language in ("rust", "go") %}
+  command: ["/app/migrate"]
+{%- else %}
+  command: []
+{%- endif %}
+  # The Job waits for this host while it resolves (the postgres chart's Service); "" never waits.
+  waitForPostgres: postgres-rw
+  postgresImage: pgvector/pgvector:pg16
+{%- if service.db_app_role %}
+  # database.rls_app_role: the service connects as this role, which cannot bypass RLS. The postgres chart
+  # creates it; the migration runs as the owner (ownerSecret), then files/db-app-role.sh refreshes the role's
+  # grants. For owner credentials from elsewhere, set ownerSecret.enabled: false and provide the Secret
+  # {{ service.name }}-migrate-owner.
+  dbAppRole: {{ service.db_app_role }}
+  ownerSecret:
+    enabled: true
+    stringData:
+{%- if service.language == "python" %}
+      APP__DB__URL: "postgresql+asyncpg://{{ service.db_name }}:CHANGEME@postgres-rw:5432/{{ service.db_name }}"
+{%- else %}
+      DATABASE_URL: "postgresql://{{ service.db_name }}:CHANGEME@postgres-rw:5432/{{ service.db_name }}"
+{%- endif %}
+      DB_OWNER_URL: "postgresql://{{ service.db_name }}:CHANGEME@postgres-rw:5432/{{ service.db_name }}"
+{%- else %}
+  dbAppRole: ""
+{%- endif %}
+{%- endif %}
+
+# Traefik: /api/{{ service.name }}/ on every frontend's host, rewritten to /api/.
+ingressRoute:
+  enabled: false
+  entryPoints:
+    - websecure
+  tls: {}
+  # each key renders a Middleware named {{ service.name }}-<key>
+  middlewares:
+    rewrite:
+      replacePathRegex:
+        regex: "^/api/{{ service.name }}/(.*)"
+        replacement: "/api/$1"
+  routes:
+    - match: {{ q(host_rule ~ " && PathPrefix(`/api/" ~ service.name ~ "/`)") }}
+      middlewares:
+{%- if topology.helm_gatekeeper %}
+        - name: gatekeeper-untrusted-headers
+        - name: {{ service.name }}-rewrite
+        - name: gatekeeper-auth
+        - name: gatekeeper-strip-api-key
+{%- else %}
+        - name: {{ service.name }}-rewrite
+{%- endif %}
+
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
-# Non-secret env -> ConfigMap (templates/configmap.yaml).
-env:
-{%- if service.language == "python" %}
-  ENV: "production"
-  LOG_LEVEL: "info"
-  APP__SERVER__PORT: "{{ service.port }}"
-{%- if service.db_app_role %}
-  # The migrate step runs as the owner; {{ service.db_app_role }} cannot create tables.
-  MIGRATE_ON_START: "false"
-{%- endif %}
-{%- elif service.language == "node" %}
-  NODE_ENV: "production"
-  LOG_LEVEL: "info"
-  APP__SERVER__PORT: "{{ service.port }}"
-{%- elif service.language == "rust" %}
-  PORT: "{{ service.port }}"
-  RUST_LOG: "info"
-{%- elif service.language == "go" %}
-  ENV: "production"
-  PORT: "{{ service.port }}"
-  APP__LOGGING__LEVEL: "info"
-{%- else %}
-  ENV: "production"
-{%- endif %}
-{%- if topology.include_keycloak %}
-  # Auth env mirrors docker-compose: the backend default is auth-OFF, so a
-  # keycloak project MUST carry these to deploy with authentication ON. In
-  # the gatekeeper sole-issuer model the backend validates gatekeeper's
-  # internal JWT (iss=gatekeeper, JWKS at <server_url>/auth/jwks), so
-  # server_url + audience point at the IN-CLUSTER gatekeeper Service, not
-  # Keycloak. For an EXTERNAL/managed gatekeeper, override via values-prod.yaml.
-  APP__SECURITY__AUTH__ENABLED: "true"
-  APP__SECURITY__AUTH__SERVER_URL: "http://gatekeeper:5000"
-  APP__SECURITY__AUTH__AUDIENCE: "forge-services"
-  # forge_core derives the JWKS URI from server_url + realm as the
-  # Keycloak-style /realms/<realm>/protocol/openid-connect/certs path unless
-  # pinned. Gatekeeper serves JWKS at /auth/jwks, so this pin is REQUIRED or
-  # the backend 404s on every verification and rejects all gatekeeper tokens.
-  APP__SECURITY__AUTH__JWKS_URI: "http://gatekeeper:5000/auth/jwks"
-  APP__SECURITY__AUTH__REALM: "{{ topology.keycloak_realm }}"
-  APP__SECURITY__AUTH__CLIENT_ID: "{{ topology.keycloak_client_id }}"
-  GATEKEEPER_ISSUER: "http://gatekeeper:5000"
-  SERVICE_AUDIENCE: "forge-services"
-{%- endif %}
-{%- if service.synthesis_env %}
-  # Inter-service (S2S) synthesis env — mirrors docker-compose.yml.j2's
-  # synthesis_env loop so a multi-service Helm deployment can mint S2S
-  # tokens + reach sibling services. Without this, Helm-deployed backends
-  # have no GATEKEEPER_CLIENT_*/INTERNAL_SERVICE_URL_*/BUS_URL and fail
-  # inter-service auth at runtime. The client secret is under secretEnv.
-{%- for k, v in service.synthesis_env.items() if not k.endswith("_SECRET") %}
-  {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
-{%- endfor %}
-{%- endif %}
-# Secret env -> Secret (templates/secret.yaml). Placeholders only: forge
-# NEVER bakes a real credential into the chart. Override per environment, or
-# set secretEnv: null and wire an ExternalSecret (see templates/secret.yaml);
-# an empty map does not remove these defaults, Helm merges it into them.
-{%- if service.db_app_role %}
-# database.rls_app_role: the Deployment connects as this role, which cannot
-# bypass RLS. The migrate Job runs the migrations with the owner credentials
-# in migrateSecretEnv, then files/db-app-role.sh creates the role and refreshes
-# its grants. APP_DB_PASSWORD must match the password in the DB URL below. For
-# owner credentials from an ExternalSecret, set migrateSecretEnv: null and
-# name that Secret {{ service.name }}-migrate-owner.
-dbAppRole: {{ service.db_app_role }}
-migrateSecretEnv:
-{%- if service.language == "python" %}
-  APP__DB__URL: "postgresql+asyncpg://CHANGEME@postgres:5432/{{ service.db_name }}"
-{%- else %}
-  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
-{%- endif %}
-  DB_OWNER_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
-  APP_DB_PASSWORD: "CHANGEME"
-{%- else %}
-dbAppRole: ""
-{%- endif %}
-secretEnv:
-{%- if service.uses_database | default(true) %}
-{%- if service.language == "python" %}
-  APP__DB__URL: "postgresql+asyncpg://{{ (service.db_app_role ~ ':') if service.db_app_role }}CHANGEME@postgres:5432/{{ service.db_name }}"
-{%- elif service.language == "node" %}
-  APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
-  DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ service.db_name }}"
-{%- elif service.language in ("rust", "go") %}
-  DATABASE_URL: "postgresql://{{ (service.db_app_role ~ ':') if service.db_app_role }}CHANGEME@postgres:5432/{{ service.db_name }}"
-{%- endif %}
-{%- endif %}
-{%- for k, v in service.synthesis_env.items() if k.endswith("_SECRET") %}
-  # the S2S client secret the in-cluster gatekeeper knows; replace it per environment
-  {{ k }}: "{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}"
-{%- endfor %}
 
-# The Service listens on containerPort, the port its siblings call
-# (INTERNAL_SERVICE_URL_{{ service.name | upper | replace("-", "_") }}, http://{{ service.name }}:{{ service.port }}) and the platform's Ingress
-# routes to by name: change it in forge (server_port) and update, never here alone.
+# Peers: {namespace (default: the release's), podLabels, ports}. ingressFrom reaches container.port (or ports),
+# egressTo is allowed beside DNS.
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+  egressTo: []
 
-# The migrate Job waits for this Postgres host when it resolves in the cluster
-# (the platform's "postgres" under infra.inCluster) and skips the wait when it
-# does not (a managed database); "" never waits.
-waitForPostgres: postgres
-postgresImage: pgvector/pgvector:pg16
+serviceMonitor:
+  enabled: false
+  labels: {}
+  path: /metrics
+  interval: 30s
+  # series carrying any of these labels are dropped at scrape time
+  dropLabels:
+    - tenant_id
 
-# Pod security: non-root by default (matches the compose posture).
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 10001
-  fsGroup: 10001
+# `helm test {{ service.name }}`: GET /api/v1/health/ready through the Service.
+test:
+  enabled: true
+  image: curlimages/curl:8.23.0@sha256:11e64e28c5f58c8d93ee95fcf22ac055f48b0bc440e0ce7d8013bbb5ad6aa8ac

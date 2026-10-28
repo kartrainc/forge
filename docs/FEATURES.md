@@ -1435,13 +1435,14 @@ How ``deploy.target=kubernetes`` packages the project for Helm.
 - ``umbrella`` (default): one chart at ``deploy/helm/`` holding every backend,
   the frontends, the Ingress and the optional in-cluster datastores, installed
   as one release.
-- ``per_service``: one chart per backend at ``deploy/helm/<backend>/`` and per
-  frontend at ``deploy/helm/<frontend>/``, each installed as its own release
-  named after the service, plus ``deploy/helm/platform/`` for the Ingress and
-  the optional in-cluster datastores, Keycloak and gatekeeper. A service then
-  rolls out, fails and rolls back alone, and its Service is named after it on
-  its own port, so the ``INTERNAL_SERVICE_URL_<NAME>`` URLs the services already
-  carry (``http://<name>:<port>``) resolve in the cluster as in compose.
+- ``per_service``: one chart per component, each installed as its own release
+  named after it: one per backend (``deploy/helm/<backend>/``) and per frontend,
+  plus ``postgres`` (a CloudNativePG cluster), ``redis``, ``keycloak`` and
+  ``gatekeeper`` when the project has them. Each service's Traefik routes live
+  in its own values. A service then rolls out, fails and rolls back alone, and
+  its Service is named after it on its own port, so the
+  ``INTERNAL_SERVICE_URL_<NAME>`` URLs the services already carry
+  (``http://<name>:<port>``) resolve in the cluster as in compose.
 
 Ignored unless ``deploy.target`` is ``kubernetes``. Switching layout on an
 existing project leaves the previous layout's files in place; see UPGRADING.

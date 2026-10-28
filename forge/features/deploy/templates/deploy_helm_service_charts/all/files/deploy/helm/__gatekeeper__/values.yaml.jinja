@@ -1,0 +1,187 @@
+{%- macro e(v) %}{{ v | replace("\\", "\\\\") | replace('"', '\\"') }}{% endmacro -%}
+{%- set host = topology.project_slug | replace("_", "-") ~ ".example.com" -%}
+{%- set further = topology.frontends | rejectattr("primary") | list -%}
+{%- set app = namespace(hosts="Host(`" ~ e(host) ~ "`)") -%}
+{%- for fe in further %}{% set app.hosts = app.hosts ~ " || Host(`" ~ e(fe.name) ~ "." ~ e(host) ~ "`)" %}{% endfor -%}
+{%- if further %}{% set app.hosts = "(" ~ app.hosts ~ ")" %}{% endif -%}
+# Values of the {{ service.name }} chart: the OIDC ForwardAuth and internal token authority of {{ topology.project_slug }}.
+#
+# THIS FILE IS FORGE-OWNED. It is re-rendered on every `forge --update` (a three-way merge keeps your edits or drops
+# a .forge-merge sidecar). Override per environment with a separate file forge never touches:
+#
+#     helm upgrade --install {{ service.name }} deploy/helm/{{ service.name }} -f values-<env>.yaml
+
+partOf: "{{ e(topology.project_slug | replace("_", "-")) }}"
+image:
+  # Built from deploy/infra/gatekeeper/.
+  repository: ghcr.io/example/{{ topology.project_slug }}-gatekeeper
+  tag: latest
+  # sha256:<64 hex>; wins over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePolicy:
+  requireDigest: false
+imagePullSecrets: []
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+  automountToken: false
+
+# The image's appuser is uid/gid 10001 (deploy/infra/gatekeeper/Dockerfile).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  # ENV=development's logging config also writes /project/app.log.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+deployment:
+  # More than one needs signingKeys.existingSecret: generated keys differ per pod.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  podDisruptionBudget:
+    enabled: false
+    maxUnavailable: 1
+  podAnnotations: {}
+  terminationGracePeriodSeconds: 30
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+container:
+  # The backends call http://{{ service.name }}:5000; the Service listens on this port.
+  port: 5000
+  env: []
+  envFrom: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  livenessProbe:
+    httpGet:
+      path: /api/v1/live
+      port: http
+    periodSeconds: 10
+  readinessProbe:
+    httpGet:
+      path: /auth/jwks
+      port: http
+    periodSeconds: 10
+
+service:
+  type: ClusterIP
+  annotations: {}
+
+# Non-secret env, as compose runs the gatekeeper with the in-cluster hosts.
+configMap:
+  data:
+    ENV: "development"
+    KEYCLOAK_BASE_URL: "http://keycloak:8080/realms"
+    KEYCLOAK_ADMIN_REALM: "{{ e(topology.keycloak_realm) }}"
+    GATEKEEPER_CLIENT_ID: "gatekeeper"
+    TENANT_SOURCE: "{{ e(topology.keycloak_tenant_source) }}"
+    SELF_REGISTRATION: "{{ e(topology.keycloak_self_registration) }}"
+    API_KEYS_ENABLED: "{{ "true" if service.api_keys | default(false) else "false" }}"
+{%- if further %}
+    # The further frontends' host labels, which resolve to the project's realm.
+    GATEKEEPER_FRONTEND_HOST_LABELS: "{{ e(further | map(attribute="name") | join(",")) }}"
+{%- endif %}
+    SESSION_ID_COOKIE_NAME: "tenant_session_id"
+    # The routes serve HTTPS (websecure).
+    COOKIE_SECURE: "true"
+    TENANT_ID_CLAIM: "https://forge/tenant_id"
+    DEFAULT_TENANT_ID: "00000000-0000-0000-0000-000000000001"
+    GATEKEEPER_ISSUER: "http://gatekeeper:5000"
+    INTERNAL_TOKEN_AUDIENCE: "forge-services"
+    INTERNAL_TOKEN_TTL_SECONDS: "300"
+    KEY_BACKEND: "file"
+    SIGNING_KEY_DIR: "/run/secrets/gatekeeper-signing"
+    SESSION_TIMEOUT_ENABLED: "true"
+    DEFAULT_IDLE_TIMEOUT_SECONDS: "1800"
+    DEFAULT_ABSOLUTE_TIMEOUT_SECONDS: "43200"
+    SESSION_WARN_AT_SECONDS: "60"
+    SERVICE_REGISTRY_PATH: "/run/secrets/gatekeeper-service-registry/service_registry.yaml"
+    SVC_AUTH_BACKEND: "preshared"
+    DEFAULT_RATE_LIMIT: "600"
+
+# Credentials -> Secret {{ service.name }}-secret. Dev placeholders: replace them per environment, or disable this and
+# enable externalSecret.
+secret:
+  enabled: true
+  stringData:
+    # The keycloak chart's realm.clientSecrets.gatekeeper.
+    GATEKEEPER_CLIENT_SECRET: "CHANGEME"
+    REDIS_URL: "redis://:CHANGEME@redis:6379/0"
+    # The keycloak chart's admin, for the boot-time check of the realm.
+    KC_ADMIN_USER: "admin"
+    KC_ADMIN_PASSWORD: "CHANGEME"
+    # The compose dev keys (Fernet keys; CHANGEME is not one), refused outside ENV=development.
+    SESSION_FERNET_KEY: "L9dXzDhHXxIbDpzmUrNSCMUgCl0rYmQ6j6lwtWXH_A4="
+    DELEGATION_GRANT_FERNET_KEY: "UVEc0SmYvD9UcwKTlz_fMTusqFVVTNLliJ96ChlPDCI="
+
+# An external-secrets.io ExternalSecret writing {{ service.name }}-secret instead.
+externalSecret:
+  enabled: false
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: ""
+  data: []
+  dataFrom: []
+
+# The ES256 keys internal tokens are signed with, at SIGNING_KEY_DIR. generate: a keygen init container writes one
+# per pod into an emptyDir. existingSecret: a Secret holding active.pem (and retiring.pem, pending.pem when
+# rotating), shared by every replica.
+signingKeys:
+  generate: true
+  existingSecret: ""
+
+# The S2S client registry at SERVICE_REGISTRY_PATH: files/service_registry.yaml, or a Secret of yours with the key
+# service_registry.yaml.
+serviceRegistry:
+  existingSecret: ""
+
+# The Traefik Middlewares the backend charts' routes use: {{ service.name }}-auth (ForwardAuth to /auth),
+# {{ service.name }}-strip-api-key and {{ service.name }}-untrusted-headers.
+authMiddlewares:
+  enabled: false
+  clusterDomain: cluster.local
+  # What /auth sets on the forwarded request.
+  authResponseHeaders:
+    - Authorization
+    - X-Gatekeeper-User-Id
+    - X-Gatekeeper-Email
+    - X-Gatekeeper-Tenant
+    - X-Gatekeeper-Roles
+    - X-Gatekeeper-Auth-Method
+
+# Traefik routing. Each middlewares.<key> is a Middleware spec, rendered as {{ service.name }}-<key>; a route without
+# services goes to this chart's Service.
+ingressRoute:
+  enabled: false
+  entryPoints:
+    - websecure
+  tls: {}
+  middlewares: {}
+  routes:
+    # The browser's endpoints on the app hosts; /auth, /auth/jwks, /auth/token and /metrics stay in the cluster.
+    - match: "{{ app.hosts }} && ({% for path in ["/auth/login", "/auth/session", "/auth/userinfo", "/auth/organization", "/callback", "/logout"] %}Path(`{{ path }}`){{ " || " if not loop.last }}{% endfor %})"
+      middlewares: []

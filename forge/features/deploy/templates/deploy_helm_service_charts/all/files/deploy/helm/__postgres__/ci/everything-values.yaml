@@ -1,0 +1,29 @@
+# Every optional setting on, for `helm lint` and `helm template` in CI.
+imagePullSecrets:
+  - name: registry-credentials
+imagePolicy:
+  requireDigest: true
+cluster:
+  instances: 3
+  image:
+    digest: sha256:1ec419e997a8bde5263b6951f4c5ebc4aa2e1937927001f2561025c0a816e174
+  storage:
+    storageClass: gp3
+  enablePDB: true
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: 256MB
+  monitoring:
+    enablePodMonitor: true
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: postgres
+      effect: NoSchedule
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: topology.kubernetes.io/zone

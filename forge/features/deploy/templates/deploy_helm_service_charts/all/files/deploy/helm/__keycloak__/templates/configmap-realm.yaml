@@ -1,0 +1,12 @@
+{{- $realm := include "keycloak.realmJson" . }}
+{{- if $realm }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+data:
+  keycloak-realm.json: |
+    {{- $realm | nindent 4 }}
+{{- end }}

@@ -1,0 +1,97 @@
+# Every optional template on, for the chart checks (helm lint, helm template, kubeconform); not an environment.
+image:
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+imagePullSecrets:
+  - name: registry
+imagePolicy:
+  requireDigest: true
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/example
+deployment:
+  podDisruptionBudget:
+    enabled: true
+  podAnnotations:
+    example.com/team: platform
+  podLabels:
+    example.com/tier: api
+  priorityClassName: example
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    - key: example.com/dedicated
+      operator: Exists
+      effect: NoSchedule
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          example.com/tier: api
+container:
+  env:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+  envFrom:
+    - secretRef:
+        name: example-extra
+  startupProbe:
+    httpGet:
+      path: /api/v1/health/live
+      port: http
+    failureThreshold: 30
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+volumes:
+  - name: tmp
+    emptyDir: {}
+service:
+  annotations:
+    example.com/scrape: "true"
+  labels:
+    example.com/tier: api
+secret:
+  enabled: false
+externalSecret:
+  enabled: true
+  secretStoreRef:
+    name: example-store
+  data:
+    - secretKey: EXAMPLE_PASSWORD
+      remoteRef:
+        key: example/credentials
+        property: password
+  dataFrom:
+    - extract:
+        key: example/env
+migration:
+  postgresImage: "pgvector/pgvector:pg16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+ingressRoute:
+  enabled: true
+  tls:
+    secretName: example-tls
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespace: traefik
+      podLabels:
+        app.kubernetes.io/name: traefik
+    - podLabels:
+        app.kubernetes.io/name: gatekeeper
+  egressTo:
+    - podLabels:
+        cnpg.io/cluster: postgres
+      ports: [5432]
+    - namespace: monitoring
+      podLabels:
+        app.kubernetes.io/name: alloy
+      ports: [4317, 4318]
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus

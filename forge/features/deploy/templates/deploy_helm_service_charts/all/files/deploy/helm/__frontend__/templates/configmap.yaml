@@ -1,6 +1,7 @@
-{{- /* nginx config for the SPA. Under security.csp it sends .Values.securityHeaders with every response and the
+{{- /* nginx config for the SPA. Under security.csp it sends configMap.securityHeaders with every response and the
        contentSecurityPolicy with index.html, whose nonce is nginx's $request_id written over the build's
        __CSP_NONCE__ placeholder; index.html is never cached, so its nonce always matches its header. */ -}}
+{{- $c := .Values.configMap }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,23 +10,23 @@ metadata:
     {{- include "svc.labels" . | nindent 4 }}
 data:
   default.conf: |
-{{- if .Values.nginxConf }}
-    {{- .Values.nginxConf | nindent 4 }}
+{{- if $c.nginxConf }}
+    {{- $c.nginxConf | nindent 4 }}
 {{- else }}
     server {
-        listen {{ .Values.port }};
+        listen {{ .Values.container.port }};
         server_name _;
         root /usr/share/nginx/html;
         index index.html;
-{{- range $name, $value := .Values.securityHeaders }}
+{{- range $name, $value := $c.securityHeaders }}
         add_header {{ $name }} {{ $value | quote }} always;
 {{- end }}
         location / {
             try_files $uri $uri/ /index.html;
         }
-{{- with .Values.contentSecurityPolicy }}
+{{- with $c.contentSecurityPolicy }}
         location = /index.html {
-{{- range $name, $value := $.Values.securityHeaders }}
+{{- range $name, $value := $c.securityHeaders }}
             add_header {{ $name }} {{ $value | quote }} always;
 {{- end }}
             add_header Content-Security-Policy {{ . | quote }} always;

@@ -21,6 +21,7 @@ import yaml
 
 from forge.config import BackendConfig, BackendLanguage, FrontendConfig, ProjectConfig
 from forge.config._frontend import FrontendFramework
+from forge.config._topology import compute_topology
 from forge.generator import generate
 
 pytestmark = pytest.mark.skipif(shutil.which("helm") is None, reason="helm not installed")
@@ -318,134 +319,326 @@ def test_notes_name_a_further_app_and_its_host_only_with_the_ingress(tmp_path: P
     assert "http(s)://" not in notes
 
 
-# deploy.helm_layout=per_service: every chart under deploy/helm/ lints, renders and validates, in every scenario.
+# deploy.helm_layout=per_service: every backend and frontend chart lints, renders and validates in every scenario,
+# with its default values and with its ci/everything-values.yaml.
 def _gen_service_charts(**kw) -> Path:
-    cfg = ProjectConfig(options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"}, **kw)
+    cfg = ProjectConfig(
+        options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"}, **kw
+    )
     return generate(cfg, quiet=True, dry_run=True) / "deploy" / "helm"
 
 
+# What CI's kubeconform runs: Kubernetes' schemas, and the CRDs' (Traefik, External Secrets, the Prometheus
+# operator) from the datreeio catalog.
+_KUBECONFORM_ARGS = (
+    "-strict",
+    "-summary",
+    "-kubernetes-version",
+    "1.29.0",
+    "-schema-location",
+    "default",
+    "-schema-location",
+    "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/"
+    "{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json",
+    "-",
+)
+
+
+def _kubeconform(rendered: str, what: str) -> None:
+    if not _KUBECONFORM:
+        return
+    kc = subprocess.run(
+        [_KUBECONFORM, *_KUBECONFORM_ARGS], input=rendered, capture_output=True, text=True
+    )
+    assert kc.returncode == 0, f"kubeconform {what} failed:\n{kc.stdout}\n{kc.stderr}"
+
+
+def _helm(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["helm", *args], capture_output=True, text=True)
+
+
+# What ci/everything-values.yaml turns on beside the defaults.
+_EVERYTHING = {
+    "backend": {
+        "ServiceAccount",
+        "PodDisruptionBudget",
+        "ExternalSecret",
+        "Middleware",
+        "IngressRoute",
+        "NetworkPolicy",
+        "ServiceMonitor",
+    },
+    "frontend": {
+        "ServiceAccount",
+        "PodDisruptionBudget",
+        "HorizontalPodAutoscaler",
+        "Middleware",
+        "IngressRoute",
+        "NetworkPolicy",
+    },
+}
+
+
 @pytest.mark.parametrize("name,kw", _scenarios(), ids=[s[0] for s in _scenarios()])
-@pytest.mark.parametrize("in_cluster", [False, True], ids=["external", "incluster"])
-def test_every_service_chart_lints_and_validates(name: str, kw: dict, in_cluster: bool) -> None:
-    helm = _gen_service_charts(**kw)
-    charts = sorted(p for p in helm.iterdir() if (p / "Chart.yaml").is_file())
-    backends = {b.name for b in kw["backends"]}
-    assert {c.name for c in charts} >= backends | {"platform"}
-    for chart in charts:
-        lint = subprocess.run(["helm", "lint", "--strict", str(chart)], capture_output=True, text=True)
-        assert lint.returncode == 0, f"helm lint {chart.name} failed:\n{lint.stdout}\n{lint.stderr}"
-        set_args = ("--set", "infra.inCluster=true") if in_cluster and chart.name == "platform" else ()
-        tmpl = subprocess.run(
-            ["helm", "template", chart.name, str(chart), *set_args], capture_output=True, text=True
-        )
-        assert tmpl.returncode == 0, f"helm template {chart.name} failed:\n{tmpl.stderr}"
-        docs = [doc for doc in yaml.safe_load_all(tmpl.stdout) if doc]
-        if chart.name in backends:
-            port = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))["containerPort"]
-            kinds = {(d["kind"], d["metadata"]["name"]) for d in docs}
-            for kind in ("Deployment", "Service", "HorizontalPodAutoscaler"):
-                assert (kind, chart.name) in kinds
+def test_every_service_chart_lints_renders_and_validates(name: str, kw: dict) -> None:
+    config = ProjectConfig(
+        options={"deploy.target": "kubernetes", "deploy.helm_layout": "per_service"}, **kw
+    )
+    helm = generate(config, quiet=True, dry_run=True) / "deploy" / "helm"
+    topology = compute_topology(config)
+    components = {be["name"]: "backend" for be in topology["backends"]} | {
+        fe["name"]: "frontend" for fe in topology["frontends"]
+    }
+    for chart_name, component in sorted(components.items()):
+        chart = helm / chart_name
+        values = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
+        port = values["container"]["port"]
+        for extra in ((), ("-f", str(chart / "ci" / "everything-values.yaml"))):
+            what = f"{chart_name} ({'everything' if extra else 'defaults'})"
+            lint = _helm("lint", "--strict", str(chart), *extra)
+            assert lint.returncode == 0, f"helm lint {what} failed:\n{lint.stdout}\n{lint.stderr}"
+            tmpl = _helm("template", chart_name, str(chart), *extra)
+            assert tmpl.returncode == 0, f"helm template {what} failed:\n{tmpl.stderr}"
+            docs = [doc for doc in yaml.safe_load_all(tmpl.stdout) if doc]
+            names = {(d["kind"], d["metadata"]["name"]) for d in docs}
+            assert {("Deployment", chart_name), ("Service", chart_name)} <= names, what
             (service,) = [d for d in docs if d["kind"] == "Service"]
-            assert service["spec"]["ports"][0]["port"] == port
-            # no credential in a ConfigMap (the S2S client secret goes to the Secret)
+            assert service["spec"]["ports"] == [
+                {"name": "http", "port": port, "targetPort": "http", "protocol": "TCP"}
+            ]
+            for doc in docs:
+                labels = doc["metadata"]["labels"]
+                assert labels["app.kubernetes.io/instance"] == chart_name, doc["metadata"]
+                assert labels["app.kubernetes.io/part-of"] == values["partOf"], doc["metadata"]
+            # no credential in a ConfigMap: the S2S client secret and the DB URLs are in the Secret
             for cm in (d for d in docs if d["kind"] == "ConfigMap"):
-                assert not [k for k in cm.get("data") or {} if k.endswith("_SECRET")], cm["metadata"]["name"]
-        if _KUBECONFORM:
-            kc = subprocess.run(
-                [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
-                input=tmpl.stdout,
-                capture_output=True,
-                text=True,
-            )
-            assert kc.returncode == 0, f"kubeconform {chart.name} failed:\n{kc.stdout}\n{kc.stderr}"
+                data = cm.get("data") or {}
+                assert not [k for k in data if k.endswith("_SECRET")], cm["metadata"]["name"]
+                assert "CHANGEME" not in str(data), cm["metadata"]["name"]
+            kinds = {d["kind"] for d in docs}
+            if extra:
+                assert _EVERYTHING[component] <= kinds, what
+            elif component == "backend":
+                assert ("HorizontalPodAutoscaler", chart_name) in names
+                assert not _EVERYTHING["backend"] & kinds, what
+            _kubeconform(tmpl.stdout, what)
 
 
-def test_the_platform_routes_each_host_to_the_services() -> None:
-    helm = _gen_service_charts(**dict(_scenarios())["py_two_vue_keycloak"])
-    docs = _template(helm / "platform", *_GATEKEEPER_ON)
-    ingresses = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Ingress"}
-    routes = {
-        name: (rule["host"], [(p["backend"]["service"]["name"], p["backend"]["service"]["port"])
-                              for p in rule["http"]["paths"]])
-        for name, ing in ingresses.items()
-        for rule in ing["spec"]["rules"]
-    }
-    assert routes == {
-        # by the Service's port name, so no release repeats a service's port
-        "rel-frontend-api": ("shop.example.com", [("api", {"name": "http"})]),
-        "rel-frontend-web": ("shop.example.com", [("frontend", {"name": "http"})]),
-        "rel-admin-api": ("admin.shop.example.com", [("api", {"name": "http"})]),
-        "rel-admin-web": ("admin.shop.example.com", [("admin", {"name": "http"})]),
-    }
-    assert "rewrite-target" in str(ingresses["rel-admin-api"]["metadata"].get("annotations"))
-    assert "annotations" not in ingresses["rel-admin-web"]["metadata"]
-    assert _gatekeeper_env(docs)["GATEKEEPER_FRONTEND_HOST_LABELS"] == "admin"
+def _render_named(chart: Path, release: str, *set_args: str) -> dict[tuple[str, str], dict]:
+    out = subprocess.run(
+        ["helm", "template", release, str(chart), *set_args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(out) if d}
 
 
 def _hook(doc: dict) -> str | None:
     return (doc["metadata"].get("annotations") or {}).get("helm.sh/hook")
 
 
-def test_a_backend_release_owns_its_config_and_rolls_when_it_changes() -> None:
-    chart = _gen_service_charts(**dict(_scenarios())["multi_py_node_vue_keycloak"]) / "user-api"
+def _env_refs(container: dict) -> list[tuple[str, bool | None]]:
+    """A container's envFrom sources: (name, optional)."""
+    refs = []
+    for source in container["envFrom"]:
+        (ref,) = source.values()
+        refs.append((ref["name"], ref.get("optional")))
+    return refs
 
+
+@pytest.fixture(scope="module")
+def user_api() -> Path:
+    return _gen_service_charts(**dict(_scenarios())["multi_py_node_vue_keycloak"]) / "user-api"
+
+
+def test_a_backend_release_owns_its_config_and_rolls_when_it_changes(user_api: Path) -> None:
     def render(*set_args: str) -> dict[tuple[str, str], dict]:
-        docs = subprocess.run(
-            ["helm", "template", "user-api", str(chart), *set_args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(docs) if d}
+        return _render_named(user_api, "user-api", *set_args)
 
     docs = render()
     # the runtime env is part of the release: a rollback restores it, an uninstall removes it
     assert _hook(docs[("ConfigMap", "user-api-config")]) is None
     assert _hook(docs[("Secret", "user-api-secret")]) is None
-    # the migration reads its own hook copies, gone once the release's hooks succeed
-    for name in ("user-api-migrate-config", "user-api-migrate-secret"):
-        kind = "ConfigMap" if name.endswith("config") else "Secret"
+    assert docs[("Secret", "user-api-secret")]["stringData"]["APP__DB__URL"] == (
+        "postgresql+asyncpg://user_api:CHANGEME@postgres-rw:5432/user_api"
+    )
+    # the migration reads its own hook copies, created first and gone once the release's hooks succeed
+    for kind, name in (
+        ("ConfigMap", "user-api-migrate-config"),
+        ("Secret", "user-api-migrate-secret"),
+    ):
         annotations = docs[(kind, name)]["metadata"]["annotations"]
         assert annotations["helm.sh/hook"] == "pre-install,pre-upgrade"
+        assert annotations["helm.sh/hook-weight"] == "-10"
         assert annotations["helm.sh/hook-delete-policy"] == "before-hook-creation,hook-succeeded"
-    job = docs[("Job", "user-api-migrate")]["spec"]["template"]
-    refs = [next(iter(e.values()))["name"] for e in job["spec"]["containers"][0]["envFrom"]]
-    assert refs == ["user-api-migrate-config", "user-api-migrate-secret"]
+    job = docs[("Job", "user-api-migrate")]
+    assert job["metadata"]["annotations"]["helm.sh/hook-weight"] == "-5"
+    pod = job["spec"]["template"]
+    (migrate,) = pod["spec"]["containers"]
+    assert migrate["command"] == ["python", "-m", "app", "db", "upgrade"]
+    assert _env_refs(migrate) == [
+        ("user-api-migrate-config", None),
+        ("user-api-migrate-secret", True),
+    ]
     # no Service selects a migration pod
     selector = docs[("Service", "user-api")]["spec"]["selector"]
-    assert not selector.items() <= job["metadata"]["labels"].items()
+    assert not selector.items() <= pod["metadata"]["labels"].items()
+    assert pod["metadata"]["labels"]["app.kubernetes.io/name"] == "user-api-migrate"
+    assert pod["metadata"]["labels"]["app.kubernetes.io/component"] == "migrate"
 
     def checksums(rendered: dict) -> dict:
         return rendered[("Deployment", "user-api")]["spec"]["template"]["metadata"]["annotations"]
 
     base = checksums(docs)
-    env_changed = checksums(render("--set", "env.LOG_LEVEL=debug"))
+    env_changed = checksums(render("--set", "configMap.data.LOG_LEVEL=debug"))
     secret_changed = checksums(
-        render("--set", "secretEnv.APP__DB__URL=postgresql+asyncpg://u:p@db/x")
+        render("--set", "secret.stringData.APP__DB__URL=postgresql+asyncpg://u:p@db/x")
     )
     assert env_changed["checksum/config"] != base["checksum/config"]
     assert env_changed["checksum/secret"] == base["checksum/secret"]
     assert secret_changed["checksum/secret"] != base["checksum/secret"]
-
-    # an external Secret (secretEnv: null) is what the migration reads
-    external = render("--set", "secretEnv=null")
-    assert ("Secret", "user-api-secret") not in external
-    assert ("Secret", "user-api-migrate-secret") not in external
-    job = external[("Job", "user-api-migrate")]["spec"]["template"]
-    assert [next(iter(e.values()))["name"] for e in job["spec"]["containers"][0]["envFrom"]] == [
-        "user-api-migrate-config",
-        "user-api-secret",
-    ]
     # an empty map is merged into the defaults and removes nothing
-    assert ("Secret", "user-api-secret") in render("--set-json", "secretEnv={}")
+    assert ("Secret", "user-api-secret") in render("--set-json", "secret.stringData={}")
+    # the HPA owns the replica count while autoscaling is on
+    assert "replicas" not in docs[("Deployment", "user-api")]["spec"]
+    fixed = render("--set", "autoscaling.enabled=false")
+    assert fixed[("Deployment", "user-api")]["spec"]["replicas"] == 2
+    assert ("HorizontalPodAutoscaler", "user-api") not in fixed
 
-    # the migration waits for the in-cluster Postgres when its host resolves, and never with ""
-    (wait,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]["initContainers"]
-    assert "getent hosts postgres" in wait["command"][-1]
-    # the pod runs as a uid without a passwd entry: pg_isready needs a user to make an attempt
-    assert "pg_isready -h postgres -p 5432 -U postgres" in wait["command"][-1]
-    no_wait = render("--set", "waitForPostgres=")[("Job", "user-api-migrate")]
-    assert "initContainers" not in no_wait["spec"]["template"]["spec"]
+
+def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api: Path) -> None:
+    def job(*set_args: str) -> dict:
+        docs = _render_named(user_api, "user-api", *set_args)
+        return docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
+
+    (wait,) = job()["initContainers"]
+    # the in-cluster Postgres when postgres-rw resolves; the pod's uid has no passwd entry, so pg_isready gets a user
+    assert "getent hosts postgres-rw" in wait["command"][-1]
+    assert "pg_isready -h postgres-rw -p 5432 -U postgres" in wait["command"][-1]
+    assert wait["image"] == "pgvector/pgvector:pg16"
+    assert "initContainers" not in job("--set", "migration.waitForPostgres=")
+
+    # secret.enabled false: the Secret of that name, provided outside the chart
+    docs = _render_named(user_api, "user-api", "--set", "secret.enabled=false")
+    assert ("Secret", "user-api-secret") not in docs
+    assert ("Secret", "user-api-migrate-secret") not in docs
+    (migrate,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]["containers"]
+    assert _env_refs(migrate) == [("user-api-migrate-config", None), ("user-api-secret", True)]
+
+    # the chart's ExternalSecret: the release's, and a hook copy the migration waits for
+    docs = _render_named(
+        user_api,
+        "user-api",
+        "--set",
+        "secret.enabled=false",
+        "--set",
+        "externalSecret.enabled=true",
+        "--set",
+        "externalSecret.secretStoreRef.name=vault",
+        "--set-json",
+        'externalSecret.dataFrom=[{"extract":{"key":"shop/user-api"}}]',
+    )
+    release = docs[("ExternalSecret", "user-api-secret")]
+    assert _hook(release) is None
+    assert release["spec"]["target"] == {"name": "user-api-secret", "creationPolicy": "Owner"}
+    assert release["spec"]["secretStoreRef"] == {"kind": "ClusterSecretStore", "name": "vault"}
+    copy = docs[("ExternalSecret", "user-api-migrate-secret")]
+    assert copy["metadata"]["annotations"]["helm.sh/hook-weight"] == "-10"
+    assert copy["spec"]["target"]["name"] == "user-api-migrate-secret"
+    assert copy["spec"]["dataFrom"] == release["spec"]["dataFrom"]
+    (migrate,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]["containers"]
+    assert _env_refs(migrate) == [
+        ("user-api-migrate-config", None),
+        ("user-api-migrate-secret", False),
+    ]
+    # the service itself reads the release's
+    (service,) = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]["containers"]
+    assert _env_refs(service) == [("user-api-config", None), ("user-api-secret", True)]
+
+
+def test_an_external_secret_needs_the_chart_secret_off(user_api: Path) -> None:
+    both = _helm(
+        "template",
+        "user-api",
+        str(user_api),
+        "--set",
+        "externalSecret.enabled=true",
+        "--set",
+        "externalSecret.secretStoreRef.name=vault",
+        "--set-json",
+        'externalSecret.dataFrom=[{"extract":{"key":"shop/user-api"}}]',
+    )
+    assert both.returncode != 0
+    assert "externalSecret.enabled needs secret.enabled false" in both.stderr
+    nothing = _helm(
+        "template",
+        "user-api",
+        str(user_api),
+        "--set",
+        "secret.enabled=false",
+        "--set",
+        "externalSecret.enabled=true",
+        "--set",
+        "externalSecret.secretStoreRef.name=vault",
+    )
+    assert nothing.returncode != 0
+    assert "externalSecret needs data or dataFrom" in nothing.stderr
+
+
+def test_a_digest_pins_the_images_and_require_digest_enforces_it(user_api: Path) -> None:
+    digest = "sha256:" + "a" * 64
+    docs = _render_named(user_api, "user-api", "--set", f"image.digest={digest}")
+    (service,) = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]["containers"]
+    (migrate,) = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]["containers"]
+    # the digest wins over the tag
+    assert service["image"] == migrate["image"] == f"ghcr.io/example/shop-user-api@{digest}"
+
+    bad = _helm("template", "user-api", str(user_api), "--set", "image.digest=sha256:abc")
+    assert bad.returncode != 0
+    assert "image.digest must be sha256:<64 hex>" in bad.stderr
+    postgres = f"migration.postgresImage=pgvector/pgvector:pg16@{digest}"
+    unpinned = _helm(
+        "template",
+        "user-api",
+        str(user_api),
+        "--set",
+        "imagePolicy.requireDigest=true",
+        "--set",
+        postgres,
+    )
+    assert unpinned.returncode != 0
+    assert "user-api: image.digest is required (imagePolicy.requireDigest)" in unpinned.stderr
+    # every image the release runs: the migration's Postgres client too
+    helper = _helm(
+        "template",
+        "user-api",
+        str(user_api),
+        "--set",
+        "imagePolicy.requireDigest=true",
+        "--set",
+        f"image.digest={digest}",
+    )
+    assert helper.returncode != 0
+    assert "migration.postgresImage needs a digest" in helper.stderr
+    pinned = _render_named(
+        user_api,
+        "user-api",
+        "--set",
+        "imagePolicy.requireDigest=true",
+        "--set",
+        f"image.digest={digest}",
+        "--set",
+        postgres,
+    )
+    assert ("Job", "user-api-migrate") in pinned
+    frontend = user_api.parent / "frontend"
+    unpinned = _helm(
+        "template", "frontend", str(frontend), "--set", "imagePolicy.requireDigest=true"
+    )
+    assert "frontend: image.digest is required (imagePolicy.requireDigest)" in unpinned.stderr
+
+
 def test_http_service_workload_has_no_database_or_migration() -> None:
     """The chart wires no database, migration or DB secret for an ``http-service``."""
     import yaml
@@ -463,17 +656,7 @@ def test_http_service_workload_has_no_database_or_migration() -> None:
     assert store["migrateCommand"] == ["npx", "prisma", "migrate", "deploy"]
 
 
-def _render_named(chart: Path, release: str, *set_args: str) -> dict[tuple[str, str], dict]:
-    out = subprocess.run(
-        ["helm", "template", release, str(chart), *set_args],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(out) if d}
-
-
-def test_a_backend_with_an_app_role_migrates_as_the_owner_then_creates_the_role() -> None:
+def test_a_backend_with_an_app_role_migrates_as_the_owner_then_grants_the_role() -> None:
     config = ProjectConfig(
         project_name="iso",
         backends=[
@@ -494,53 +677,252 @@ def test_a_backend_with_an_app_role_migrates_as_the_owner_then_creates_the_role(
     assert not (helm / "files").exists()
     docs = _render_named(helm / "api", "api")
     pod = docs[("Job", "api-migrate")]["spec"]["template"]["spec"]
-    # the platform's Postgres exists before this release, so the pre-install Job does both steps
+    # the postgres release exists before this one, so the pre-install Job does both steps
     assert [c["name"] for c in pod["initContainers"]] == ["wait-for-postgres", "migrate"]
     (role,) = pod["containers"]
     assert role["name"] == "db-role"
-    assert role["env"] == [{"name": "APP_DB_ROLE", "value": "api_app"}]
-    owner = [r["secretRef"]["name"] for r in pod["initContainers"][1]["envFrom"] if "secretRef" in r]
-    assert owner[-1] == "api-migrate-owner"
+    assert role["command"] == ["sh", "/scripts/db-app-role.sh"]
+    # the postgres chart creates the role and owns its password: the script only grants
+    assert role["env"] == [
+        {"name": "APP_DB_ROLE", "value": "api_app"},
+        {"name": "APP_DB_ROLE_MANAGED", "value": "true"},
+    ]
+    assert _env_refs(role) == [("api-migrate-owner", None)]
+    # the owner's URL overrides the runtime role's
+    assert _env_refs(pod["initContainers"][1])[-1] == ("api-migrate-owner", None)
     for kind, name in (("Secret", "api-migrate-owner"), ("ConfigMap", "api-db-app-role")):
         annotations = docs[(kind, name)]["metadata"]["annotations"]
         assert annotations["helm.sh/hook"] == "pre-install,pre-upgrade", name
         assert annotations["helm.sh/hook-weight"] == "-10", name
+    script = docs[("ConfigMap", "api-db-app-role")]["data"]["db-app-role.sh"]
+    assert script == (helm / "api" / "files" / "db-app-role.sh").read_text(encoding="utf-8")
+    owner = docs[("Secret", "api-migrate-owner")]["stringData"]
+    assert owner["DB_OWNER_URL"] == "postgresql://api:CHANGEME@postgres-rw:5432/api"
+    assert owner["APP__DB__URL"] == "postgresql+asyncpg://api:CHANGEME@postgres-rw:5432/api"
     # the service serves as the role and never sees the owner's credentials
     (service,) = docs[("Deployment", "api")]["spec"]["template"]["spec"]["containers"]
     assert "api-migrate-owner" not in str(service["envFrom"])
     assert docs[("ConfigMap", "api-config")]["data"]["MIGRATE_ON_START"] == "false"
-    assert "//api_app:" in docs[("Secret", "api-secret")]["stringData"]["APP__DB__URL"]
-    # owner credentials from an ExternalSecret: no hook Secret, the Job reads the name
-    external = _render_named(helm / "api", "api", "--set", "migrateSecretEnv=null")
+    assert docs[("Secret", "api-secret")]["stringData"]["APP__DB__URL"] == (
+        "postgresql+asyncpg://api_app:CHANGEME@postgres-rw:5432/api"
+    )
+    # owner credentials from elsewhere: no hook Secret, the Job reads the name
+    external = _render_named(helm / "api", "api", "--set", "migration.ownerSecret.enabled=false")
     assert ("Secret", "api-migrate-owner") not in external
     assert ("Job", "api-migrate") in external
-    if _KUBECONFORM:
-        rendered = subprocess.run(
-            ["helm", "template", "api", str(helm / "api")], capture_output=True, text=True, check=True
-        ).stdout
-        kc = subprocess.run(
-            [_KUBECONFORM, "-strict", "-summary", "-kubernetes-version", "1.29.0", "-"],
-            input=rendered,
-            capture_output=True,
-            text=True,
-        )
-        assert kc.returncode == 0, kc.stdout
+    _kubeconform(
+        _helm("template", "api", str(helm / "api")).stdout,
+        "api with an app role",
+    )
 
 
-def test_the_platform_imports_the_realm_with_the_app_hosts() -> None:
+def test_routes_and_middlewares_render_with_the_ingress_route() -> None:
     helm = _gen_service_charts(**dict(_scenarios())["py_two_vue_keycloak"])
-    docs = _render_named(helm / "platform", "rel", *_GATEKEEPER_ON)
-    # one realm ConfigMap: Keycloak imports it and the realm-sync Job reads it
-    realms = [k for k in docs if k == ("ConfigMap", "rel-keycloak-realm")]
-    assert len(realms) == 1
-    realm = docs[("ConfigMap", "rel-keycloak-realm")]["data"]["keycloak-realm.json"]
-    assert "__APP_HOST" not in realm
-    assert "https://admin.shop.example.com" in realm
-    (keycloak,) = docs[("Deployment", "keycloak")]["spec"]["template"]["spec"]["containers"]
-    assert "--import-realm" in keycloak["args"]
-    gatekeeper = _gatekeeper_env([d for d in docs.values()])
-    assert gatekeeper["TENANT_SOURCE"] == "organization"
-    assert gatekeeper["SELF_REGISTRATION"] == "off"
-    assert gatekeeper["KEYCLOAK_ADMIN_REALM"] == docs[("Job", "rel-realm-sync")]["spec"]["template"][
-        "spec"
-    ]["containers"][0]["env"][2]["value"]
+    # off by default: neither the route nor its Middlewares
+    assert not [
+        k for k in _render_named(helm / "api", "api") if k[0] in ("IngressRoute", "Middleware")
+    ]
+    docs = _render_named(helm / "api", "api", "--set", "ingressRoute.enabled=true")
+    spec = docs[("IngressRoute", "api")]["spec"]
+    assert spec["entryPoints"] == ["websecure"]
+    assert "tls" not in spec
+    (rule,) = spec["routes"]
+    assert rule["match"] == (
+        "(Host(`shop.example.com`) || Host(`admin.shop.example.com`)) && PathPrefix(`/api/api/`)"
+    )
+    # the gatekeeper chart's Middlewares around this chart's rewrite
+    assert [m["name"] for m in rule["middlewares"]] == [
+        "gatekeeper-untrusted-headers",
+        "api-rewrite",
+        "gatekeeper-auth",
+        "gatekeeper-strip-api-key",
+    ]
+    assert rule["services"] == [{"name": "api", "port": 8001}]
+    assert docs[("Middleware", "api-rewrite")]["spec"] == {
+        "replacePathRegex": {"regex": "^/api/api/(.*)", "replacement": "/api/$1"}
+    }
+    tls = _render_named(
+        helm / "api",
+        "api",
+        "--set",
+        "ingressRoute.enabled=true",
+        "--set",
+        "ingressRoute.tls.secretName=shop-tls",
+    )
+    assert tls[("IngressRoute", "api")]["spec"]["tls"] == {"secretName": "shop-tls"}
+    for name, host in (("frontend", "shop.example.com"), ("admin", "admin.shop.example.com")):
+        docs = _render_named(helm / name, name, "--set", "ingressRoute.enabled=true")
+        assert docs[("IngressRoute", name)]["spec"]["routes"] == [
+            {
+                "kind": "Rule",
+                "match": f"Host(`{host}`)",
+                "priority": 1,
+                "services": [{"name": name, "port": 8080}],
+            }
+        ]
+        assert not [k for k in docs if k[0] == "Middleware"]
+
+
+def test_the_optional_objects_follow_their_values(user_api: Path) -> None:
+    docs = _render_named(
+        user_api, "user-api", "-f", str(user_api / "ci" / "everything-values.yaml")
+    )
+    policy = docs[("NetworkPolicy", "user-api")]["spec"]
+    assert policy["podSelector"] == {
+        "matchLabels": {
+            "app.kubernetes.io/name": "user-api",
+            "app.kubernetes.io/instance": "user-api",
+        }
+    }
+    port = [{"port": 8001, "protocol": "TCP"}]
+    assert policy["ingress"] == [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "traefik"}
+                    },
+                    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "traefik"}},
+                }
+            ],
+            "ports": port,
+        },
+        {
+            "from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "gatekeeper"}}}],
+            "ports": port,
+        },
+        # the chart's helm test pod
+        {
+            "from": [
+                {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "user-api-test",
+                            "app.kubernetes.io/instance": "user-api",
+                        }
+                    }
+                }
+            ],
+            "ports": port,
+        },
+    ]
+    assert policy["egress"][0] == {
+        "ports": [{"port": 53, "protocol": "UDP"}, {"port": 53, "protocol": "TCP"}]
+    }
+    assert policy["egress"][1] == {
+        "to": [{"podSelector": {"matchLabels": {"cnpg.io/cluster": "postgres"}}}],
+        "ports": [{"port": 5432, "protocol": "TCP"}],
+    }
+    (endpoint,) = docs[("ServiceMonitor", "user-api")]["spec"]["endpoints"]
+    assert endpoint["port"] == "http"
+    assert endpoint["path"] == "/metrics"
+    assert endpoint["metricRelabelings"] == [
+        {"sourceLabels": ["tenant_id"], "regex": ".+", "action": "drop"}
+    ]
+    assert docs[("PodDisruptionBudget", "user-api")]["spec"]["minAvailable"] == 1
+    pod = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]
+    assert pod["serviceAccountName"] == "user-api"
+    assert pod["automountServiceAccountToken"] is False
+    assert docs[("ServiceAccount", "user-api")]["automountServiceAccountToken"] is False
+    # a pre-install hook runs before the chart's ServiceAccount exists
+    assert "serviceAccountName" not in docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
+    existing = _render_named(user_api, "user-api", "--set", "serviceAccount.name=shared")
+    job = existing[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
+    assert job["serviceAccountName"] == "shared"
+    budget = _render_named(
+        user_api,
+        "user-api",
+        "--set",
+        "deployment.podDisruptionBudget.enabled=true",
+        "--set",
+        "deployment.podDisruptionBudget.maxUnavailable=1",
+    )[("PodDisruptionBudget", "user-api")]["spec"]
+    assert budget["maxUnavailable"] == 1
+    assert "minAvailable" not in budget
+
+
+def test_helm_test_pods_check_the_services(user_api: Path) -> None:
+    for chart, url in (
+        (user_api, "http://user-api:8001/api/v1/health/ready"),
+        (user_api.parent / "frontend", "http://frontend:8080/"),
+    ):
+        pod = _render_named(chart, chart.name)[("Pod", f"{chart.name}-test")]
+        assert pod["metadata"]["annotations"]["helm.sh/hook"] == "test"
+        assert pod["metadata"]["labels"]["app.kubernetes.io/name"] == f"{chart.name}-test"
+        assert pod["spec"]["securityContext"]["runAsNonRoot"] is True
+        (container,) = pod["spec"]["containers"]
+        assert container["args"][-1] == url
+        assert "@sha256:" in container["image"]
+        assert container["securityContext"] == {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"]},
+        }
+        off = _render_named(chart, chart.name, "--set", "test.enabled=false")
+        assert not [k for k in off if k[0] == "Pod"]
+
+
+def test_a_frontend_serves_its_nginx_config_on_an_unprivileged_port() -> None:
+    helm = _gen_service_charts(**dict(_scenarios())["py_two_vue_keycloak"])
+    docs = _render_named(helm / "admin", "admin")
+    conf = docs[("ConfigMap", "admin-nginx")]["data"]["default.conf"]
+    assert "listen 8080;" in conf
+    assert 'sub_filter "__CSP_NONCE__" "$request_id";' in conf
+    pod = docs[("Deployment", "admin")]["spec"]["template"]
+    (container,) = pod["spec"]["containers"]
+    assert container["ports"] == [{"name": "http", "containerPort": 8080, "protocol": "TCP"}]
+    # nginx:alpine as uid 10001 without capabilities: an unprivileged port, and writable cache and PID directories
+    assert pod["spec"]["securityContext"]["runAsUser"] == 10001
+    assert container["securityContext"] == {
+        "allowPrivilegeEscalation": False,
+        "readOnlyRootFilesystem": True,
+        "capabilities": {"drop": ["ALL"]},
+    }
+    assert {m["mountPath"]: m["name"] for m in container["volumeMounts"]} == {
+        "/etc/nginx/conf.d/default.conf": "nginx-conf",
+        "/var/cache/nginx": "nginx-cache",
+        "/run": "nginx-run",
+    }
+    moved = _render_named(helm / "admin", "admin", "--set", "container.port=9090")
+    assert "listen 9090;" in moved[("ConfigMap", "admin-nginx")]["data"]["default.conf"]
+    assert moved[("Service", "admin")]["spec"]["ports"][0]["port"] == 9090
+    checksum = "checksum/nginx"
+    assert (
+        moved[("Deployment", "admin")]["spec"]["template"]["metadata"]["annotations"][checksum]
+        != pod["metadata"]["annotations"][checksum]
+    )
+    own = _render_named(
+        helm / "admin", "admin", "--set-json", 'configMap.nginxConf="server { listen 8080; }"'
+    )
+    assert own[("ConfigMap", "admin-nginx")]["data"]["default.conf"].strip() == (
+        "server { listen 8080; }"
+    )
+
+
+def test_a_long_release_name_keeps_every_name_within_63_characters(user_api: Path) -> None:
+    release = "r" * 53
+    out = _helm(
+        "template", release, str(user_api), "-f", str(user_api / "ci" / "everything-values.yaml")
+    )
+    assert out.returncode == 0, out.stderr
+    docs = [d for d in yaml.safe_load_all(out.stdout) if d]
+    names = [(d["kind"], d["metadata"]["name"]) for d in docs]
+    assert len(names) == len(set(names))
+    assert all(len(name) <= 63 for _, name in names)
+    # each derived name keeps its whole suffix
+    by_kind = {(kind, name.removeprefix(release[:40]).lstrip("r")) for kind, name in names}
+    for kind, suffix in (
+        ("ConfigMap", "-config"),
+        ("ConfigMap", "-migrate-config"),
+        ("ExternalSecret", "-secret"),
+        ("ExternalSecret", "-migrate-secret"),
+        ("Middleware", "-rewrite"),
+        ("Job", "-migrate"),
+        ("Pod", "-test"),
+    ):
+        assert (kind, suffix) in by_kind, (kind, suffix)
+    for doc in docs:
+        labels = dict(doc["metadata"]["labels"])
+        if doc["kind"] in ("Job",):
+            labels |= doc["spec"]["template"]["metadata"]["labels"]
+        assert all(len(str(v)) <= 63 for v in labels.values()), labels

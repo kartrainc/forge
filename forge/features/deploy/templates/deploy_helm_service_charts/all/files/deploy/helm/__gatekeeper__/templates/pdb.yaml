@@ -1,0 +1,19 @@
+{{- with .Values.deployment.podDisruptionBudget }}
+{{- if .enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gatekeeper.name" $ }}
+  labels:
+    {{- include "gatekeeper.labels" $ | nindent 4 }}
+spec:
+  {{- if not (kindIs "invalid" .minAvailable) }}
+  minAvailable: {{ .minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gatekeeper.selector" $ | nindent 6 }}
+{{- end }}
+{{- end }}

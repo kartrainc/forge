@@ -1,0 +1,66 @@
+{{- include "postgres.validate" . -}}
+{{- /* Pod security is the operator's default: uid/gid 26 (the image's postgres user), non-root, RuntimeDefault seccomp,
+       a read-only root filesystem, no privilege escalation, every capability dropped. */ -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "postgres.name" . }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.cluster.instances }}
+  imageName: {{ include "postgres.image" . }}
+  imagePullPolicy: {{ .Values.cluster.image.pullPolicy }}
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with first (.Values.databases | default list) }}
+  # initdb creates the first database and its owner, with the password the role keeps: no unused app database
+  bootstrap:
+    initdb:
+      database: {{ .name }}
+      owner: {{ .owner }}
+      secret:
+        name: {{ include "postgres.roleSecret" (dict "root" $ "role" .owner) }}
+  {{- end }}
+  storage:
+    size: {{ .Values.cluster.storage.size }}
+    {{- with .Values.cluster.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.cluster.resources | nindent 4 }}
+  enablePDB: {{ .Values.cluster.enablePDB }}
+  enableSuperuserAccess: {{ .Values.cluster.enableSuperuserAccess }}
+  {{- with .Values.cluster.postgresql.parameters }}
+  postgresql:
+    parameters:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+  monitoring:
+    enablePodMonitor: {{ .Values.cluster.monitoring.enablePodMonitor }}
+  {{- $affinity := deepCopy (.Values.cluster.affinity | default dict) }}
+  {{- with .Values.cluster.nodeSelector }}
+  {{- $_ := set $affinity "nodeSelector" . }}
+  {{- end }}
+  {{- with .Values.cluster.tolerations }}
+  {{- $_ := set $affinity "tolerations" . }}
+  {{- end }}
+  {{- with $affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.roles }}
+  managed:
+    roles:
+      {{- range . }}
+      - name: {{ .name }}
+        ensure: present
+        {{- with omit . "name" "ensure" "passwordSecret" }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        passwordSecret:
+          name: {{ include "postgres.roleSecret" (dict "root" $ "role" .name) }}
+      {{- end }}
+  {{- end }}

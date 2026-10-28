@@ -1,12 +1,14 @@
-{{- /* Non-secret env: part of the release, so a rollback restores it and an uninstall removes it. The migrate Job
-       reads its own hook copy (migrate-env.yaml), which exists before the release's resources on a first install. */ -}}
+{{- /* Non-secret env: part of the release, so a rollback restores it and an uninstall removes it. The migration reads
+       its own hook copy (migration-env.yaml), which exists before the release's resources on a first install. */ -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "svc.child" (dict "root" . "suffix" "config") }}
   labels:
     {{- include "svc.labels" . | nindent 4 }}
+{{- with .Values.configMap.data }}
 data:
-  {{- range $k, $v := .Values.env }}
+  {{- range $k, $v := . }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
+{{- end }}

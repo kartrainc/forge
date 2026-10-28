@@ -8,18 +8,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Per-service Helm charts
 
 - `deploy.helm_layout` (`umbrella` by default, `per_service`): with `deploy.target=kubernetes`, `per_service` emits
-  one Helm chart per backend (`deploy/helm/<backend>/`) and per frontend (`deploy/helm/<frontend>/`), each installed as
-  its own release named after the service, plus `deploy/helm/platform/` for the Ingress and the optional in-cluster
-  datastores, Keycloak and gatekeeper. A service rolls out, fails its migration and rolls back alone. Its Service is
-  named after it on its own port, so the `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve in the
-  cluster as in compose. Each chart's values carry its umbrella workload entry, except that the S2S client secret
-  (`GATEKEEPER_CLIENT_SECRET`) is in `secretEnv`, so it lands in the Secret rather than the ConfigMap. A service's
-  Service listens on its `containerPort` and the platform's Ingress routes to the port named `http`, so no release
-  repeats a port. The migrate Job waits for the platform's in-cluster Postgres when `postgres` resolves and skips the
-  wait otherwise. `secretEnv: null`, not `{}`, drops a chart's Secret for an external one.
-  Under `database.rls_app_role`, a backend's migrate Job migrates as the owner (`migrateSecretEnv`), then creates
-  the runtime role it serves as; the platform's in-cluster Keycloak imports the project's realm.
-- Fragment files under a `__backend__/` or `__frontend__/` directory are written once per topology entry, with the
+  one Helm chart per component, each installed as its own release named after it: one per backend and per frontend,
+  plus `postgres` (a CloudNativePG cluster with each backend's owner and runtime roles and its database), `redis`
+  (Valkey), `keycloak` (importing the project's realm) and `gatekeeper` when the project has them. The charts follow
+  helmart's shape (`deployment`, `image`, `container`, `service`, `configMap`, `secret`, `ingressRoute`,
+  `autoscaling`), and each service's Traefik routes and Middlewares live in its own values. A service rolls out, fails
+  its migration and rolls back alone; its Service is named after it on its own port, so the
+  `INTERNAL_SERVICE_URL_<NAME>` URLs (`http://<name>:<port>`) resolve as in compose. Credentials, including the S2S
+  client secret, stay out of ConfigMaps; `secret.enabled: false` or `externalSecret` hands a Secret to External
+  Secrets; `image.digest` wins over the tag and `imagePolicy.requireDigest` enforces it. Under
+  `database.rls_app_role`, the postgres chart creates the runtime role a backend serves as and a backend's migration
+  Job migrates as the owner, then grants that role its tables. Redis requires a password, and the Redis URLs the
+  backends' fragments default to carry it. A frontend serves on 8080 as a non-root nginx.
+- `db-app-role.sh`: with `APP_DB_ROLE_MANAGED=true` it leaves creating the role and its password to whatever manages
+  the database (CloudNativePG) and only checks the role is safe and grants it the owner's tables.
+- Fragment files under `__backend__/`, `__frontend__/`, `__postgres__/`, `__redis__/`, `__keycloak__/` or
+  `__gatekeeper__/` are written once per topology entry (not at all when the project lacks the component), with the
   entry exposed to their Jinja as `service`.
 ### Tenant isolation and Keycloak strategies
 

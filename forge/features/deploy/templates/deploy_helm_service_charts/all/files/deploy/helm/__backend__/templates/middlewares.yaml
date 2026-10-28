@@ -1,0 +1,13 @@
+{{- if .Values.ingressRoute.enabled }}
+{{- range $key, $spec := .Values.ingressRoute.middlewares }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "svc.child" (dict "root" $ "suffix" $key) }}
+  labels:
+    {{- include "svc.labels" $ | nindent 4 }}
+spec:
+  {{- toYaml $spec | nindent 2 }}
+{{- end }}
+{{- end }}

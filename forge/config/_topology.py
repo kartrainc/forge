@@ -252,6 +252,13 @@ def compute_topology(
         )
         for bc in config.backends
     )
+    # The Redis URLs each backend's fragments default to, which a Redis with a password must override.
+    for be in backends:
+        be["redis_env"] = (
+            _redis_env_defaults(plan, be["language"])
+            if plan is not None and "redis" in rendered_infra
+            else {}
+        )
     # Frontends beside the primary; the primary keeps the scalar keys below.
     extra_frontends = tuple(
         frontend_topology_entry(config, fc)
@@ -319,9 +326,104 @@ def compute_topology(
         "frontend_csp": frontend_csp.content_security_policy(config),
         "extra_frontends": extra_frontends,
         "frontends": frontends,
+        # deploy.helm_layout=per_service: one chart per infrastructure component the project
+        # runs, each a list of zero or one entry so a placeholder directory expands over it.
+        **_helm_infra_charts(config, options, backends, rendered_infra, render_postgres),
     }
 
 
 def _dns_label(name: str) -> str:
     """A Kubernetes/Helm release name: lowercase, ``-`` for ``_`` and spaces."""
     return name.lower().replace("_", "-").replace(" ", "-")
+
+
+def _helm_infra_charts(
+    config: ProjectConfig,
+    options: Mapping[str, object],
+    backends: tuple[dict[str, Any], ...],
+    rendered_infra: set[str],
+    render_postgres: bool,
+) -> dict[str, list[dict[str, Any]]]:
+    """The postgres, redis, keycloak and gatekeeper charts of the per-service Helm layout.
+
+    The postgres entry lists the roles and databases: per backend that has a database, its owner
+    role and, under ``database.rls_app_role``, the runtime role it serves as (``runtime``), then
+    the event bus's and Keycloak's. The chart creates every role, so a migration only grants.
+    """
+    roles: list[dict[str, Any]] = []
+    databases: list[dict[str, str]] = []
+    for be in backends:
+        if config.database_mode == "none" or not be["uses_database"]:
+            continue
+        roles.append({"name": be["db_name"], "runtime": False})
+        if be["db_app_role"]:
+            roles.append({"name": be["db_app_role"], "runtime": True})
+        databases.append({"name": be["db_name"], "owner": be["db_name"]})
+    if any("APP__EVENTS__BUS_URL" in be["synthesis_env"] for be in backends):
+        roles.append({"name": "events", "runtime": False})
+        databases.append({"name": "events", "owner": "events"})
+    if config.include_keycloak:
+        roles.append({"name": "keycloak", "runtime": False})
+        databases.append({"name": "keycloak", "owner": "keycloak"})
+    gatekeeper = (
+        config.include_keycloak
+        and option_value(options, "auth.mode") == "generate"
+        and option_value(options, "auth.provider") == "gatekeeper"
+    )
+    return {
+        "helm_postgres": (
+            [{"name": "postgres", "roles": roles, "databases": databases}]
+            if render_postgres
+            else []
+        ),
+        "helm_redis": [{"name": "redis"}] if "redis" in rendered_infra else [],
+        "helm_keycloak": [{"name": "keycloak"}] if config.include_keycloak else [],
+        "helm_gatekeeper": (
+            [{"name": "gatekeeper", "api_keys": bool(option_value(options, "auth.api_keys"))}]
+            if gatekeeper
+            else []
+        ),
+    }
+
+
+def _redis_env_defaults(plan: ResolvedPlan, language: str) -> dict[str, str]:
+    """The env vars the backend fragments of ``language`` default to ``redis://redis:6379/<db>``."""
+    lang = BackendLanguage(language)
+    env: dict[str, str] = {}
+    for resolved in plan.ordered:
+        impl = resolved.fragment.implementations.get(lang)
+        if impl is None or impl.scope != "backend" or lang not in resolved.target_backends:
+            continue
+        env.update({k: v for k, v in impl.env_vars if v.startswith("redis://redis:6379")})
+    return env
+
+
+# Roles Postgres or CloudNativePG own, and the suffixes of the Secrets CloudNativePG names <cluster>-<suffix>.
+_POSTGRES_RESERVED_ROLES = frozenset({"postgres", "streaming_replica"})
+_CNPG_SECRET_SUFFIXES = frozenset({"ca", "server", "replication", "superuser"})
+
+
+def helm_postgres_conflict(config: ProjectConfig, topology: Mapping[str, Any]) -> str | None:
+    """Why the postgres chart of the per-service layout cannot create the project's roles, if it can't.
+
+    Each role is named after a backend's database (``-`` as ``_``), its runtime role adds
+    ``_app``, and its Secret is ``postgres-<role>`` (``_`` as ``-``). ``topology`` is computed
+    without the synthesis, as the resolver does, so the event bus's role is added here.
+    """
+    if not topology["helm_postgres"]:
+        return None
+    roles = [role["name"] for role in topology["helm_postgres"][0]["roles"]]
+    if option_value(config.options, "infrastructure.event_bus") == "postgres_notify":
+        roles.append("events")
+    seen: set[str] = set()
+    for role in roles:
+        if role in seen:
+            return f"two Postgres roles would be named {role!r}"
+        if role in _POSTGRES_RESERVED_ROLES or role.startswith(("pg_", "cnpg_")):
+            return f"{role!r} is a role Postgres or CloudNativePG reserves"
+        if role.replace("_", "-") in _CNPG_SECRET_SUFFIXES:
+            return (
+                f"the Secret of the Postgres role {role!r} would replace one CloudNativePG creates"
+            )
+        seen.add(role)
+    return None

@@ -1,0 +1,46 @@
+{{- /* The Middlewares the backend charts' routes name: with the release gatekeeper, gatekeeper-auth,
+       gatekeeper-strip-api-key and gatekeeper-untrusted-headers. */ -}}
+{{- if .Values.authMiddlewares.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "gatekeeper.child" (dict "root" . "suffix" "auth") }}
+  labels:
+    {{- include "gatekeeper.labels" . | nindent 4 }}
+spec:
+  forwardAuth:
+    # Traefik runs in another namespace, hence the Service's FQDN.
+    address: {{ printf "http://%s.%s.svc.%s:%v/auth" (include "gatekeeper.name" .) .Release.Namespace .Values.authMiddlewares.clusterDomain .Values.container.port | quote }}
+    trustForwardHeader: false
+    authResponseHeaders:
+      {{- toYaml .Values.authMiddlewares.authResponseHeaders | nindent 6 }}
+---
+# After the ForwardAuth: services get the internal JWT, never the integration's API key.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "gatekeeper.child" (dict "root" . "suffix" "strip-api-key") }}
+  labels:
+    {{- include "gatekeeper.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      X-API-Key: ""
+---
+# For routes without the ForwardAuth: a client cannot pass identity headers of its own.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "gatekeeper.child" (dict "root" . "suffix" "untrusted-headers") }}
+  labels:
+    {{- include "gatekeeper.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      Forwarded: ""
+      {{- range .Values.authMiddlewares.authResponseHeaders }}
+      {{- if hasPrefix "x-gatekeeper-" (lower .) }}
+      {{ . }}: ""
+      {{- end }}
+      {{- end }}
+{{- end }}

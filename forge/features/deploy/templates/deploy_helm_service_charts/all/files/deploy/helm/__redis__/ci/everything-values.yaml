@@ -1,0 +1,25 @@
+# Every optional setting on, for `helm lint` and `helm template` in CI.
+imagePullSecrets:
+  - name: registry-credentials
+imagePolicy:
+  requireDigest: true
+image:
+  digest: sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+persistence:
+  storageClass: gp3
+nodeSelector:
+  kubernetes.io/arch: amd64
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: cache
+    effect: NoSchedule
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/os
+              operator: In
+              values:
+                - linux

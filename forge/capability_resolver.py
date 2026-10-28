@@ -905,27 +905,29 @@ def _check_fragment_ui_kits(config: ProjectConfig, fragment_set: set[str]) -> No
 
 # A Helm release name: a DNS-1123 label of at most 53 characters.
 _RELEASE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
-# Names the platform chart takes: its release, and the Services of its in-cluster infrastructure.
-_PLATFORM_NAMES = {
-    "platform": "the platform chart",
-    "postgres": "the platform's in-cluster Postgres",
-    "redis": "the platform's in-cluster Redis",
-    "keycloak": "the platform's in-cluster Keycloak",
-    "gatekeeper": "the platform's gatekeeper",
+# Releases and Services of the infrastructure charts (CloudNativePG names its Services <cluster>-rw/-ro/-r).
+_INFRA_CHART_NAMES = {
+    "postgres": "the postgres chart",
+    "postgres-rw": "the postgres chart",
+    "postgres-ro": "the postgres chart",
+    "postgres-r": "the postgres chart",
+    "redis": "the redis chart",
+    "keycloak": "the keycloak chart",
+    "gatekeeper": "the gatekeeper chart",
 }
 
 
 def _check_service_chart_names(config: ProjectConfig) -> None:
     """deploy.helm_layout=per_service writes deploy/helm/<name>/ per backend and frontend, installed as release <name>
-    beside the release ``platform``: every name must be a release name, distinct from the others, from ``platform``
-    and from the in-cluster infrastructure the platform names its Services after."""
-    from forge.config._topology import compute_topology  # noqa: PLC0415
+    beside the infrastructure charts: every name must be a release name, distinct from the others and from the
+    infrastructure charts' releases and Services."""
+    from forge.config._topology import compute_topology, helm_postgres_conflict  # noqa: PLC0415
 
     topology = compute_topology(config)
     names = [be["name"] for be in topology["backends"]] + [
         fe["name"] for fe in topology["frontends"]
     ]
-    seen: set[str] = set(_PLATFORM_NAMES)
+    seen: set[str] = set(_INFRA_CHART_NAMES)
     for name in names:
         if not _RELEASE_NAME.match(name):
             raise OptionsError(
@@ -935,9 +937,12 @@ def _check_service_chart_names(config: ProjectConfig) -> None:
         if name in seen:
             raise OptionsError(
                 f"deploy.helm_layout=per_service: {name!r} is already taken by "
-                f"{_PLATFORM_NAMES.get(name, 'another service')}; rename the service"
+                f"{_INFRA_CHART_NAMES.get(name, 'another service')}; rename the service"
             )
         seen.add(name)
+    conflict = helm_postgres_conflict(config, topology)
+    if conflict:
+        raise OptionsError(f"deploy.helm_layout=per_service: {conflict}; rename the service")
 
 
 def resolve(config: ProjectConfig) -> ResolvedPlan:

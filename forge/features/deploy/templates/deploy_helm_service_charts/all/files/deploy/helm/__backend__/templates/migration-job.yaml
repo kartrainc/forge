@@ -1,0 +1,91 @@
+{{- /* The migration, a pre-install/pre-upgrade hook: a failed one fails this release only. It waits for
+       migration.waitForPostgres while that name resolves; with migration.dbAppRole it migrates as the owner, then the
+       db-role container refreshes the grants of the runtime role the postgres chart creates. */ -}}
+{{- if .Values.migration.enabled }}
+{{- $m := .Values.migration }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "svc.child" (dict "root" . "suffix" "migrate") }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+  annotations:
+    {{- include "svc.hookAnnotations" "-5" | nindent 4 }}
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "svc.processLabels" (dict "root" . "suffix" "migrate" "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- /* a pre-install hook runs before the chart's own ServiceAccount exists: only an existing one */}}
+      {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.name }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- end }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.deployment.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or $m.waitForPostgres $m.dbAppRole }}
+      initContainers:
+        {{- with $m.waitForPostgres }}
+        - name: wait-for-postgres
+          image: {{ include "svc.auxImage" (dict "root" $ "key" "migration.postgresImage" "image" $m.postgresImage) | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              if getent hosts {{ . }} >/dev/null; then
+                until pg_isready -h {{ . }} -p 5432 -U postgres; do echo "waiting for postgres"; sleep 2; done
+              else
+                echo "{{ . }} does not resolve: no in-cluster Postgres to wait for"
+              fi
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+        {{- end }}
+        {{- if $m.dbAppRole }}
+        {{- include "svc.migrateContainer" . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        {{- if $m.dbAppRole }}
+        - name: db-role
+          image: {{ include "svc.auxImage" (dict "root" . "key" "migration.postgresImage" "image" $m.postgresImage) | quote }}
+          command: ["sh", "/scripts/db-app-role.sh"]
+          env:
+            - name: APP_DB_ROLE
+              value: {{ $m.dbAppRole | quote }}
+            # the postgres chart creates the role and owns its password: only grant
+            - name: APP_DB_ROLE_MANAGED
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: {{ include "svc.child" (dict "root" . "suffix" "migrate-owner") }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: db-app-role
+              mountPath: /scripts
+              readOnly: true
+        {{- else }}
+        {{- include "svc.migrateContainer" . | nindent 8 }}
+        {{- end }}
+      {{- if $m.dbAppRole }}
+      volumes:
+        - name: db-app-role
+          configMap:
+            name: {{ include "svc.child" (dict "root" . "suffix" "db-app-role") }}
+      {{- end }}
+{{- end }}

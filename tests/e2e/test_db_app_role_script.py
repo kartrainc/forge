@@ -64,11 +64,14 @@ def postgres():
         _docker("rm", "-f", name, check=False)
 
 
-def _run_script(name: str, role: str) -> subprocess.CompletedProcess[str]:
+def _run_script(name: str, role: str, *, managed: bool = False) -> subprocess.CompletedProcess[str]:
+    secret = (
+        ("-e", "APP_DB_ROLE_MANAGED=true") if managed else ("-e", f"APP_DB_PASSWORD={PASSWORD}")
+    )
     return _docker(
         "exec",
         "-e", "PGHOST=localhost", "-e", "PGUSER=shop_owner", "-e", "PGPASSWORD=ownerpw",
-        "-e", "PGDATABASE=shop", "-e", f"APP_DB_ROLE={role}", "-e", f"APP_DB_PASSWORD={PASSWORD}",
+        "-e", "PGDATABASE=shop", "-e", f"APP_DB_ROLE={role}", *secret,
         name, "sh", "/db-app-role.sh",
         check=False,
     )  # fmt: skip
@@ -137,3 +140,43 @@ def test_a_role_the_owner_did_not_create_fails_without_leaking_the_verifier(post
     log = _docker("logs", name).stderr + _docker("logs", name).stdout
     for output in (result.stderr, result.stdout, log):
         assert re.search(r"SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{8}", output) is None, output
+
+
+def test_a_managed_role_gets_its_grants_and_keeps_its_password(postgres) -> None:
+    # APP_DB_ROLE_MANAGED: a database operator (CloudNativePG) creates the role and owns its
+    # password; the owner only refreshes the grants, re-run on every migration.
+    name, ip = postgres
+    _docker(
+        "exec", name, "psql", "-U", "postgres", "-c",
+        "CREATE ROLE managed_app LOGIN PASSWORD 'operatorpw'",
+    )  # fmt: skip
+    for _ in range(2):
+        result = _run_script(name, "managed_app", managed=True)
+        assert result.returncode == 0, result.stderr
+    login = _docker(
+        "run", "--rm", "-e", "PGPASSWORD=operatorpw", IMAGE,
+        "psql", "-h", ip, "-U", "managed_app", "-d", "shop", "-Atc",
+        "INSERT INTO items VALUES (2, 'b') ON CONFLICT DO NOTHING; SELECT count(*) FROM items",
+        check=False,
+    )  # fmt: skip
+    assert login.returncode == 0, login.stderr
+    assert login.stdout.splitlines()[-1] != "0"
+
+
+@pytest.mark.parametrize(
+    ("statement", "message"),
+    [
+        (None, "does not exist"),
+        ("CREATE ROLE risky_app LOGIN BYPASSRLS", "must be LOGIN NOSUPERUSER NOBYPASSRLS"),
+    ],
+    ids=["missing", "unsafe"],
+)
+def test_a_managed_role_must_exist_and_be_safe(
+    postgres, statement: str | None, message: str
+) -> None:
+    name, _ = postgres
+    if statement:
+        _docker("exec", name, "psql", "-U", "postgres", "-c", statement)
+    result = _run_script(name, "risky_app" if statement else "absent_app", managed=True)
+    assert result.returncode != 0
+    assert message in result.stderr

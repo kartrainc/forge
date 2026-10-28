@@ -882,8 +882,8 @@ def _apply_project_scope(
         _per_service = plan.option_values.get("deploy.helm_layout") == "per_service"
         _realm = project_root / "deploy" / "infra" / "keycloak-realm.json"
         if _realm.is_file():
-            # per_service: the in-cluster Keycloak lives in the platform chart
-            _chart = "platform" if _per_service else ""
+            # per_service: the keycloak chart imports it
+            _chart = "keycloak" if _per_service else ""
             _realm_dst = project_root / "deploy" / "helm" / _chart / "files" / "keycloak-realm.json"
             _realm_dst.parent.mkdir(parents=True, exist_ok=True)
             from forge.docker_manager import helm_realm_json  # noqa: PLC0415
@@ -912,6 +912,17 @@ def _apply_project_scope(
                 _role_dst.parent.mkdir(parents=True, exist_ok=True)
                 _role_dst.write_bytes(_role_script.read_bytes())
                 collector.record(_role_dst, origin="base-template")
+        # per_service: the gatekeeper chart mounts the S2S client registry compose uses
+        _registry = (
+            project_root / "deploy" / "infra" / "gatekeeper" / "secrets" / "service_registry.yaml"
+        )
+        if _per_service and _registry.is_file():
+            _registry_dst = (
+                project_root / "deploy" / "helm" / "gatekeeper" / "files" / "service_registry.yaml"
+            )
+            _registry_dst.parent.mkdir(parents=True, exist_ok=True)
+            _registry_dst.write_bytes(_registry.read_bytes())
+            collector.record(_registry_dst, origin="base-template")
 
     # Drop shared quality-signal files (.editorconfig, .gitignore, CI, pre-commit)
     # if the per-template generators haven't already provided them.

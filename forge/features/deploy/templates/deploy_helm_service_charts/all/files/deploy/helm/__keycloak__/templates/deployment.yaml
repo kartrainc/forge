@@ -1,0 +1,141 @@
+{{- $realm := include "keycloak.realmJson" . }}
+{{- if not (has .Values.mode (list "development" "production")) }}
+{{- fail (printf "keycloak: mode must be development or production, got %q" .Values.mode) }}
+{{- end }}
+{{- $production := eq .Values.mode "production" }}
+{{- if and $production (not .Values.hostname) }}
+{{- fail "keycloak: hostname is required in mode production (the public URL, e.g. https://auth.example.com)" }}
+{{- end }}
+{{- if and (not $production) (gt (int .Values.replicas) 1) }}
+{{- fail "keycloak: mode development keeps sign-ins in each pod's memory; run one replica" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keycloak.name" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "keycloak.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "keycloak.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "keycloak.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: keycloak
+          image: {{ include "keycloak.image" (dict "root" . "image" .Values.image "field" "image") | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - {{ ternary "start" "start-dev" $production }}
+            {{- if $realm }}
+            - --import-realm
+            {{- end }}
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: {{ .Values.db.host | quote }}
+            - name: KC_DB_URL_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: KC_DB_URL_DATABASE
+              value: {{ .Values.db.database | quote }}
+            - name: KC_DB_USERNAME
+              value: {{ .Values.db.username | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.passwordSecret.name }}
+                  key: {{ .Values.db.passwordSecret.key }}
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.adminSecret" . }}
+                  key: username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.adminSecret" . }}
+                  key: password
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            # TLS ends at Traefik, which sets the X-Forwarded-* headers.
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            {{- if .Values.hostname }}
+            - name: KC_HOSTNAME
+              value: {{ .Values.hostname | quote }}
+            {{- else }}
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if $realm }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          {{- end }}
+      {{- if $realm }}
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ include "keycloak.child" (dict "root" . "suffix" "realm") }}
+            items:
+              - key: keycloak-realm.json
+                path: {{ printf "%s-realm.json" .Values.realm.name }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

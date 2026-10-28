@@ -55,7 +55,7 @@ jobs:
           sudo install kubeconform /usr/local/bin/kubeconform
           helm version --short && kubeconform -v
       - name: Validate generated Helm chart
-        run: uv run pytest tests/test_deploy_helm_validation.py -v --no-cov
+        run: uv run pytest tests/test_deploy_helm_*.py -v --no-cov
 
   # Epic X (1.1.0-alpha.1) — typecheck split into forge + canary. A
   # failure in `typecheck-forge` alone is a forge typing regression. A

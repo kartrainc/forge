@@ -203,7 +203,14 @@ def copy_files(
 
 # A directory named after a placeholder is written once per entry of the topology list it names, under the entry's
 # ``name``, with the entry exposed to the file's Jinja as ``service`` (the per-service Helm charts).
-_INSTANCE_DIRS = {"__backend__": "backends", "__frontend__": "frontends"}
+_INSTANCE_DIRS = {
+    "__backend__": "backends",
+    "__frontend__": "frontends",
+    "__postgres__": "helm_postgres",
+    "__redis__": "helm_redis",
+    "__keycloak__": "helm_keycloak",
+    "__gatekeeper__": "helm_gatekeeper",
+}
 
 
 def _instances(
