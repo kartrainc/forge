@@ -20,7 +20,7 @@ import pytest
 
 SCRIPT = (
     Path(__file__).resolve().parents[1]
-    / "forge/templates/apps/vue-frontend-template/template/scripts/post_generate.py"
+    / "forge/templates/apps/vue-frontend-template/template/scripts/{% if app_template == 'crud-app' %}post_generate.py{% endif %}"
 )
 PACKAGE_JSON = '{\n  "name": "web",\n  "private": true,\n  "type": "module",\n  "scripts": {}\n}\n'
 
