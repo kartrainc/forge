@@ -144,6 +144,13 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "layout": "layout",
     "ui_kit": "ui_kit",
     "dev_server": "dev_server",
+    # File-only keys (ADR-015): a menu or a routing table does not fit a flag,
+    # so these names match no argparse destination and the file always wins.
+    "app_template": "_file_only_app_template",
+    "layouts": "_file_only_layouts",
+    "routing": "_file_only_routing",
+    "auth": "_file_only_auth",
+    "extras": "_file_only_extras",
 }
 
 
@@ -311,6 +318,11 @@ def _frontend_config(
         ui_kit=get("ui_kit", "shadcn"),
         dev_server=get("dev_server", False),
         name=name,
+        app_template=get("app_template", "crud-app"),
+        layouts=get("layouts", None),
+        routing=get("routing", None),
+        auth=get("auth", None),
+        extras=get("extras", None),
     )
 
 

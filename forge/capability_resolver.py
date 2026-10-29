@@ -563,6 +563,25 @@ def _provider_needs_keycloak(provider: object) -> bool:
     return provider in _KEYCLOAK_DEPENDENT_PROVIDERS
 
 
+def auth_stack_generated(config: ProjectConfig) -> bool:
+    """Whether ``auth.mode`` stays ``generate`` after the no-keycloak coercion of :func:`resolve`.
+
+    The Vue template asks it before mounting the session-timeout dialog, which only the
+    generated auth stack emits (ADR-015).
+    """
+    from forge.options._registry import OPTION_REGISTRY  # noqa: PLC0415
+
+    def value(path: str) -> object:
+        if path in config.options:
+            return config.options[path]
+        option = OPTION_REGISTRY.get(path)
+        return option.default if option is not None else None
+
+    if value("auth.mode") != "generate":
+        return False
+    return config.include_keycloak or not _provider_needs_keycloak(value("auth.provider"))
+
+
 # ``database.multitenancy`` strategies that are recognised values but ship no
 # realisation yet. The option ACCEPTS them (so a forge.toml pinning one isn't
 # rejected outright by value-validation), but the resolver turns a USER
