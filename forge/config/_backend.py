@@ -180,7 +180,7 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         template_dir="services/node-service-template",
         display_label="Node.js (Fastify)",
         version_field="node_version",
-        version_choices=("22", "20", "18"),
+        version_choices=("26", "24", "22", "20", "18"),
         toolchain=_node_toolchain_factory(),
         version="1.0.0",
     ),
@@ -282,7 +282,7 @@ class BackendConfig:
     # Omitted: ["items"], or none for an app template that owns no database (resolved in __post_init__).
     features: list[str] = field(default_factory=_default_features)
     python_version: str = "3.13"
-    node_version: str = "22"
+    node_version: str = "26"
     rust_edition: str = "2024"
     go_version: str = "1.27"
     server_port: int = 5000

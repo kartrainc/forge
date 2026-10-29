@@ -54,7 +54,7 @@ class TestOff:
     @pytest.mark.parametrize("manager", MANAGERS)
     def test_the_build_is_unchanged(self, tmp_path: Path, manager: str) -> None:
         content = _render(tmp_path, dev_server=False, package_manager=manager)
-        assert _stages(content) == [("node:22-slim", "builder"), ("nginx:alpine", "")]
+        assert _stages(content) == [("node:26-slim", "builder"), ("nginx:alpine", "")]
         assert content.count("COPY . .") == 1
         assert "USER" not in content
         assert "dev" not in {name for _, name in _stages(content)}
@@ -67,7 +67,7 @@ class TestOn:
     ) -> None:
         content = _render(tmp_path, dev_server=True, package_manager=manager)
         assert _stages(content) == [
-            ("node:22-slim", "deps"),
+            ("node:26-slim", "deps"),
             ("deps", "source"),
             ("source", "dev"),
             ("source", "builder"),

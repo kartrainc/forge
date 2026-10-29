@@ -341,6 +341,32 @@ Each safeguard below is an option, so a project can choose another strategy.
   outside the plugin API that SemVer covers (`forge/api.py`), and forge's own
   callers and stack files are unaffected (UPGRADING).
 
+### Node 26
+
+- Node 26 is the default and the baseline. `BackendConfig.node_version` and the
+  stack file's default are `26` (choices `26`, `24`, `22`, `20`, `18`, also on
+  `--node-version`), and the Node service template's `@types/node` follows
+  `node_version`. The frontend images, the e2e harness image and the generated
+  quality workflow run on `node:26-slim` / Node 26; `engines` asks for Node 26 in
+  the Vue, Svelte and workspace manifests; forge's own CI runs on Node 26.
+- The Vue template takes the current libraries: vue 3.5.44, pinia 4.1.0,
+  @tanstack/vue-query 5.105.0, @tanstack/vue-virtual 3.13.50, zod 4.6.7, ky
+  2.2.0, @iconify-json/lucide 1.2.149, vite 8.3.5, @vitejs/plugin-vue 6.0.10,
+  vitest and @vitest/coverage-v8 5.0.5 (exact, and the vitest override),
+  @playwright/test 1.64.1, eslint 10.13.0, eslint-plugin-vue 10.12.0,
+  typescript-eslint 8.72.1, jsdom 30.1.3, msw 3.0.3, vue-tsc 3.3.13, prettier
+  3.9.10, autoprefixer 10.6.2, @sentry/vue 11.10.0, @types/node 26.6.6 and
+  @tsconfig/node26 26.0.1 in place of @tsconfig/node22. @nuxt/ui stays 4.12.0
+  and TypeScript ^6.0.3 (typescript-eslint's peer range ends below 6.1).
+- The Node service template takes fastify 5.12.7, @prisma/client,
+  @prisma/adapter-pg and prisma 7.10.1 (npm's `latest` for prisma is an 8.0
+  release candidate), dotenv 18.0.9, uuid 14.0.3, @biomejs/biome 2.6.4 and
+  vitest 5.0.5. The platform-auth Node SDK takes @types/node 26, vitest 5.0.5,
+  @biomejs/biome 2.6.4 and fastify 5.12.7, with its lockfile re-resolved; the
+  e2e harness takes @types/node 26 and @playwright/test 1.64.1; the Svelte
+  template and the workspace root's vitest override follow to 5.0.5, so one
+  workspace resolves one vitest.
+
 ### Frontend application templates
 
 - `frontend.app_template` chooses what a Vue app contains

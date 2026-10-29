@@ -94,7 +94,7 @@ scenarios:
           language: node
           features: ["items"]
           server_port: 8030
-          node_version: "22"
+          node_version: "26"
       frontend:
         framework: vue
         include_auth: true
@@ -124,7 +124,7 @@ scenarios:
           language: node
           features: ["items"]
           server_port: 8040
-          node_version: "22"
+          node_version: "26"
       frontend:
         framework: svelte
         include_auth: false
@@ -246,7 +246,7 @@ scenarios:
           language: node
           features: ["products"]
           server_port: 8091
-          node_version: "22"
+          node_version: "26"
       frontend:
         framework: vue
         include_auth: true
@@ -276,7 +276,7 @@ scenarios:
           language: node
           features: ["products"]
           server_port: 8101
-          node_version: "22"
+          node_version: "26"
         - name: rust-svc
           language: rust
           features: ["tickets"]
@@ -352,7 +352,7 @@ scenarios:
           language: node
           features: ["items"]
           server_port: 8130
-          node_version: "22"
+          node_version: "26"
       options:
         middleware.rate_limit: true
         observability.otel: true
@@ -448,7 +448,7 @@ scenarios:
           language: node
           features: ["items"]
           server_port: 8180
-          node_version: "22"
+          node_version: "26"
       options:
         queue.backend: bullmq
         middleware.response_cache: true

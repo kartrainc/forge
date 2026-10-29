@@ -71,8 +71,12 @@ export async function routerFor(config: ApplicationConfig, at = '/'): Promise<Ro
     for (const sections of Object.values(layout.menus)) for (const name of targets(sections.flatMap(section => section.items))) names.add(name)
   }
   const routes: RouteRecordRaw[] = [...names].map(name => ({ path: `/${name}`, name, component: Blank }))
+  // A placeholder that is already a route the menus open keeps that route (without :item).
   for (const layout of Object.values(config.layouts)) {
-    if (layout.placeholder) routes.push({ path: `/${layout.placeholder}/:item`, name: layout.placeholder, component: Blank })
+    if (layout.placeholder && !names.has(layout.placeholder)) {
+      names.add(layout.placeholder)
+      routes.push({ path: `/${layout.placeholder}/:item`, name: layout.placeholder, component: Blank })
+    }
   }
   routes.push({ path: '/:any(.*)*', name: '__fallback__', component: Blank })
   const router = createRouter({ history: createMemoryHistory(), routes })

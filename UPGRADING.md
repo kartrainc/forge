@@ -146,7 +146,7 @@ then run architecture and all three native test suites against the candidate.
   stock TypeScript 7. The compatibility failure is tracked in
   [issue #357](https://github.com/cchifor/forge/issues/357); a compiler fork is not
   substituted automatically.
-- **Web frontends:** use Node 22.18 or newer. Vite 8 uses Rolldown build options.
+- **Web frontends:** use Node 26 or newer (see "Node 26" below). Vite 8 uses Rolldown build options.
   SvelteKit 3 puts adapter/preprocessor settings in the Vite plugin and replaces
   `$app/stores` with `$app/state`. Resolve application paths through
   `$app/paths.resolve()` so navigation respects the deployment base; runtime
@@ -648,6 +648,20 @@ nothing with one frontend.
   `fc.page_features(config.all_features)`.
 - **Template updates reach every backend.** A template bump now re-renders each
   backend of that language, not only the first one.
+
+### Node 26 (unreleased)
+
+Node 26 is the default runtime. On the next update:
+
+- **Frontend apps** build on `node:26-slim` (their Dockerfile is regenerated) and
+  their `package.json` asks for Node 26 in `engines` and takes the current
+  libraries; an edited `package.json` gets the new version as a `.forge-merge`
+  proposal. Run the frontend locally on Node 26.
+- **Node services** keep the `node_version` their recipe records: an existing
+  project recorded `22` and stays on it until you change it. A new stack file
+  without `node_version` gets `26`. `@types/node` now follows `node_version`
+  (`^<major>.0.0`), and the template's libraries take their latest patches.
+- **The generated quality workflow and the e2e harness** run on Node 26.
 
 ### Frontend application templates (unreleased)
 

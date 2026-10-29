@@ -544,7 +544,7 @@ const paginatedItemResponseSchema = paginatedResponseSchema(itemSchema);
 
 ## Prerequisites
 
-- **Node.js** >= 22.18
+- **Node.js** >= 26
 - **npm** >= 9
 - **Backend** (optional): FastAPI service running on port 5000
 

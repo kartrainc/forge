@@ -243,7 +243,7 @@ class TestRenderFrontendDockerfile:
         path = render_frontend_dockerfile(config, tmp_path)
         content = path.read_text(encoding="utf-8")
 
-        assert "FROM node:22-slim AS builder" in content
+        assert "FROM node:26-slim AS builder" in content
         assert "FROM nginx:alpine" in content
         assert "run build" in content
 

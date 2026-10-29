@@ -158,7 +158,7 @@
     },
     ".forge/quality.json": {
       "size": 2761,
-      "sha256": "4c3d8b82d9a8fc17"
+      "sha256": "42151d2a69460b2e"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -166,7 +166,7 @@
     },
     ".github/workflows/quality.yml": {
       "size": 3420,
-      "sha256": "59c4ec23d78fa45a"
+      "sha256": "7c2d78f2bc68408b"
     },
     ".gitignore": {
       "size": 523,
@@ -210,7 +210,7 @@
     },
     "apps/admin/Dockerfile": {
       "size": 561,
-      "sha256": "601806cd08a11e8c"
+      "sha256": "56ff1fc05ad2dbc5"
     },
     "apps/admin/README.md": {
       "size": 953,
@@ -233,8 +233,8 @@
       "sha256": "c00a25cf996153d5"
     },
     "apps/admin/package.json": {
-      "size": 1869,
-      "sha256": "0325159c7e707f0b"
+      "size": 1868,
+      "sha256": "9241e7c78a3859f7"
     },
     "apps/admin/playwright.csp.config.ts": {
       "size": 859,
@@ -730,7 +730,7 @@
     },
     "apps/frontend/Dockerfile": {
       "size": 561,
-      "sha256": "601806cd08a11e8c"
+      "sha256": "56ff1fc05ad2dbc5"
     },
     "apps/frontend/README.md": {
       "size": 1073,
@@ -757,8 +757,8 @@
       "sha256": "c00a25cf996153d5"
     },
     "apps/frontend/package.json": {
-      "size": 2124,
-      "sha256": "c3b057c2d0716d36"
+      "size": 2123,
+      "sha256": "834e31b785e87549"
     },
     "apps/frontend/playwright.csp.config.ts": {
       "size": 859,
@@ -2025,8 +2025,8 @@
       "sha256": "<version-dependent>"
     },
     "package.json": {
-      "size": 688,
-      "sha256": "6d0010f24a113cdc"
+      "size": 687,
+      "sha256": "3296cc08411c8ed9"
     },
     "packages/platform-auth/README.md": {
       "size": 1468,
@@ -2754,7 +2754,7 @@
     },
     "tests/e2e/Dockerfile": {
       "size": 461,
-      "sha256": "8ba57ee26349df3c"
+      "sha256": "804df94be7277607"
     },
     "tests/e2e/_tasks/answers.json": {
       "size": 87,
@@ -2794,7 +2794,7 @@
     },
     "tests/e2e/package.json": {
       "size": 517,
-      "sha256": "52c2a32691d1619d"
+      "sha256": "d6e77c2409bf8c2e"
     },
     "tests/e2e/playwright.config.ts": {
       "size": 679,

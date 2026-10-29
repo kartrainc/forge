@@ -124,7 +124,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend-name", metavar="NAME", help="Backend service name (default: backend)")
     p.add_argument("--backend-port", type=int, metavar="PORT")
     p.add_argument("--python-version", choices=["3.13", "3.12", "3.11"])
-    p.add_argument("--node-version", choices=["22", "24"])
+    p.add_argument("--node-version", choices=["26", "24", "22", "20", "18"])
     p.add_argument("--rust-edition", choices=["2021", "2024"])
     p.add_argument("--go-version", choices=["1.27", "1.26"])
 

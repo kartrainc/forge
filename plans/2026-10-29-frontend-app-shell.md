@@ -196,6 +196,16 @@ createApplicationRouter({
     skill; CHANGELOG; UPGRADING (`crud-app` to `app-shell`, and the UI kit's
     switch-back, whose leftovers are now deleted); the plans index.
 
+12. `fix(config,update)` (review of #16): looping and malformed app-shell settings
+    refused; discontinued files taken back only on positive evidence, never beside
+    a pending `.forge-merge`; the no-auth `useAuth.login` takes the redirect.
+13. `fix(vue)` (review of #16): the guards, routes, menus and bootstrap fixes of the
+    Deviations' review section, each with its failing test first; the reference
+    configuration and the e2e starter open a sub-menu route and a placeholder; a
+    `vue/app-shell-no-auth` lane.
+14. `build`: Node 26 everywhere and the current frontend and Node service
+    libraries (the owner's ruling).
+
 ## Tests
 
 - **Configuration:** valid and invalid layouts, menus (duplicate ids, two
@@ -303,6 +313,17 @@ by a failing test first, then fixed. What changed against the sections above:
 17. **Coverage.** The reference configuration has a placeholder route and a
     sub-menu item with a route, and the e2e starter opens both; it also checks that
     a stalled sign-in shows `auth_stuck`.
+
+### Node 26 and the libraries
+
+18. **The owner's ruling of round 2.** Node 26 everywhere: the frontend and e2e
+    images, `engines`, the Node backend's default and choices (`26`, `24`, `22`,
+    `20`, `18`), `@types/node` following `node_version` in the Node service, CI.
+    The frontend and Node service libraries move to their current releases
+    (CHANGELOG lists them); `@nuxt/ui` stays 4.12.0 and TypeScript ^6.0.3, since
+    typescript-eslint's peer range ends below 6.1. `@tsconfig/node26` replaces
+    `@tsconfig/node22` as a devDependency; no tsconfig of the template extends
+    either, so the compiler options do not change.
 
 ## Open points
 
