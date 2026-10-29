@@ -1,0 +1,17 @@
+// The application's routes, composed once (ADR-015). forge renders the shell, the menus,
+// the routing contracts and the system pages from the configuration into
+// src/shared/application/; the project adds its pages per layout, its public routes,
+// the wrappers that fill a layout's slots, and its menu actions here.
+import { createApplicationRouter } from '@/shared/application/router'
+import { auth } from '../auth'
+
+const router = createApplicationRouter({
+  auth,
+  // The project's pages, per layout name: { <layout>: [ { path, name, component, meta } ] }.
+  routes: {},
+  actions: {
+    'sign-out': () => auth.signOut(),
+  },
+})
+
+export default router

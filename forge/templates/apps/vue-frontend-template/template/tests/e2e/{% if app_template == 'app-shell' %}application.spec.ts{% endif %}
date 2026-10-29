@@ -1,0 +1,46 @@
+import { mockSession } from './session';
+import { expect, test } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { application } from '../../src/shared/application/config';
+
+// FORGE_BROWSER_COVERAGE is set for the instrumented run; the run against the
+// production build under the content-security policy collects none.
+test.afterEach(async ({ page }, testInfo) => {
+  const directory = process.env.FORGE_BROWSER_COVERAGE;
+  if (!directory) return;
+  const coverage = await page.evaluate(() => (window as any).__coverage__);
+  expect(coverage, 'Browser instrumentation must produce real coverage').toBeTruthy();
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, String(testInfo.parallelIndex) + '-' + Date.now() + '.json'), JSON.stringify(coverage));
+});
+
+const [firstLayout] = Object.keys(application.layouts);
+const topLevel = application.layouts[firstLayout!]!.menus.primary.flatMap(section => section.items.map(item => item.label));
+
+test('the application shell boots on the landing route with its menus', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mockSession(page);
+  await page.goto('/');
+  await expect(page.locator('[data-shell="header"]')).toBeVisible();
+  // Nuxt UI's palette applies: under the content-security policy only its
+  // nonce lets the palette element in, and nothing else defines the shades.
+  const shade = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--ui-color-primary-500').trim());
+  expect(shade).not.toBe('');
+  const main = page.getByRole('navigation', { name: 'Main' });
+  for (const label of topLevel) await expect(main.getByText(label, { exact: true }).first()).toBeVisible();
+  await page.locator('[data-shell="sidebar-toggle"]').click();
+  await page.locator('[data-shell="sidebar-toggle"]').click();
+  expect(errors).toEqual([]);
+});
+
+// A project that renders its own not-found page tests it with its own specs.
+if (application.builtin.includes('not_found')) test('an unknown address opens the not-found destination', async ({ page }) => {
+  await mockSession(page);
+  await page.goto('/no-such-page-anywhere');
+  await expect(page.getByText('Page not found')).toBeVisible();
+  await page.getByRole('link', { name: 'Back to start' }).click();
+  await expect(page.locator('[data-shell="header"]')).toBeVisible();
+});

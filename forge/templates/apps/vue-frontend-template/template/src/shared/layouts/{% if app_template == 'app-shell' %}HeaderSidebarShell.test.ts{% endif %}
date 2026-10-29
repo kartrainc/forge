@@ -1,0 +1,106 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
+import UApp from '@nuxt/ui/components/App.vue'
+import HeaderSidebarShell from './HeaderSidebarShell.vue'
+import { application } from '@/shared/application/config'
+import { setApplicationContext } from '@/shared/application/context'
+import { routerFor, testAuth } from '@/shared/application/testing'
+
+const layout = Object.keys(application.layouts)[0]!
+let wrapper: VueWrapper | undefined
+const original = window.matchMedia
+
+function screen(wide: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: wide, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  })) as never
+}
+
+async function render(slots: Record<string, unknown> = {}, props: Record<string, unknown> = {}) {
+  const router = await routerFor(application)
+  // Inside UApp, as App.vue mounts every page: its tooltips and overlays need it.
+  const Root = defineComponent({ setup: () => () => h(UApp, null, () => h(HeaderSidebarShell, { layout, ...props }, slots as never)) })
+  wrapper = mount(Root, { global: { plugins: [router] }, attachTo: document.body })
+  await flushPromises()
+  return wrapper
+}
+
+function topLevelLabels(): string[] {
+  return application.layouts[layout]!.menus.primary.flatMap(section => section.items.map(item => item.label))
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  setApplicationContext({ auth: testAuth().auth, actions: { 'sign-out': () => {} } })
+})
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = undefined
+  window.matchMedia = original
+  document.body.innerHTML = ''
+})
+
+describe('the header-sidebar shell on a wide screen', () => {
+  beforeEach(() => screen(true))
+
+  it('renders the title, the primary menu and the page', async () => {
+    const shell = await render()
+    expect(shell.get('[data-shell="header"]').text()).toContain(application.title)
+    for (const label of topLevelLabels()) expect(shell.text()).toContain(label)
+    expect(shell.find('[data-test="blank-page"]').exists()).toBe(true)
+  })
+
+  it('fills its slots and collapses the sidebar and the right panel with the edge toggles', async () => {
+    const shell = await render({
+      logo: () => h('span', { 'data-test': 'logo' }, 'Logo'),
+      header: () => h('input', { 'data-test': 'search' }),
+      actions: () => h('button', { 'data-test': 'team' }, 'Team'),
+      footer: () => h('p', { 'data-test': 'footer' }, 'Footer'),
+      aside: () => h('p', { 'data-test': 'chat' }, 'Chat'),
+    }, { asideBadge: 2 })
+    for (const name of ['logo', 'search', 'team', 'footer', 'chat']) expect(shell.find(`[data-test="${name}"]`).exists()).toBe(true)
+
+    await shell.get('[data-shell="sidebar-toggle"]').trigger('click')
+    expect(localStorage.getItem(`shell-${layout}-sidebar-collapsed`)).toBe('true')
+    await shell.get('[data-shell="sidebar-toggle"]').trigger('click')
+    expect(localStorage.getItem(`shell-${layout}-sidebar-collapsed`)).toBe('false')
+
+    await shell.get('[data-shell="aside-toggle"]').trigger('click')
+    expect(shell.find('[data-test="chat"]').exists()).toBe(false)
+    expect(shell.find('[data-shell="aside-badge"]').exists()).toBe(true)
+    await shell.get('[data-shell="aside-toggle"]').trigger('click')
+    expect(shell.find('[data-test="chat"]').exists()).toBe(true)
+  })
+})
+
+describe('the header-sidebar shell on a narrow screen', () => {
+  beforeEach(() => screen(false))
+
+  it('lets the header slot cover the header and slides the right panel over the page', async () => {
+    const shell = await render({
+      header: ({ collapse }: { collapse: () => void }) => h('button', { 'data-test': 'search', onClick: collapse }, 'Search'),
+      actions: ({ expandHeader }: { expandHeader: () => void }) => h('button', { 'data-test': 'open-search', onClick: expandHeader }, 'Open search'),
+      aside: () => h('p', { 'data-test': 'chat' }, 'Chat'),
+    })
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+    await shell.get('[data-test="open-search"]').trigger('click')
+    expect(shell.find('[data-test="search"]').exists()).toBe(true)
+    await shell.get('[data-test="search"]').trigger('click')
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+    await shell.get('[data-test="open-search"]').trigger('click')
+    await shell.get('button[aria-label="Close"]').trigger('click')
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+
+    await shell.get('button[aria-label="Show panel"]').trigger('click')
+    await flushPromises()
+    await vi.waitFor(() => expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull())
+  })
+
+  it('offers the account menu when the slot is left to the shell', async () => {
+    const shell = await render()
+    const account = application.layouts[layout]!.menus.account
+    expect(shell.find('button[aria-label="Account"]').exists()).toBe(account.some(section => section.items.length > 0))
+  })
+})

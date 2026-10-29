@@ -1,0 +1,28 @@
+<script setup lang="ts">
+{%- if 'confirm' in extras.split(',') %}
+import ConfirmHost from '@/shared/components/ConfirmHost.vue'
+{%- endif %}
+{%- if session_dialog == 'builtin' %}
+import SessionTimeoutModal from '@/features/auth/components/SessionTimeoutModal.vue'
+{%- endif %}
+import { cspNonce } from './providers/csp'
+import { useQueryErrorToasts } from './providers/query-client'
+
+// UApp provides toasts, tooltips and overlays; its nonce reaches the <style>
+// elements Reka UI inserts (scrollbar hiding, the splitter's drag cursor).
+const nonce = cspNonce()
+
+useQueryErrorToasts()
+</script>
+
+<template>
+  <UApp :toaster="{ position: 'bottom-right', expand: true }" :nonce="nonce">
+    <RouterView />
+{%- if 'confirm' in extras.split(',') %}
+    <ConfirmHost />
+{%- endif %}
+{%- if session_dialog == 'builtin' %}
+    <SessionTimeoutModal />
+{%- endif %}
+  </UApp>
+</template>

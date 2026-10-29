@@ -1,0 +1,19 @@
+import { expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import ProfilePage from './ProfilePage.vue'
+import { setApplicationContext } from '@/shared/application/context'
+import { testAuth } from '@/shared/application/testing'
+
+it('lists what the contract knows about the user and signs out', async () => {
+  const { auth, user, calls } = testAuth(true)
+  setApplicationContext({ auth, actions: {} })
+  user.value = { username: 'dev', roles: ['admin', 'user'], orgId: null }
+  const page = mount(ProfilePage)
+  expect(page.text()).toContain('admin, user')
+  expect(page.text()).not.toContain('orgId')
+  await page.get('button').trigger('click')
+  expect(calls).toEqual(['signOut'])
+  user.value = 'not an object'
+  await page.vm.$nextTick()
+  expect(page.findAll('dt')).toHaveLength(0)
+})

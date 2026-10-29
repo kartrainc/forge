@@ -1,0 +1,55 @@
+// First import: it configures zod before any schema is built.
+import { cspNonce } from './providers/csp'
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import { VueQueryPlugin } from '@tanstack/vue-query'
+import ui from '@nuxt/ui/vue-plugin'
+
+import App from './App.vue'
+import router from './router'
+import { auth } from './auth'
+import { queryClient } from './providers/query-client'
+import { createAppHead } from './providers/head'
+import { configureApiClient } from '@/shared/api/client'
+
+import './styles/main.css'
+
+async function bootstrap() {
+{%- if 'msw' in extras.split(',') %}
+  // Start MSW in development when enabled
+  if (import.meta.env.DEV && import.meta.env.VITE_MSW_ENABLED === 'true') {
+    const { worker } = await import('@/shared/mocks/browser')
+    await worker.start({ onUnhandledFrame: 'bypass' })
+  }
+{%- endif %}
+
+  const app = createApp(App)
+
+  app.use(createPinia())
+  app.use(router)
+  app.use(VueQueryPlugin, { queryClient })
+  // Nuxt UI renders its palette through the head installed before it.
+  app.use(createAppHead(cspNonce()))
+  app.use(ui)
+
+  // The authentication contract (./auth.ts) initialises before the app mounts.
+  await auth.init?.()
+{%- if include_auth %}
+  // The gateway keeps the session in an HttpOnly cookie: no bearer token.
+  configureApiClient({
+    getToken: async () => null,
+    onUnauthorized: () => {
+      void auth.signIn()
+    },
+  })
+{%- else %}
+  configureApiClient({
+    getToken: async () => null,
+    onUnauthorized: () => {},
+  })
+{%- endif %}
+
+  app.mount('#app')
+}
+
+bootstrap()

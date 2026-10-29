@@ -1,0 +1,22 @@
+import { expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import AuthStuckPage from './AuthStuckPage.vue'
+import { application } from '@/shared/application/config'
+import { routerFor } from '@/shared/application/testing'
+
+it('offers to retry and to go to the sign-in page', async () => {
+  const router = await routerFor(application)
+  const reload = vi.fn()
+  vi.stubGlobal('location', { ...window.location, reload })
+  try {
+    const page = mount(AuthStuckPage, { global: { plugins: [router] } })
+    expect(page.text()).toContain('Sign-in is taking longer than usual')
+    await page.get('button').trigger('click')
+    expect(reload).toHaveBeenCalledOnce()
+    if (application.routing.sign_in) {
+      expect(page.get('a').attributes('href')).toBe(router.resolve({ name: application.routing.sign_in }).href)
+    }
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
