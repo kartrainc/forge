@@ -18,7 +18,7 @@ env:
   # registry snapshot, so an upstream release cannot turn this required check
   # red without a commit. Scheduled and manual runs resolve against the live
   # registry. Advance the snapshot as the maintainer runbook describes.
-  FORGE_NPM_SNAPSHOT: '2026-10-18T00:00:00Z'
+  FORGE_NPM_SNAPSHOT: '2026-10-29T13:00:00Z'
 jobs:
   policy:
     strategy:
