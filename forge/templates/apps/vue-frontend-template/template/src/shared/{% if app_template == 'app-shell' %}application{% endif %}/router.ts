@@ -29,7 +29,8 @@ const SYSTEM_TITLES: Record<Exclude<RoutingKey, 'landing'>, string> = {
   not_found: 'Page not found',
 }
 const EXTRA_ROUTES: Record<string, { path: string, title: string }> = {
-  home: { path: '', title: 'Home' },
+  // Off `/`, which always opens the landing route.
+  home: { path: 'home', title: 'Home' },
   profile: { path: 'profile', title: 'Profile' },
   settings: { path: 'settings', title: 'Settings' },
 }
@@ -46,6 +47,34 @@ function routeNames(records: RouteRecordRaw[], names: string[] = []): string[] {
     if (record.children) routeNames(record.children, names)
   }
   return names
+}
+
+/** The record named `name` and the list it sits in, searching the children too. */
+function findRecord(records: RouteRecordRaw[], name: string): { record: RouteRecordRaw, siblings: RouteRecordRaw[], nested: boolean } | null {
+  for (const record of records) {
+    if (record.name === name) return { record, siblings: records, nested: false }
+    const found = record.children ? findRecord(record.children, name) : null
+    if (found) return { ...found, nested: true }
+  }
+  return null
+}
+
+/**
+ * A project route named as routing.not_found answers every unknown address too: a
+ * catch-all beside it renders its component and keeps the address.
+ */
+function addNotFoundCatchAll(records: RouteRecordRaw[], name: string): void {
+  const found = findRecord(records, name)
+  if (!found || found.record.path.includes(':pathMatch')) return
+  const { record, siblings, nested } = found
+  const catchAll = {
+    path: nested ? ':pathMatch(.*)*' : '/:pathMatch(.*)*',
+    meta: { ...record.meta },
+    ...('component' in record && record.component ? { component: record.component } : {}),
+    ...('components' in record && record.components ? { components: record.components } : {}),
+    ...('props' in record && record.props !== undefined ? { props: record.props } : {}),
+  }
+  siblings.push(catchAll as RouteRecordRaw)
 }
 
 function menuTargets(items: MenuItemConfig[]): string[] {
@@ -103,6 +132,10 @@ export function createApplicationRouter(options: ApplicationOptions, config: App
     const page = systemPages[key]
     const name = config.routing[key]
     if (page && name) records.push({ path: SYSTEM_PATHS[key], name, component: page, meta: { requiresAuth: false, title: SYSTEM_TITLES[key] } })
+  }
+
+  if (config.routing.not_found && !config.builtin.includes('not_found')) {
+    addNotFoundCatchAll(records, config.routing.not_found)
   }
 
   const names = routeNames(records)

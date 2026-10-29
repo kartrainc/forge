@@ -141,8 +141,21 @@ frontend:
 An item has at most one of `to` (a route name), `action` (an id the project
 passes to the router factory) and `children` (one level); ids are kebab-case and
 unique within a layout; `badge` names a key whose value the project supplies at
-runtime with `provideMenuBadges`. A route marks the item it belongs to with
-`meta.menu: <id>`, which makes that item active and opens its parent.
+runtime with `provideMenuBadges` (account-menu badges included). A route marks the
+item it belongs to with `meta.menu: <id>`; without it, the item whose `to` is a
+matched route is active. The active item's parent is open, and follows navigation.
+A placeholder item opens the placeholder route with `{ item: <id> }` when that
+route takes `:item`, without params otherwise.
+
+The routing contracts: `/` always opens `landing` (the `home` extra sits at
+`/home`); `landing` may not be a system destination (the sign-in route, built in or
+not, the not-found, auth-stuck or forbidden route), which would loop, and the
+guards never redirect a visit to the route it is on. A project route named as
+`not_found` also answers every unknown address, keeping the address. Every
+`meta.requiresRole` along the matched routes must hold, and the deepest route that
+sets `meta.requiresAuth` decides whether it needs a sign-in. The app mounts without
+waiting for the authentication contract to start; a sign-in that does not answer
+in time ends on `auth_stuck`.
 
 What forge writes, and who owns it:
 

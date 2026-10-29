@@ -23,8 +23,9 @@ from forge.quality.model import subjects
 from forge.quality.runner import run_suites
 
 
-# The reference app-shell application (ADR-015): two layouts, sub-menus, an action,
-# the page extras as the routes the menus open, every system page built in.
+# The reference app-shell application (ADR-015): two layouts, sub-menus (one item opening
+# a route, one opening the placeholder route), an action, the page extras as the routes the
+# menus open, every system page built in. With --auth off it renders without sign-in.
 APP_SHELL_REFERENCE: dict = {
     "app_template": "app-shell",
     "features": [],
@@ -33,6 +34,8 @@ APP_SHELL_REFERENCE: dict = {
     "layouts": {
         "console": {
             "shell": "header-sidebar",
+            # A route without :item: the placeholder items open it without params.
+            "placeholder": "settings",
             "menus": {
                 "primary": [
                     {
@@ -48,7 +51,12 @@ APP_SHELL_REFERENCE: dict = {
                                 "label": "Sales",
                                 "icon": "i-lucide-shopping-cart",
                                 "children": [
-                                    {"id": "orders", "label": "Orders", "icon": "i-lucide-receipt"},
+                                    {
+                                        "id": "orders",
+                                        "label": "Orders",
+                                        "icon": "i-lucide-receipt",
+                                        "to": "profile",
+                                    },
                                     {"id": "invoices", "label": "Invoices", "badge": "invoices"},
                                 ],
                             },

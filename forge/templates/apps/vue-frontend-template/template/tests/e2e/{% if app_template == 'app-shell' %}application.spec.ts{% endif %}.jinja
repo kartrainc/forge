@@ -16,7 +16,14 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const [firstLayout] = Object.keys(application.layouts);
-const topLevel = application.layouts[firstLayout!]!.menus.primary.flatMap(section => section.items.map(item => item.label));
+const layout = application.layouts[firstLayout!]!;
+const topLevel = layout.menus.primary.flatMap(section => section.items.map(item => item.label));
+const parents = layout.menus.primary.flatMap(section => section.items).filter(item => item.children?.length);
+// A sub-menu item that opens a route, and an item that opens the placeholder route.
+const subMenuDestination = parents.flatMap(parent => (parent.children ?? []).filter(child => child.to).map(child => ({ parent, child })))[0];
+const placeholder = layout.placeholder
+  ? parents.flatMap(parent => (parent.children ?? []).filter(child => !child.to && !child.action).map(child => ({ parent, child })))[0]
+  : undefined;
 
 test('the application shell boots on the landing route with its menus', async ({ page }) => {
   const errors: string[] = [];
@@ -44,3 +51,45 @@ if (application.builtin.includes('not_found')) test('an unknown address opens th
   await page.getByRole('link', { name: 'Back to start' }).click();
   await expect(page.locator('[data-shell="header"]')).toBeVisible();
 });
+
+// The configuration names a sub-menu item with a route: opening its parent and the item
+// leaves the landing route for that route, and the parent stays open on it.
+if (subMenuDestination) test('a sub-menu item opens its route and keeps its parent open', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mockSession(page);
+  await page.goto('/');
+  const main = page.getByRole('navigation', { name: 'Main' });
+  const before = page.url();
+  await main.getByRole('button', { name: subMenuDestination.parent.label }).click();
+  await main.getByRole('link', { name: subMenuDestination.child.label }).click();
+  await expect(page).not.toHaveURL(before);
+  await expect(main.getByRole('link', { name: subMenuDestination.child.label })).toBeVisible();
+  await expect(page.getByText('Page not found')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+// An item without a destination opens the layout's placeholder route.
+if (placeholder) test('an item without a destination opens the placeholder route', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mockSession(page);
+  await page.goto('/');
+  const main = page.getByRole('navigation', { name: 'Main' });
+  const before = page.url();
+  await main.getByRole('button', { name: placeholder.parent.label }).click();
+  await main.getByRole('link', { name: placeholder.child.label }).click();
+  await expect(page).not.toHaveURL(before);
+  await expect(page.getByText('Page not found')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+{%- if include_auth and auth_runtime == 'forge' and 'auth_stuck' in builtin_pages.split(',') %}
+
+// The gateway never answers who is signed in: the app still mounts, and the guard's
+// timeout shows the stalled-sign-in page instead of a blank one.
+test('a sign-in that never answers shows the stalled sign-in page', async ({ page }) => {
+  await page.route(url => url.pathname === '/auth/userinfo', () => {});
+  await page.goto('/');
+  await expect(page.getByText('Sign-in is taking longer than usual')).toBeVisible({ timeout: 15_000 });
+});
+{%- endif %}

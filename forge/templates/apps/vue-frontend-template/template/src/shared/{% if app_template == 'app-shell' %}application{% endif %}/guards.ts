@@ -10,12 +10,20 @@ import type { AuthContract, RoutingKey } from './contracts'
 
 export const AUTH_INIT_TIMEOUT_MS = 5_000
 
-function requiredRole(to: RouteLocationNormalized): string | null {
-  for (const record of to.matched) {
-    const role = record.meta?.requiresRole
-    if (typeof role === 'string' && role.length > 0) return role
+/** Every role the matched routes require: a parent's role does not stand in for a child's. */
+function requiredRoles(to: RouteLocationNormalized): string[] {
+  return to.matched
+    .map(record => record.meta?.requiresRole)
+    .filter((role): role is string => typeof role === 'string' && role.length > 0)
+}
+
+/** The deepest matched route that says whether it needs a sign-in decides (a child's false wins). */
+function requiresAuth(to: RouteLocationNormalized): boolean {
+  for (let i = to.matched.length - 1; i >= 0; i -= 1) {
+    const value = to.matched[i]?.meta?.requiresAuth
+    if (typeof value === 'boolean') return value
   }
-  return null
+  return false
 }
 
 function waitForAuth(isLoading: Readonly<Ref<boolean>>, timeoutMs: number): Promise<'ready' | 'timeout'> {
@@ -45,21 +53,25 @@ export interface GuardOptions {
 export function installGuards(router: Router, { auth, routing, enabled, timeoutMs = AUTH_INIT_TIMEOUT_MS }: GuardOptions): void {
   router.beforeEach(async (to): Promise<boolean | RouteLocationRaw> => {
     if (!enabled) return true
+    // Never a redirect to the route the visit is on: a contract that names one route
+    // for two destinations stops there instead of looping.
+    const redirect = (name: string, query?: Record<string, string>): boolean | RouteLocationRaw =>
+      to.name === name ? true : { name, ...(query ? { query } : {}) }
+    // The stalled-sign-in page is where a wait ends; entering it never waits again.
+    if (routing.auth_stuck && to.name === routing.auth_stuck) return true
     if (auth.isLoading.value && (await waitForAuth(auth.isLoading, timeoutMs)) === 'timeout') {
-      if (!routing.auth_stuck || to.name === routing.auth_stuck) return true
-      return { name: routing.auth_stuck, query: { next: to.fullPath } }
+      return routing.auth_stuck ? redirect(routing.auth_stuck, { next: to.fullPath }) : true
     }
     const signedIn = auth.isAuthenticated.value
-    if (to.matched.some(record => record.meta?.requiresAuth === true) && !signedIn) {
-      if (routing.sign_in) return { name: routing.sign_in, query: { redirect: to.fullPath } }
+    if (requiresAuth(to) && !signedIn) {
+      if (routing.sign_in) return redirect(routing.sign_in, { redirect: to.fullPath })
       await auth.signIn(to.fullPath)
       return false
     }
     if (signedIn && routing.sign_in && to.name === routing.sign_in && routing.landing) {
-      return { name: routing.landing }
+      return redirect(routing.landing)
     }
-    const role = requiredRole(to)
-    if (role && signedIn && !auth.hasRole(role)) {
+    if (signedIn && requiredRoles(to).some(role => !auth.hasRole(role))) {
       const target = routing.forbidden ?? routing.landing
       return target && to.name !== target ? { name: target } : false
     }

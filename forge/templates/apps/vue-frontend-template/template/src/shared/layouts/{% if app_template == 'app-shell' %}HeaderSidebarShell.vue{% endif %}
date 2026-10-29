@@ -11,7 +11,7 @@ import { computed, ref, useSlots, watch } from 'vue'
 import { useLocalStorage, useMediaQuery } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import { application } from '@/shared/application/config'
-import { useApplicationDropdown, useApplicationMenu } from '@/shared/application/menus'
+import { useApplicationDropdown, useApplicationMenu, useOpenMenuItems } from '@/shared/application/menus'
 
 const props = withDefaults(defineProps<{
   /** The layout whose menus the shell renders. */
@@ -32,6 +32,8 @@ defineSlots<{
 const slots = useSlots()
 const route = useRoute()
 const primary = useApplicationMenu(props.layout, 'primary')
+// Controlled, so the open sub-menu follows navigation, not only the first render.
+const openItems = useOpenMenuItems(props.layout, 'primary')
 const account = useApplicationDropdown(props.layout, 'account')
 const footer = useApplicationMenu(props.layout, 'footer')
 const hasAccount = computed(() => account.value.some(group => group.some(item => item.type !== 'label')))
@@ -88,6 +90,9 @@ function toggleAside() {
           <slot name="actions" :narrow="narrow" :expand-header="() => (headerExpanded = true)" :account="account">
             <UDropdownMenu v-if="hasAccount" :items="account" :content="{ align: 'end' }">
               <UButton icon="i-lucide-circle-user" color="neutral" variant="ghost" aria-label="Account" />
+              <template #item-trailing="{ item }">
+                <UBadge v-if="item.badge !== undefined" :label="String(item.badge)" size="sm" variant="subtle" data-shell="account-badge" />
+              </template>
             </UDropdownMenu>
           </slot>
           <UButton
@@ -116,6 +121,7 @@ function toggleAside() {
       >
         <template #default="{ collapsed: isCollapsed }">
           <UNavigationMenu
+            v-model="openItems"
             :items="primary"
             orientation="vertical"
             :collapsed="isCollapsed"

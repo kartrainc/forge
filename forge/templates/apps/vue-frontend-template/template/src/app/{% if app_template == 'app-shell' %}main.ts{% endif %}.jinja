@@ -32,8 +32,12 @@ async function bootstrap() {
   app.use(createAppHead(cspNonce()))
   app.use(ui)
 
-  // The authentication contract (./auth.ts) initialises before the app mounts.
-  await auth.init?.()
+  // The authentication contract (./auth.ts) starts here, and the app does not wait for it:
+  // the guards wait (a bounded time), so a sign-in that never answers ends on the
+  // auth_stuck page instead of a blank one.
+  auth.init?.().catch((error: unknown) => {
+    console.error('The authentication contract failed to start.', error)
+  })
 {%- if include_auth %}
   // The gateway keeps the session in an HttpOnly cookie: no bearer token.
   configureApiClient({

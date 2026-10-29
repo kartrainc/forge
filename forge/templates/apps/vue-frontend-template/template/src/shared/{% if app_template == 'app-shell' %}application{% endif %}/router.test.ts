@@ -65,7 +65,7 @@ describe('createApplicationRouter', () => {
     expect(r.hasRoute('not-found')).toBe(true)
     expect(r.hasRoute('forbidden')).toBe(true)
     expect(r.resolve('/does-not-exist').name).toBe('not-found')
-    expect(r.resolve({ name: 'home' }).path).toBe('/')
+    expect(r.resolve({ name: 'home' }).path).toBe('/home')
   })
 
   it('refuses a configuration the composition cannot satisfy', () => {
@@ -91,4 +91,22 @@ describe('createApplicationRouter', () => {
     await r.push('/admin')
     expect(r.currentRoute.value.name).toBe('forbidden')
   })
+
+  it('keeps / for the landing route when the home extra is on', async () => {
+    const config = testApplication({ extras: ['home'] })
+    const r = router({}, config)
+    await r.push('/')
+    expect(r.currentRoute.value.name).toBe('start')
+    expect(r.resolve({ name: 'home' }).path).toBe('/home')
+  })
+
+  it('renders a project not-found route for every unknown address, keeping the address', () => {
+    const Oops = defineComponent({ setup: () => () => h('p', 'oops') })
+    const config = testApplication({ routing: { ...testApplication().routing, not_found: 'oops' } })
+    const r = router({ publicRoutes: [...publicRoutes.filter(route => route.name !== 'not-found'), { path: '/404', name: 'oops', component: Oops }] }, config)
+    const resolved = r.resolve('/no/such/page')
+    expect(resolved.path).toBe('/no/such/page')
+    expect(resolved.matched.at(-1)?.components?.default).toBe(Oops)
+  })
 })
+

@@ -10,6 +10,16 @@ const routes = [
   { path: '/secret', name: 'secret', component: Page, meta: { requiresAuth: true, requiresRole: 'admin' } },
   { path: '/stuck', name: 'stuck', component: Page },
   { path: '/open', name: 'open', component: Page },
+  { path: '/login', name: 'login', component: Page },
+  {
+    path: '/area',
+    component: Page,
+    meta: { requiresAuth: true, requiresRole: 'user' },
+    children: [
+      { path: 'admin', name: 'area-admin', component: Page, meta: { requiresRole: 'admin' } },
+      { path: 'public', name: 'area-public', component: Page, meta: { requiresAuth: false } },
+    ],
+  },
 ]
 
 function build(auth = testAuth().auth, routing: Record<string, string> = { landing: 'start', auth_stuck: 'stuck' }, enabled = true) {
@@ -78,5 +88,32 @@ describe('installGuards', () => {
     await router.push('/open')
     await router.push('/secret')
     expect(router.currentRoute.value.name).toBe('open')
+  })
+
+  it('requires every role the matched routes name, not only the first', async () => {
+    const router = build(testAuth(true, ['user']).auth)
+    await router.push('/area/admin')
+    expect(router.currentRoute.value.name).toBe('start')
+  })
+
+  it('lets the deepest route that says so decide whether it needs a sign-in', async () => {
+    const router = build(testAuth(false).auth, { landing: 'start', sign_in: 'login' })
+    await router.push('/area/public')
+    expect(router.currentRoute.value.name).toBe('area-public')
+  })
+
+  it('enters auth_stuck without waiting for the sign-in a second time', { timeout: 2_000 }, async () => {
+    const { auth, isLoading } = testAuth(false)
+    isLoading.value = true
+    const router = createRouter({ history: createMemoryHistory(), routes })
+    installGuards(router, { auth, routing: { auth_stuck: 'stuck' }, enabled: true, timeoutMs: 60_000 })
+    await router.push('/stuck')
+    expect(router.currentRoute.value.name).toBe('stuck')
+  })
+
+  it('never redirects to the route it is on', async () => {
+    const router = build(testAuth(true).auth, { landing: 'login', sign_in: 'login' })
+    await router.push('/login')
+    expect(router.currentRoute.value.name).toBe('login')
   })
 })

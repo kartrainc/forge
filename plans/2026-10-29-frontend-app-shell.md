@@ -273,6 +273,37 @@ What the implementation does differently from the sections above, and why.
    items (the shell's account menu), and `src/shared/application/testing.ts`
    holds the fixtures of the runtime's unit tests.
 
+### After the review of #16
+
+An adversarial review of the pull request found fourteen issues; each was reproduced
+by a failing test first, then fixed. What changed against the sections above:
+
+10. **Guards.** Every `meta.requiresRole` along the matched routes must hold; the
+    deepest route that sets `meta.requiresAuth` decides; entering `auth_stuck` never
+    waits again; no redirect goes to the route the visit is on.
+11. **Routing.** `landing` may not be a system destination (the sign-in route, built
+    in or not, the not-found, auth-stuck or forbidden route). The `home` extra sits
+    at `/home`, so `/` always opens `landing`. A project route named as `not_found`
+    gets a catch-all beside it that renders it and keeps the address.
+12. **Bootstrap.** `main.ts` starts the auth contract without waiting for it; a
+    sign-in that never answers ends on `auth_stuck` instead of a blank page.
+13. **Menus.** The active item falls back to the item whose `to` is a matched route;
+    the open sub-menu is controlled (`useOpenMenuItems`) and follows navigation;
+    dropdown items keep their badges; a placeholder route without `:item` gets no
+    params.
+14. **Update.** A discontinued scaffold file is deleted only on positive evidence:
+    recorded `scaffold`, origin `base-template` or `fragment`, still `scaffold` under
+    the ownership policy, and its hash; anything else stays, keeps its record and is
+    reported. A pending `.forge-merge` beside a discontinued file stops the update.
+15. **Configuration.** Shapes are checked before defaults apply (`menus: []`,
+    `auth: []`, `routing: []`, `extras: {}` are errors), and a layout body may not
+    name another layout than its key.
+16. **Without sign-in.** The no-auth `useAuth.login` takes the optional redirect,
+    so the adapter type-checks; a `vue/app-shell-no-auth` lane renders it.
+17. **Coverage.** The reference configuration has a placeholder route and a
+    sub-menu item with a route, and the e2e starter opens both; it also checks that
+    a stalled sign-in shows `auth_stuck`.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

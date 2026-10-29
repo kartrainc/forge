@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { activeMenuItem, buildMenu, provideMenuBadges, useApplicationDropdown, useApplicationMenu } from './menus'
+import { activeMenuItem, buildMenu, dropdownMenu, provideMenuBadges, resolveActiveItem, useApplicationDropdown, useApplicationMenu, useOpenMenuItems } from './menus'
 import { setApplicationContext } from './context'
 import { testApplication, testAuth } from './testing'
 import { application } from './config'
@@ -75,3 +75,47 @@ describe('useApplicationMenu', () => {
     expect(buildMenu('main', 'primary', { application: app })[1]![0]!.type).toBe('label')
   })
 })
+
+describe('the open sub-menu', () => {
+  it('follows navigation, by meta.menu or by the item whose route matches', async () => {
+    const Page = { render: () => null }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/orders', name: 'orders', component: Page },
+        { path: '/help', name: 'help-page', component: Page, meta: { menu: 'help' } },
+        { path: '/invoices', name: 'invoice-list', component: Page, meta: { menu: 'invoices' } },
+      ],
+    })
+    await router.push('/orders')
+    let open: ReturnType<typeof useOpenMenuItems> | undefined
+    mount(defineComponent({ setup() { open = useOpenMenuItems('main', 'primary', app); return () => null } }), { global: { plugins: [router] } })
+    expect(open!.value).toEqual(['sales'])
+    await router.push('/help')
+    await nextTick()
+    expect(open!.value).toEqual([])
+    await router.push('/invoices')
+    await nextTick()
+    expect(open!.value).toEqual(['sales'])
+  })
+
+  it('takes the item whose route matches when no route names one', () => {
+    expect(resolveActiveItem(app.layouts.main!, { matched: [{ name: 'orders', meta: {} }] } as never)).toBe('orders')
+    expect(resolveActiveItem(app.layouts.main!, { matched: [{ name: 'elsewhere', meta: {} }] } as never)).toBeNull()
+  })
+})
+
+describe('dropdownMenu', () => {
+  it('keeps the badges of the items it converts', () => {
+    const items = dropdownMenu([[{ label: 'Inbox', badge: 7, to: '/inbox' }]])
+    expect(items[0]![0]).toMatchObject({ label: 'Inbox', badge: 7 })
+  })
+})
+
+describe('placeholders', () => {
+  it('pass the item id only to a placeholder route that takes one', () => {
+    const [first] = buildMenu('main', 'primary', { application: app, placeholderTakesItem: false })
+    expect(first![1]!.children![1]!.to).toEqual({ name: 'not-built' })
+  })
+})
+

@@ -273,8 +273,8 @@
       "sha256": "c7268a35adc2f5ba"
     },
     "apps/frontend/src/app/main.ts": {
-      "size": 1145,
-      "sha256": "0a98f9b183b934b0"
+      "size": 1385,
+      "sha256": "773899f3ce4fdf80"
     },
     "apps/frontend/src/app/providers/csp.test.ts": {
       "size": 544,
@@ -385,32 +385,32 @@
       "sha256": "64735be39fef4cd4"
     },
     "apps/frontend/src/shared/application/guards.test.ts": {
-      "size": 3029,
-      "sha256": "ac10656740ff97b7"
+      "size": 4626,
+      "sha256": "d1f5414296d940d8"
     },
     "apps/frontend/src/shared/application/guards.ts": {
-      "size": 2715,
-      "sha256": "90ba612d755b37e4"
+      "size": 3491,
+      "sha256": "87cdbeb515f9ecfb"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
-      "size": 3747,
-      "sha256": "94fbb0ddc97e8689"
+      "size": 5661,
+      "sha256": "d346e0213220aa1c"
     },
     "apps/frontend/src/shared/application/menus.ts": {
-      "size": 4259,
-      "sha256": "16694ccb33d56761"
+      "size": 7257,
+      "sha256": "ccc5a9e1b00147c5"
     },
     "apps/frontend/src/shared/application/pages.ts": {
       "size": 708,
       "sha256": "cc10dbf98e8ed353"
     },
     "apps/frontend/src/shared/application/router.test.ts": {
-      "size": 4511,
-      "sha256": "71730da48bec2f4f"
+      "size": 5422,
+      "sha256": "81e525310a368e7b"
     },
     "apps/frontend/src/shared/application/router.ts": {
-      "size": 5538,
-      "sha256": "ceed5f859ae2dd58"
+      "size": 7048,
+      "sha256": "a7edc82e5cc4c193"
     },
     "apps/frontend/src/shared/application/testing.ts": {
       "size": 3484,
@@ -457,8 +457,8 @@
       "sha256": "19a528269361661a"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
-      "size": 8522,
-      "sha256": "a45923532c709fb2"
+      "size": 8933,
+      "sha256": "bbbe9ab74936a4c4"
     },
     "apps/frontend/src/shared/observability/sentry.test.ts": {
       "size": 1155,
@@ -521,8 +521,8 @@
       "sha256": "53363b185599bcc8"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 2486,
-      "sha256": "7c62f1b5a153c56d"
+      "size": 5110,
+      "sha256": "98df69e84e463709"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
