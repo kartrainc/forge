@@ -155,6 +155,11 @@ def test_lcov_adapters_require_successful_native_tests(service, monkeypatch, lan
         assert json.loads((root / output).read_text(encoding="utf-8"))["tests"] > 0
 
 
+_GIT_PLUGIN_NOISE = (
+    'GitCommitInfo: timeout of 3000ms exceeded while running "git fetch origin c03f337f"\n'
+)
+
+
 def test_browser_remaps_original_sources(service, monkeypatch):
     root, directory, source = service
     monkeypatch.delenv("VITE_AUTH_DISABLED", raising=False)
@@ -163,7 +168,10 @@ def test_browser_remaps_original_sources(service, monkeypatch):
         # The app keeps the project's authentication setting (its .env): the
         # suites answer the session in the page, as a consumer's own specs do.
         assert "VITE_AUTH_DISABLED" not in kwargs["env"]
-        kwargs["stdout"].write(json.dumps({"stats": {"expected": 2, "unexpected": 0, "flaky": 0}}))
+        # On CI, Playwright's git plugin prints to stdout; the report is a file.
+        kwargs["stdout"].write(_GIT_PLUGIN_NOISE)
+        report = {"stats": {"expected": 2, "unexpected": 0, "flaky": 0}}
+        Path(kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(json.dumps(report))
         return subprocess.CompletedProcess(argv, 0)
 
     def remap(argv, cwd, env):
@@ -174,6 +182,8 @@ def test_browser_remaps_original_sources(service, monkeypatch):
     monkeypatch.setattr("forge.quality.runner._execute", remap)
     output = run_native(root, {"name": "api", "path": "services/api", "language": "vue"}, "e2e")
     assert json.loads((root / output).read_text(encoding="utf-8"))["tests"] == 2
+    # The coverage gate reads every JSON file there as a coverage report.
+    assert [p.name for p in (root / output).parent.glob("*.json")] == ["e2e.json"]
 
 
 _PALETTE = {
@@ -235,13 +245,18 @@ def _content_security(
             with open(env["FORGE_CSP_REPORT"], "w", encoding="utf-8") as stream:
                 stream.writelines(json.dumps(report) + "\n" for report in reports)
             outcome = {"stats": stats or {"expected": 3, "unexpected": 0, "flaky": 0}}
-            kwargs["stdout"].write(json.dumps({**outcome, "errors": list(errors)}))
+            kwargs["stdout"].write(_GIT_PLUGIN_NOISE)
+            Path(env["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(
+                json.dumps({**outcome, "errors": list(errors)})
+            )
             return subprocess.CompletedProcess(argv, exit_code)
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr("forge.quality.csp.subprocess.run", run)
     result = check_content_security(service, tmp_path / "out", ui_kit=ui_kit)
     assert calls == [["npm", "run", "build"], ["npx", "--no-install", "playwright"]]
+    # The coverage gate reads every JSON file there as a coverage report.
+    assert not list((tmp_path / "out").glob("*.json"))
     return result
 
 
