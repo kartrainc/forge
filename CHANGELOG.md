@@ -341,6 +341,35 @@ Each safeguard below is an option, so a project can choose another strategy.
   outside the plugin API that SemVer covers (`forge/api.py`), and forge's own
   callers and stack files are unaffected (UPGRADING).
 
+### Frontend application templates
+
+- `frontend.app_template` chooses what a Vue app contains
+  ([ADR-015](docs/architecture-decisions/ADR-015-frontend-application-templates-layouts-and-menus.md)).
+  `crud-app` (the default) is the sample application as before. `app-shell`
+  (with `ui_kit: nuxt-ui`) renders the boilerplate, a configurable shell and no
+  page: `layouts` (named, each with a `shell` and `primary`, `account` and
+  `footer` menus with sections and one level of sub-items), `routing`
+  (`landing`, `sign_in`, `not_found`, `auth_stuck`, `forbidden`, each `builtin`
+  or a project route), `auth` (`runtime: forge | project`, `session_dialog`) and
+  `extras` (the sample pages and helpers it wants). The first shell is
+  `header-sidebar`: a full-width header above Nuxt UI's dashboard sidebar,
+  page and right panel. A generated router factory composes the project's
+  routes, wrappers and actions once and refuses a menu item or contract that
+  names a missing route. See the frontend-layouts guide.
+- An owned update deletes every scaffold file forge stops emitting when it is
+  unchanged since emission, and reports an edited one as left in place and
+  keeps its record (the dev-server overlay's rule, generalised). Leaving the
+  sample application, switching UI kits or dropping a page no longer leaves
+  untracked files behind.
+- Vue apps without `include_chat` no longer receive the chat's
+  `ui_protocol.gen.ts`, `events.gen.ts` and `src/core/ui-protocol/`.
+- A backend feature named like a reserved page (`settings`, `home`, …) is
+  refused only for a frontend that renders it as a page.
+- The recipe records `app_template`, `layouts` (as a list of named entries, so
+  their order survives), `routing`, `auth` and `extras`;
+  `scripts/check_generated_quality.py` takes `--frontend-app-template app-shell`
+  and a `vue/app-shell` lane runs it.
+
 ### Changed — manifest schema v4 → v5
 
 - `forge.toml` records several frontends in a `[[forge.frontends]]` array,
