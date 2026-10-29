@@ -212,7 +212,7 @@ class ProjectConfig:
         carry an api_target at all; returns empty string in that case
         to match pre-typed behaviour.
         """
-        if isinstance(self.typed.frontend, (FrontendGenerate, FrontendExternal)):
+        if isinstance(self.typed.frontend, FrontendGenerate | FrontendExternal):
             return self.typed.frontend.api_target_url
         return ""
 
@@ -240,7 +240,7 @@ class ProjectConfig:
         ``none`` variant returns ``"local"`` to match the pre-typed
         ``options.get(..., "local")`` default.
         """
-        if isinstance(self.typed.frontend, (FrontendGenerate, FrontendExternal)):
+        if isinstance(self.typed.frontend, FrontendGenerate | FrontendExternal):
             return self.typed.frontend.api_target_type
         return "local"
 
@@ -976,14 +976,18 @@ class ProjectConfig:
                 )
 
     def _validate_features_against_reserved(self) -> None:
-        """Backend feature names must not collide with frontend's reserved page names."""
-        if not self.active_frontends:
-            return
-        for bc in self.backends:
-            for f in bc.features:
+        """A backend feature a frontend renders as a page must not take a reserved page name.
+
+        Only the pages a frontend emits can collide with its own folders: a backend
+        feature named ``settings`` is refused for an app that renders a page per backend
+        feature, and accepted for one that lists its pages or renders none (ADR-015).
+        """
+        owners = {f: bc.name for bc in self.backends for f in bc.features}
+        for fc in self.active_frontends:
+            for f in fc.page_features(self.all_features):
                 if f in FRONTEND_RESERVED:
                     raise ValueError(
-                        f"Feature '{f}' on backend '{bc.name}' is reserved "
+                        f"Feature '{f}' on backend '{owners.get(f, '?')}' is reserved "
                         f"in the frontend template."
                     )
 
