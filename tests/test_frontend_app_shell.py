@@ -380,3 +380,121 @@ def test_an_update_to_app_shell_takes_back_unchanged_sample_files(tmp_path: Path
     assert edited in recorded
     assert "apps/frontend/src/shared/application/router.ts" in recorded
     assert (root / "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue").is_file()
+
+
+# --- review round 2 (kartrainc/forge#16) --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        # A routing contract that loops: the landing route is a system destination.
+        ({"routing": {"landing": "login"}}, "landing .login. is also the sign_in destination"),
+        ({"routing": {"landing": "my-sign-in", "sign_in": "my-sign-in"}}, "also the sign_in destination"),
+        ({"routing": {"landing": "not-found"}}, "also the not_found destination"),
+        ({"routing": {"landing": "forbidden"}}, "also the forbidden destination"),
+        ({"routing": {"landing": "wait", "auth_stuck": "wait"}}, "also the auth_stuck destination"),
+        # Shapes are checked before defaults apply.
+        ({"layouts": {"main": {"menus": []}}}, "menus must be a table"),
+        ({"auth": []}, "auth must be a table"),
+        ({"routing": []}, "routing must be a table"),
+        ({"extras": {}}, "extras must be a list"),
+        # A layout's name is its key.
+        ({"layouts": {"main": {"name": "different"}}}, "layouts.main carries name 'different'"),
+    ],
+)
+def test_round_two_refusals(overrides: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _frontend(**overrides).validate()
+
+
+def test_a_layout_body_may_repeat_its_own_name() -> None:
+    fc = _frontend(layouts={"main": {"name": "main"}})
+    fc.validate()
+    assert [name for name, _ in layout_entries(fc)] == ["main"]
+
+
+def test_app_shell_renders_without_authentication(tmp_path: Path) -> None:
+    fc = _frontend(include_auth=False, extras=["home"])
+    app = _render(_project(fc), tmp_path) / "apps" / "frontend"
+    use_auth = (app / "src/shared/composables/useAuth.ts").read_text(encoding="utf-8")
+    # The forge adapter passes the redirect on: the no-auth login takes it too.
+    assert "function login(_redirect?: string)" in use_auth
+    assert (app / "src/shared/application/forgeAuth.ts").is_file()
+    for rel in ["src/shared/system/SignInPage.vue", "src/shared/system/AuthStuckPage.vue"]:
+        assert not (app / rel).exists(), rel
+    assert json.loads((app / "src/shared/application/config.ts").read_text(encoding="utf-8").split(" = ", 1)[1])["auth"] is False
+
+
+def _crud_project(tmp_path: Path) -> Path:
+    crud = FrontendConfig(project_name="frontend", framework=FrontendFramework.VUE, ui_kit="nuxt-ui", include_chat=False, include_openapi=False)
+    return _render(_project(crud), tmp_path)
+
+
+def _to_app_shell(root: Path) -> None:
+    recipe = root / ".forge" / "quality.json"
+    data = json.loads(recipe.read_text(encoding="utf-8"))
+    shell = _frontend()
+    data["config"]["frontend"].update(
+        {"app_template": "app-shell", "features": [], "layouts": shell.layouts, "routing": shell.routing, "extras": shell.extras}
+    )
+    recipe.write_text(json.dumps(data), encoding="utf-8")
+
+
+DISCONTINUED = "apps/frontend/src/features/settings/ui/SettingsPage.vue"
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(lambda record: record.pop("ownership"), id="ownership missing"),
+        pytest.param(lambda record: record.update(origin="somewhere"), id="unknown origin"),
+        pytest.param(lambda record: record.pop("origin"), id="origin missing"),
+        pytest.param(lambda record: record.update(ownership="user"), id="ownership user"),
+        pytest.param(lambda record: record.update(ownership="generated-ish"), id="ownership unknown"),
+    ],
+)
+def test_an_update_deletes_a_discontinued_file_only_on_trustworthy_provenance(tmp_path: Path, tamper) -> None:
+    import tomlkit
+
+    root = _crud_project(tmp_path)
+    manifest_path = root / "forge.toml"
+    manifest = tomlkit.parse(manifest_path.read_text(encoding="utf-8"))
+    record = manifest["forge"]["provenance"][DISCONTINUED]
+    tamper(record)
+    manifest_path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
+    _to_app_shell(root)
+
+    report = update_owned_project(root)
+
+    assert report["passed"], report
+    assert (root / DISCONTINUED).is_file()
+    assert DISCONTINUED in report["left_in_place"]
+
+
+def test_an_update_keeps_a_discontinued_file_whose_recomputed_ownership_is_generated(tmp_path: Path) -> None:
+    import tomlkit
+
+    root = _crud_project(tmp_path)
+    # A path the policy owns (src/shared/**) recorded, wrongly, as scaffold.
+    rel = "apps/frontend/src/shared/components/AppSidebar.vue"
+    manifest_path = root / "forge.toml"
+    manifest = tomlkit.parse(manifest_path.read_text(encoding="utf-8"))
+    manifest["forge"]["provenance"][rel]["ownership"] = "scaffold"
+    manifest_path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
+    _to_app_shell(root)
+
+    report = update_owned_project(root)
+
+    assert (root / rel).is_file()
+    assert rel in report["left_in_place"]
+
+
+def test_an_update_refuses_to_drop_a_file_beside_its_sidecar(tmp_path: Path) -> None:
+    root = _crud_project(tmp_path)
+    (root / (DISCONTINUED + ".forge-merge")).write_text("<template />\n", encoding="utf-8")
+    _to_app_shell(root)
+
+    with pytest.raises(ValueError, match="Resolve existing update conflict first"):
+        update_owned_project(root)
+    assert (root / DISCONTINUED).is_file()

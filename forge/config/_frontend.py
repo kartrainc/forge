@@ -246,10 +246,13 @@ class FrontendConfig:
     extras: list[str] | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.layouts, dict) and all(
-            isinstance(v, dict) for v in self.layouts.values()
+        # Only a well-formed mapping becomes the list; anything else (a body that is not
+        # a table, or one naming another layout) stays as it is for validation to refuse.
+        layouts = self.layouts
+        if isinstance(layouts, dict) and all(
+            isinstance(v, dict) and v.get("name", k) == k for k, v in layouts.items()
         ):
-            self.layouts = [{"name": name, **value} for name, value in self.layouts.items()]
+            self.layouts = [{**value, "name": name} for name, value in layouts.items()]
 
     @property
     def dns_name(self) -> str:

@@ -193,9 +193,24 @@ def _unknown(keys: Iterable[object], allowed: frozenset[str], where: str) -> Non
 
 def layout_entries(fc: FrontendConfig) -> list[tuple[str, Mapping[str, Any]]]:
     """The layouts in their declared order, as ``(name, layout)``; the first is mounted at ``/``."""
-    raw = fc.layouts or []
+    raw = fc.layouts if fc.layouts is not None else []
     if isinstance(raw, Mapping):
-        return [(str(name), value) for name, value in raw.items()]
+        entries_: list[tuple[str, Mapping[str, Any]]] = []
+        for name, value in raw.items():
+            # A layout's name is its key; a body naming another one would rename it
+            # behind the contributions keyed by the key.
+            body_name = value.get("name") if isinstance(value, Mapping) else None
+            if body_name is not None and body_name != name:
+                raise ValueError(
+                    f"layouts.{name} carries name {body_name!r}; a layout's name is its key."
+                )
+            body = (
+                {k: v for k, v in value.items() if k != "name"}
+                if isinstance(value, Mapping)
+                else value
+            )
+            entries_.append((str(name), body))
+        return entries_
     if not isinstance(raw, list):
         raise ValueError(f"layouts must be a table of named layouts, got {type(raw).__name__}.")
     entries: list[tuple[str, Mapping[str, Any]]] = []
@@ -234,7 +249,8 @@ def _check_layouts(fc: FrontendConfig) -> None:
         placeholder = layout.get("placeholder")
         if placeholder is not None and not _is_route_name(placeholder):
             raise ValueError(f"{where}.placeholder must be a route name, got {placeholder!r}.")
-        menus = _require_mapping(layout.get("menus") or {}, f"{where}.menus")
+        raw_menus = layout.get("menus")
+        menus = _require_mapping({} if raw_menus is None else raw_menus, f"{where}.menus")
         _unknown(menus.keys(), frozenset(MENUS), f"{where}.menus")
         ids: set[str] = set()
         for menu_name, sections in menus.items():
@@ -299,7 +315,7 @@ def _is_route_name(value: object) -> bool:
 
 
 def _check_routing(fc: FrontendConfig) -> None:
-    routing = _require_mapping(fc.routing or {}, "routing")
+    routing = _require_mapping({} if fc.routing is None else fc.routing, "routing")
     _unknown(routing.keys(), frozenset(ROUTING_KEYS), "routing")
     landing = routing.get("landing")
     if not _is_route_name(landing) or landing == BUILTIN:
@@ -313,10 +329,22 @@ def _check_routing(fc: FrontendConfig) -> None:
             raise ValueError(f"routing.{key} must be 'builtin' or a route name, got {value!r}.")
         if key in _AUTH_DESTINATIONS and value != BUILTIN and not fc.include_auth:
             raise ValueError(f"routing.{key} needs include_auth.")
+    # A landing route that is also a system destination loops: a signed-in visit of
+    # the sign-in route goes to the landing route, which is the sign-in route again.
+    for key in ROUTING_KEYS[1:]:
+        if key in _AUTH_DESTINATIONS and not fc.include_auth:
+            continue
+        value = routing.get(key, BUILTIN)
+        name = BUILTIN_ROUTE_NAMES[key] if value == BUILTIN else value
+        if landing == name:
+            raise ValueError(
+                f"routing.landing {landing!r} is also the {key} destination; the guards "
+                "would send a visit back and forth between them. Name another route."
+            )
 
 
 def _check_auth(fc: FrontendConfig) -> None:
-    auth = _require_mapping(fc.auth or {}, "auth")
+    auth = _require_mapping({} if fc.auth is None else fc.auth, "auth")
     _unknown(auth.keys(), frozenset({"runtime", "session_dialog"}), "auth")
     runtime = auth.get("runtime", "forge")
     if runtime not in AUTH_RUNTIMES:
@@ -339,7 +367,7 @@ def _check_auth(fc: FrontendConfig) -> None:
 
 
 def _check_extras(fc: FrontendConfig) -> None:
-    extras = fc.extras or []
+    extras = [] if fc.extras is None else fc.extras
     if not isinstance(extras, list) or not all(isinstance(e, str) for e in extras):
         raise ValueError("extras must be a list of names.")
     unknown = sorted(set(extras) - set(EXTRAS))

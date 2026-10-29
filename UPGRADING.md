@@ -658,10 +658,11 @@ Three changes reach existing projects on their next update:
 
 - **Discontinued scaffold files are taken back.** A scaffold file forge no
   longer emits (another UI kit, a page dropped from `features`, the sample
-  application left for `app-shell`) is deleted when unchanged and listed as
-  "left in place" when edited; an edited file keeps its forge record. Before,
-  only generated files and the dev-server overlay were handled; the rest stayed
-  on disk unrecorded.
+  application left for `app-shell`) is deleted when its record says forge wrote it
+  as scaffold and it is unchanged; any other (edited, or recorded incompletely) is
+  listed as "left in place" and keeps its record. A pending `.forge-merge` beside
+  such a file stops the update until it is resolved. Before, only generated files
+  and the dev-server overlay were handled; the rest stayed on disk unrecorded.
 - **Chat-less Vue apps lose three orphan files**: `src/features/ai_chat/ui_protocol.gen.ts`,
   `src/features/ai_chat/events.gen.ts` and `src/core/ui-protocol/types.ts`. Nothing in
   the template imports them without the chat.

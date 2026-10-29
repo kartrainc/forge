@@ -30,7 +30,8 @@ export function useAuth() {
   const isAuthenticated = computed(() => !!user.value)
   async function init() { if (!isInitialized.value) { user.value = DEV_USER; isLoading.value = false; isInitialized.value = true } }
   async function getToken(): Promise<string | null> { return 'dev-token' }
-  function login() { user.value = DEV_USER }
+  // The redirect is accepted for the contract's sake: with authentication off nobody leaves.
+  function login(_redirect?: string) { user.value = DEV_USER }
   function logout() { user.value = null }
   function hasRole(role: string): boolean { return user.value?.roles.includes(role) ?? false }
   return { user: readonly(user), isAuthenticated, isLoading: readonly(isLoading), init, getToken, login, logout, hasRole }

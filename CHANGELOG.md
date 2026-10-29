@@ -356,9 +356,11 @@ Each safeguard below is an option, so a project can choose another strategy.
   page and right panel. A generated router factory composes the project's
   routes, wrappers and actions once and refuses a menu item or contract that
   names a missing route. See the frontend-layouts guide.
-- An owned update deletes every scaffold file forge stops emitting when it is
-  unchanged since emission, and reports an edited one as left in place and
-  keeps its record (the dev-server overlay's rule, generalised). Leaving the
+- An owned update deletes a scaffold file forge stops emitting only on positive
+  evidence (recorded as scaffold, written by forge, still scaffold under the
+  ownership policy, unchanged since emission), and reports any other as left in
+  place, keeping its record (the dev-server overlay's rule, generalised). It
+  refuses to drop a file beside a pending `.forge-merge` proposal. Leaving the
   sample application, switching UI kits or dropping a page no longer leaves
   untracked files behind.
 - Vue apps without `include_chat` no longer receive the chat's
