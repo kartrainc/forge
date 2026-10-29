@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -77,8 +77,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -157,8 +157,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 2485,
-      "sha256": "7d2563f4de4cc0fc"
+      "size": 2761,
+      "sha256": "4c3d8b82d9a8fc17"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -316,10 +316,6 @@
       "size": 156,
       "sha256": "116d1f92db82f98a"
     },
-    "apps/admin/src/core/ui-protocol/types.ts": {
-      "size": 457,
-      "sha256": "8519e4e3e7f838c3"
-    },
     "apps/admin/src/custom/theme/nuxt-ui.config.ts": {
       "size": 1106,
       "sha256": "a0341d785997a7e8"
@@ -327,14 +323,6 @@
     "apps/admin/src/custom/theme/tokens.css": {
       "size": 619,
       "sha256": "027d68c5c8fe4e98"
-    },
-    "apps/admin/src/features/ai_chat/events.gen.ts": {
-      "size": 4093,
-      "sha256": "1f4a2ec3204179bd"
-    },
-    "apps/admin/src/features/ai_chat/ui_protocol.gen.ts": {
-      "size": 2139,
-      "sha256": "23d26ad54546e2c1"
     },
     "apps/admin/src/features/auth/components/SessionTimeoutModal.test.ts": {
       "size": 3499,
@@ -843,18 +831,6 @@
     "apps/frontend/src/app/styles/main.css": {
       "size": 6181,
       "sha256": "142445b3f8032448"
-    },
-    "apps/frontend/src/core/ui-protocol/types.ts": {
-      "size": 457,
-      "sha256": "8519e4e3e7f838c3"
-    },
-    "apps/frontend/src/features/ai_chat/events.gen.ts": {
-      "size": 4093,
-      "sha256": "1f4a2ec3204179bd"
-    },
-    "apps/frontend/src/features/ai_chat/ui_protocol.gen.ts": {
-      "size": 2139,
-      "sha256": "23d26ad54546e2c1"
     },
     "apps/frontend/src/features/auth/components/SessionTimeoutModal.test.ts": {
       "size": 3215,

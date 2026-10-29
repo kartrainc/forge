@@ -23,6 +23,90 @@ from forge.quality.model import subjects
 from forge.quality.runner import run_suites
 
 
+# The reference app-shell application (ADR-015): two layouts, sub-menus, an action,
+# the page extras as the routes the menus open, every system page built in.
+APP_SHELL_REFERENCE: dict = {
+    "app_template": "app-shell",
+    "features": [],
+    "routing": {"landing": "home"},
+    "extras": ["home", "profile", "settings"],
+    "layouts": {
+        "console": {
+            "shell": "header-sidebar",
+            "menus": {
+                "primary": [
+                    {
+                        "items": [
+                            {
+                                "id": "overview",
+                                "label": "Overview",
+                                "icon": "i-lucide-house",
+                                "to": "home",
+                            },
+                            {
+                                "id": "sales",
+                                "label": "Sales",
+                                "icon": "i-lucide-shopping-cart",
+                                "children": [
+                                    {"id": "orders", "label": "Orders", "icon": "i-lucide-receipt"},
+                                    {"id": "invoices", "label": "Invoices", "badge": "invoices"},
+                                ],
+                            },
+                        ]
+                    },
+                    {
+                        "label": "Account",
+                        "items": [
+                            {
+                                "id": "preferences",
+                                "label": "Preferences",
+                                "icon": "i-lucide-sliders-horizontal",
+                                "to": "settings",
+                            },
+                        ],
+                    },
+                ],
+                "account": [
+                    {
+                        "items": [
+                            {
+                                "id": "profile",
+                                "label": "Profile",
+                                "icon": "i-lucide-user",
+                                "to": "profile",
+                            },
+                            {
+                                "id": "sign-out",
+                                "label": "Log out",
+                                "icon": "i-lucide-log-out",
+                                "action": "sign-out",
+                            },
+                        ]
+                    }
+                ],
+                "footer": [{"items": [{"id": "support", "label": "Support"}]}],
+            },
+        },
+        "staff": {
+            "menus": {
+                "primary": [
+                    {
+                        "items": [
+                            {
+                                "id": "staff-home",
+                                "label": "Staff",
+                                "icon": "i-lucide-shield",
+                                "to": "home",
+                            }
+                        ]
+                    }
+                ]
+            },
+        },
+    },
+}
+
+
 def check(
     language: str,
     destination: Path,
@@ -32,13 +116,17 @@ def check(
     features: list[str] | None = None,
     extra_frontends: list[tuple[str, str]] | None = None,
     app_template: str | None = None,
+    frontend_app_template: str | None = None,
 ) -> dict:
     """Render the reference application for ``language`` and run its gates.
 
     ``extra_frontends`` adds further Vue apps beside the primary, as
     ``(name, ui_kit)`` pairs: each becomes its own quality subject.
+    ``frontend_app_template`` ``app-shell`` renders the primary as
+    :data:`APP_SHELL_REFERENCE`.
     """
     frontend = language in {"vue", "svelte"}
+    shell = APP_SHELL_REFERENCE if frontend_app_template == "app-shell" else {}
     config = ProjectConfig(
         project_name=f"quality-{language}",
         backends=[
@@ -57,6 +145,7 @@ def check(
                 include_chat=False,
                 include_openapi=False,
                 ui_kit=ui_kit,
+                **shell,
             ),
             *(
                 FrontendConfig(
@@ -137,6 +226,11 @@ if __name__ == "__main__":
         help="The backend's app template variant (default: the language's crud-service).",
     )
     parser.add_argument(
+        "--frontend-app-template",
+        choices=["crud-app", "app-shell"],
+        help="The primary frontend's application template (default: crud-app).",
+    )
+    parser.add_argument(
         "--extra-frontend",
         action="append",
         default=[],
@@ -155,6 +249,7 @@ if __name__ == "__main__":
             for name, _, kit in (item.partition(":") for item in args.extra_frontend)
         ],
         app_template=args.app_template,
+        frontend_app_template=args.frontend_app_template,
     )
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result["passed"] else 12)

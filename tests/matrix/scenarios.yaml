@@ -574,3 +574,56 @@ scenarios:
           include_auth: true
           include_chat: false
           server_port: 5188
+
+  - name: py_vue_app_shell
+    description: >-
+      Python + a Nuxt UI app on the page-free app-shell template (ADR-015):
+      two layouts with sub-menus, the home extra as the landing route, every
+      system page built in, with Keycloak; the app builds.
+    lanes: [generate, verify]
+    port_base: 8230
+    expected_files:
+      - services/api/pyproject.toml
+      - apps/frontend/package.json
+      - apps/frontend/src/shared/application/router.ts
+      - apps/frontend/src/shared/layouts/HeaderSidebarShell.vue
+      - docker-compose.yml
+      - forge.toml
+    config:
+      project_name: "Py Vue App Shell"
+      include_keycloak: true
+      keycloak_port: 18089
+      backends:
+        - name: api
+          language: python
+          features: ["items"]
+          server_port: 8230
+          python_version: "3.13"
+      frontend:
+        framework: vue
+        ui_kit: nuxt-ui
+        app_template: app-shell
+        include_auth: true
+        include_chat: false
+        server_port: 5189
+        routing: { landing: home }
+        extras: [home, settings]
+        layouts:
+          console:
+            shell: header-sidebar
+            menus:
+              primary:
+                - items:
+                    - { id: overview, label: Overview, icon: i-lucide-house, to: home }
+                    - id: sales
+                      label: Sales
+                      children:
+                        - { id: orders, label: Orders }
+                - label: Account
+                  items:
+                    - { id: preferences, label: Preferences, to: settings }
+          staff:
+            menus:
+              primary:
+                - items:
+                    - { id: audit, label: Audit, to: home }
