@@ -211,10 +211,13 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(root().dataset.collapsed).toBe('true')
     expect(root().style.getPropertyValue('--width')).toBe('0rem')
     expect(root().classList.contains('data-[collapsed=true]:border-s-0')).toBe(true) // no line at no width
+    // nothing to scroll at no width: a scrollable region without focusable content fails axe
+    expect(root().querySelector('[data-slot="body"]')!.classList.contains('overflow-y-hidden')).toBe(true)
     expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined()
     await toggle().trigger('click')
     expect(root().dataset.collapsed).toBe('false')
     expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeUndefined()
+    expect(root().querySelector('[data-slot="body"]')!.classList.contains('overflow-y-hidden')).toBe(false)
   })
 })
 

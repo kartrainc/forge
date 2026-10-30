@@ -174,7 +174,12 @@ const asideProps = computed(() => ({
   ...props.aside,
   collapsible: true,
   collapsedSize: 0,
-  ui: mergeUi({ root: 'flex min-h-0 min-w-0 border-s border-default data-[collapsed=true]:border-s-0', body: 'p-0', handle: 'block' }, props.aside.ui as Ui | undefined),
+  // Nothing scrolls at no width: a scrollable region without focusable content (inert) is an axe failure.
+  ui: mergeUi({
+    root: 'flex min-h-0 min-w-0 border-s border-default data-[collapsed=true]:border-s-0',
+    body: asideCollapsed.value ? 'p-0 overflow-y-hidden' : 'p-0',
+    handle: 'block',
+  }, props.aside.ui as Ui | undefined),
 }))
 const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
 
