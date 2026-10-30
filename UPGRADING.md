@@ -661,9 +661,13 @@ Node 26 is the default runtime. On the next update:
   project recorded `22` and stays on it until you change it. A new stack file
   without `node_version` gets `26`. `@types/node` now follows `node_version`
   (`^<major>.0.0`), and the template's libraries take their latest patches.
-  The choices are `26`, `24` and `22` (the prompt and `--node-version`): the
-  template's toolchain (vitest 5) does not run on Node 20 or 18. A recipe that
-  records one of them keeps it; move it to `22` or newer.
+  The choices are `26`, `24` and `22` (forge's prompt, `--node-version` and the
+  template's Copier prompt): the template's toolchain (vitest 5) does not run on
+  Node 20 or 18. A recipe that records one of them keeps it; move it to `22` or
+  newer.
+- **Python services** are offered `3.13` and `3.14`, the versions the template's
+  Copier prompt takes; forge used to offer `3.12` and `3.11`, which Copier refused,
+  so no project records them.
 - **The workspace root's** `package.json` asks in `engines` for the oldest Node a
   Node service records (`>=22.18.0` for `22`), Node 26 without one: each service's
   image runs `npm ci` at the root on its own Node.

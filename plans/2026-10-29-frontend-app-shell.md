@@ -356,6 +356,19 @@ sign-in page, a placeholder for its unbuilt items) found two gaps.
 26. **Menus.** On the placeholder route, the item its `:item` names is the active
     one, so the sidebar marks it and opens its parent, as for any other page.
 
+### After the owner's review on #16
+
+27. **Versions.** Amends 22: the Node template's Copier prompt drops `20` and `18`
+    too, and a test holds every backend template's Copier choices and default to
+    the registry's. It found Python's apart: forge offered `3.12` and `3.11`, which
+    the template's Copier prompt refuses, so the registry offers its `3.13` and
+    `3.14`.
+28. **Generated tests.** The integration test's not-found case asserted the route's
+    name, which a project destination's unnamed catch-all does not have; it now
+    compares the views shown at the unknown address with the destination's own.
+    The no-auth rendered lane names a page extra as `not_found`, so CI covers a
+    project destination.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

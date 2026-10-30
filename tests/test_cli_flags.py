@@ -89,6 +89,26 @@ class TestBackendVariantFlags:
         ):
             assert list(actions[dest].choices) == list(BACKEND_REGISTRY[language].version_choices)
 
+    @pytest.mark.parametrize(
+        "language",
+        [BackendLanguage.PYTHON, BackendLanguage.NODE, BackendLanguage.RUST, BackendLanguage.GO],
+    )
+    def test_template_prompts_offer_the_registry_choices(self, language: BackendLanguage) -> None:
+        # Copier refuses an answer its question does not list, so a version forge
+        # offers must be one the template's copier.yml offers, and the reverse.
+        from pathlib import Path
+
+        import yaml
+
+        import forge
+        from forge.config import BACKEND_REGISTRY
+
+        spec = BACKEND_REGISTRY[language]
+        copier = Path(forge.__file__).parent / "templates" / spec.template_dir / "copier.yml"
+        question = yaml.safe_load(copier.read_text(encoding="utf-8"))[spec.version_field]
+        assert sorted(question["choices"]) == sorted(spec.version_choices)
+        assert question["default"] == spec.version_choices[0]
+
     def test_node_versions_are_the_ones_the_template_toolchain_runs_on(self) -> None:
         # vitest 5 runs on ^22.12, ^24 and >=26; Node 20 and 18 are past end of life.
         from forge.config import BACKEND_REGISTRY
@@ -96,10 +116,10 @@ class TestBackendVariantFlags:
         assert BACKEND_REGISTRY[BackendLanguage.NODE].version_choices == ("26", "24", "22")
 
     def test_python_version_flows_to_backend(self) -> None:
-        args = _args_stub(backend_language="python", python_version="3.11")
+        args = _args_stub(backend_language="python", python_version="3.14")
         config = cli._build_config(args, {})
         assert config.backends[0].language is BackendLanguage.PYTHON
-        assert config.backends[0].python_version == "3.11"
+        assert config.backends[0].python_version == "3.14"
 
 
 # -- --no-e2e-tests -----------------------------------------------------------

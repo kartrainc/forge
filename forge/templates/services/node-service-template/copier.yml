@@ -49,8 +49,6 @@ node_version:
     - "26"
     - "24"
     - "22"
-    - "20"
-    - "18"
 
 include_error_envelope:
   type: bool

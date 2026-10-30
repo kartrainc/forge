@@ -172,7 +172,8 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         template_dir="services/python-service-template",
         display_label="Python (FastAPI)",
         version_field="python_version",
-        version_choices=("3.13", "3.12", "3.11"),
+        # The template's Copier prompt offers these, and Copier refuses any other.
+        version_choices=("3.13", "3.14"),
         toolchain=_python_toolchain_factory(),
         version="1.0.0",
     ),

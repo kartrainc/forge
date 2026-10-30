@@ -43,7 +43,14 @@ it('renders the first layout with its configured primary menu', async () => {
   for (const label of labels) expect(document.body.textContent).toContain(label)
 })
 
-it('answers an unknown address with the not-found destination', async () => {
+// A built-in not-found page is the route itself; a project destination is shown through an
+// unnamed catch-all that copies its view chain. Either way the address stays and the
+// destination's own view renders.
+it('answers an unknown address with the not-found destination, keeping the address', async () => {
   await open('/no-such-page-anywhere')
-  expect(router.currentRoute.value.name).toBe(application.routing.not_found ?? router.currentRoute.value.name)
+  const unknown = router.currentRoute.value
+  expect(unknown.path).toBe('/no-such-page-anywhere')
+  const shown = unknown.matched.map(record => record.components?.default)
+  await router.push({ name: application.routing.not_found! })
+  expect(router.currentRoute.value.matched.map(record => record.components?.default)).toEqual(shown)
 })

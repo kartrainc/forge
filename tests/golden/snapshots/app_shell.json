@@ -533,8 +533,8 @@
       "sha256": "5b26cc9727297977"
     },
     "apps/frontend/tests/integration/application.test.ts": {
-      "size": 1868,
-      "sha256": "d46f05264cc98d74"
+      "size": 2326,
+      "sha256": "38822fb560a0c8be"
     },
     "apps/frontend/tsconfig.app.json": {
       "size": 863,

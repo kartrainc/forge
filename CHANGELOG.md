@@ -343,9 +343,14 @@ Each safeguard below is an option, so a project can choose another strategy.
 
 ### Node 26
 
+- forge offers each backend language the versions its template's Copier prompt
+  takes, and a test holds the two lists together: Python is offered `3.13` and
+  `3.14` (`3.12` and `3.11` failed in Copier), Node `26`, `24` and `22`.
+
 - Node 26 is the default and the baseline. `BackendConfig.node_version` and the
   stack file's default are `26` (choices `26`, `24` and `22`, which
-  `--node-version` takes from the registry; vitest 5 does not run on 20 or 18),
+  `--node-version` and the template's Copier prompt take from the registry;
+  vitest 5 does not run on 20 or 18),
   and the Node service template's `@types/node` follows `node_version`. The
   frontend images, the e2e harness image and the generated quality workflow run
   on `node:26-slim` / Node 26; `engines` asks for Node 26 in the Vue and Svelte

@@ -22,10 +22,10 @@ from forge.quality.dependencies import dependencies
 from forge.quality.model import subjects
 from forge.quality.runner import run_suites
 
-
 # The reference app-shell application (ADR-015): two layouts, sub-menus (one item opening
 # a route, one opening the placeholder route), an action, the page extras as the routes the
-# menus open, every system page built in. With --auth off it renders without sign-in.
+# menus open, every system page built in. With --auth off it renders without sign-in, and
+# its not-found destination is a page extra instead of the built-in page.
 APP_SHELL_REFERENCE: dict = {
     "app_template": "app-shell",
     "features": [],
@@ -135,6 +135,11 @@ def check(
     """
     frontend = language in {"vue", "svelte"}
     shell = APP_SHELL_REFERENCE if frontend_app_template == "app-shell" else {}
+    if shell and not auth:
+        # Without sign-in the not-found destination is a project route (a page extra), so
+        # the generated tests cover the catch-all that shows it; with sign-in every system
+        # page stays built in.
+        shell = {**shell, "routing": {**shell["routing"], "not_found": "profile"}}
     config = ProjectConfig(
         project_name=f"quality-{language}",
         backends=[
