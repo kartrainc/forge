@@ -188,7 +188,12 @@ function menuProps(isCollapsed: boolean) {
 </script>
 
 <template>
-  <UDashboardGroup unit="rem" storage="local" :storage-key="storageKey" class="flex-col">
+  <!--
+    Nuxt UI stores a collapsible sidebar's size with its collapse, and a stored size wins
+    over the configured one: only a size the user can change is stored. The shell stores
+    the collapse itself.
+  -->
+  <UDashboardGroup unit="rem" storage="local" :storage-key="storageKey" :persistent="!!sidebarProps.resizable" class="flex-col">
     <header
       class="relative z-20 flex h-(--ui-header-height) shrink-0 items-center gap-3 border-b border-default bg-default px-4"
       data-shell="header"
@@ -319,6 +324,7 @@ function menuProps(isCollapsed: boolean) {
         unit="rem"
         storage="local"
         :storage-key="storageKey"
+        :persistent="!!asideProps.resizable"
         class="contents"
       >
         <UDashboardSidebar

@@ -147,6 +147,21 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(typeof menu.props('modelValue')).toBe('string')
   })
 
+  it('sizes a sidebar and a right panel the user cannot resize as configured, over a size stored before', async () => {
+    // Nuxt UI stores a collapsible sidebar's size: a size stored under an earlier default would win over a new one.
+    localStorage.setItem(`shell-${layout}-sidebar-${layout}-sidebar`, JSON.stringify({ size: 16, collapsed: false }))
+    localStorage.setItem(`shell-${layout}-sidebar-${layout}-aside`, JSON.stringify({ size: 22, collapsed: false }))
+    const shell = await render({ aside: chat }, { sidebar: { defaultSize: 12.5 }, aside: { defaultSize: 22.5, resizable: false } })
+    expect(rootOf(shell.get('nav[aria-label="Main"]').element).style.getPropertyValue('--width')).toBe('12.5rem')
+    expect(rootOf(shell.get('[data-shell="aside"]').element).style.getPropertyValue('--width')).toBe('22.5rem')
+  })
+
+  it('keeps the size a user gave a sidebar they can resize', async () => {
+    localStorage.setItem(`shell-${layout}-sidebar-${layout}-sidebar`, JSON.stringify({ size: 18, collapsed: false }))
+    const shell = await render({}, { sidebar: { defaultSize: 12.5, resizable: true } })
+    expect(rootOf(shell.get('nav[aria-label="Main"]').element).style.getPropertyValue('--width')).toBe('18rem')
+  })
+
   it('keeps the group\'s sidebar state the sidebar\'s while the right panel docks', async () => {
     const shell = await render({ default: () => h(UDashboardSidebarCollapse), aside: chat })
     await shell.get('[data-shell="sidebar-toggle"]').trigger('click')

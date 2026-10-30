@@ -410,7 +410,10 @@ Each safeguard below is an option, so a project can choose another strategy.
   screen's edge); the narrow screen's sidebar menu keeps its close button (the
   shell hid the menu's header and dropped Nuxt UI's toggle); a collapsed
   sidebar's links and sub-menu buttons keep their names for assistive
-  technology; Escape closes the header expanded on a narrow screen.
+  technology; Escape closes the header expanded on a narrow screen; a sidebar or
+  right panel the user cannot resize takes its configured size, not one Nuxt UI
+  stored under an earlier default (Nuxt UI stores a collapsible sidebar's size,
+  and a stored size wins; only a resizable one's is stored now).
 - `app-shell` with `security.csp`: zod and `src/app/providers/csp.ts` load as one
   chunk (`vendor-zod`). Rolldown runs the chunks the entry imports before the
   entry's own body, so a schema one of them built made zod probe for eval, which
