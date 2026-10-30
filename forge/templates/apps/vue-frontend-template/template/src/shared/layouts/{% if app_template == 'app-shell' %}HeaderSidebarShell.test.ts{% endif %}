@@ -4,6 +4,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import UApp from '@nuxt/ui/components/App.vue'
 import UDashboardSidebarCollapse from '@nuxt/ui/components/DashboardSidebarCollapse.vue'
 import UNavigationMenu from '@nuxt/ui/components/NavigationMenu.vue'
+import USlideover from '@nuxt/ui/components/Slideover.vue'
 import HeaderSidebarShell from './HeaderSidebarShell.vue'
 import { application } from '@/shared/application/config'
 import { setApplicationContext } from '@/shared/application/context'
@@ -86,7 +87,7 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(localStorage.getItem(`shell-${layout}-sidebar-collapsed`)).toBe('false')
 
     await shell.get('[data-shell="aside-toggle"]').trigger('click')
-    expect(shell.find('[data-test="chat"]').exists()).toBe(false)
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined() // folded in place
     expect(shell.find('[data-shell="aside-badge"]').exists()).toBe(true)
     await shell.get('[data-shell="aside-toggle"]').trigger('click')
     expect(shell.find('[data-test="chat"]').exists()).toBe(true)
@@ -181,7 +182,7 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(localStorage.getItem(`shell-${layout}-sidebar-collapsed`)).toBe('true')
     expect(shell.get('[data-test="own-sidebar-toggle"]').attributes('data-collapsed')).toBe('true')
     await shell.get('[data-test="own-aside-toggle"]').trigger('click')
-    expect(shell.find('[data-test="chat"]').exists()).toBe(false)
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined() // folded in place
     expect(shell.get('[data-test="own-aside-toggle"]').attributes('data-collapsed')).toBe('true')
   })
 
@@ -194,8 +195,26 @@ describe('the header-sidebar shell on a wide screen', () => {
     const trigger = () => shell.get('[data-test="trigger"]')
     expect(trigger().attributes()).toMatchObject({ 'data-open': 'true', 'data-docked': 'true' })
     await trigger().trigger('click')
-    expect(shell.find('[data-test="chat"]').exists()).toBe(false)
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined()
     expect(trigger().attributes('data-open')).toBe('false')
+  })
+
+  it('folds the docked right panel in place, its content kept and out of reach, so a project can animate the fold', async () => {
+    document.documentElement.style.fontSize = '16px'
+    const shell = await render({ aside: chat }, { aside: { resizable: false } })
+    const root = () => rootOf(shell.get('[data-shell="aside"]').element)
+    const toggle = () => shell.get('[data-shell="aside-toggle"]')
+    expect(root().dataset.collapsed).toBe('false')
+    expect(root().style.getPropertyValue('--width')).toBe('22rem')
+    await toggle().trigger('click')
+    expect(shell.find('[data-test="chat"]').exists()).toBe(true)
+    expect(root().dataset.collapsed).toBe('true')
+    expect(root().style.getPropertyValue('--width')).toBe('0rem')
+    expect(root().classList.contains('data-[collapsed=true]:border-s-0')).toBe(true) // no line at no width
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined()
+    await toggle().trigger('click')
+    expect(root().dataset.collapsed).toBe('false')
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeUndefined()
   })
 })
 
@@ -282,6 +301,16 @@ describe('the header-sidebar shell on a narrow screen', () => {
     const shell = await render()
     const account = application.layouts[layout]!.menus.account
     expect(shell.find('button[aria-label="Account"]').exists()).toBe(account.some(section => section.items.length > 0))
+  })
+})
+
+describe('the header-sidebar shell\'s right panel on a narrow screen', () => {
+  beforeEach(() => screen(800))
+
+  it('passes the project\'s slide-over props over its own', async () => {
+    const shell = await render({ aside: chat }, { asideSlideover: { overlay: false, modal: false, title: 'Team chat' } })
+    const slideover = shell.findComponent(USlideover)
+    expect(slideover.props()).toMatchObject({ overlay: false, modal: false, title: 'Team chat', side: 'right' })
   })
 })
 

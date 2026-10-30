@@ -231,6 +231,13 @@ toggle the edge toggle and the header's "Show panel" button use.
 | `breakpoints` | 1024 px each | `{ sidebar, aside, header }`: where each region turns narrow, as the pixels from which it is wide or a media query that matches while it is |
 | `narrowSidebar` | `'menu'` | the sidebar below its breakpoint: `'menu'` hides it behind the header's menu button and opens it over the page (Nuxt UI's menu, with its own close button); `'collapsed'` keeps it, collapsed to icons, with no menu button, and leaves the user's wide-screen choice as it was |
 | `asideButton` | `true` | the header's "Show panel" button while the panel slides over the page; off when the project renders its own trigger |
+| `asideSlideover` | `{}` | `USlideover` props for the panel on narrow screens over the shell's own (`title: 'Panel'`): `overlay: false` and `modal: false` slide it over a page that stays usable, `transition`, `title`, `ui` |
+
+Folded, the docked panel keeps its place at no width (`data-collapsed="true"`)
+instead of leaving the page: its content stays, out of reach (`inert`), and a
+project can animate the fold in its own CSS, a `transition` on the panel's width
+through `aside.ui.root`, for example. The sidebar's collapse is a width change
+too.
 
 A `ui` object merges per Nuxt UI slot: the shell's classes come first and the
 project's after them, so tailwind-merge lets the project's win. The shell's own

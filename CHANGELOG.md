@@ -400,7 +400,10 @@ Each safeguard below is an option, so a project can choose another strategy.
   button. New slots: `aside-trigger` (`{ open, docked, toggle }`, at the shell's
   root, for a trigger of the project's own), `sidebar-toggle` and `aside-toggle`
   (`{ collapsed, toggle }`, the edge toggles). Slot props gain `sidebarNarrow`,
-  `aside` (`actions`) and `docked` (`aside`).
+  `aside` (`actions`) and `docked` (`aside`). `asideSlideover` passes `USlideover`
+  props for the panel on narrow screens (`overlay: false`, `modal: false`, …).
+  Folded, the docked panel keeps its place at no width, its content inert, so its
+  state survives and a project can animate the fold in its own CSS.
 - Fixed in the `header-sidebar` shell: the right panel's resize handle sits on its
   inner edge and drags towards the page (the panel is a right-hand
   `UDashboardSidebar`; a `UDashboardPanel`'s handle follows it, at the screen's
