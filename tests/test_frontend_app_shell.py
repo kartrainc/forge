@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -339,6 +340,21 @@ def test_crud_app_renders_no_application_runtime(tmp_path: Path) -> None:
     # The chat types follow include_chat (they used to land in every Vue app).
     assert not (app / "src/features/ai_chat").exists()
     assert not (app / "src/core").exists()
+
+
+def test_zod_and_its_jitless_setting_load_as_one_chunk(shell_app: Path) -> None:
+    # Rolldown runs the chunks the entry imports before the entry's own body, so zod and
+    # the module that sets it jitless (main.ts's first import) share one chunk: a schema
+    # any other chunk builds would otherwise make zod probe for eval under the policy.
+    vite = (shell_app / "vite.config.ts").read_text(encoding="utf-8")
+    group = re.search(r"\{ name: 'vendor-zod', test: /(.+)/ \}", vite)
+    assert group, "no vendor-zod chunk group"
+    test = re.compile(group.group(1))
+    assert test.search("/app/node_modules/zod/v4/core/core.js")
+    assert test.search("/app/apps/frontend/src/app/providers/csp.ts")
+    assert not test.search("/app/apps/frontend/src/app/providers/head.ts")
+    csp = (shell_app / "src/app/providers/csp.ts").read_text(encoding="utf-8")
+    assert "z.config({ jitless: true })" in csp
 
 
 # --- reserved names -----------------------------------------------------------
