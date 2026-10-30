@@ -453,12 +453,12 @@
       "sha256": "d93d8731bb37d0ab"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.test.ts": {
-      "size": 5141,
-      "sha256": "19a528269361661a"
+      "size": 16237,
+      "sha256": "16f3fabc5ae78c93"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
-      "size": 8933,
-      "sha256": "bbbe9ab74936a4c4"
+      "size": 16512,
+      "sha256": "13f5a3b9bf7c8732"
     },
     "apps/frontend/src/shared/observability/sentry.test.ts": {
       "size": 1155,
@@ -521,8 +521,8 @@
       "sha256": "53363b185599bcc8"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 5110,
-      "sha256": "98df69e84e463709"
+      "size": 6461,
+      "sha256": "b22634a701461d61"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,

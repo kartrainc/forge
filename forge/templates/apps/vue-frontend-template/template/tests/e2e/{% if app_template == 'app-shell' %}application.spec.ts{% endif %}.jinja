@@ -83,6 +83,32 @@ if (placeholder) test('an item without a destination opens the placeholder route
   await expect(page.getByText('Page not found')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+// Collapsed to icons, the sidebar's links and sub-menu buttons keep their names.
+test('the collapsed sidebar keeps the names of its items', async ({ page }) => {
+  await mockSession(page);
+  await page.goto('/');
+  await page.locator('[data-shell="sidebar-toggle"]').click();
+  const main = page.getByRole('navigation', { name: 'Main' });
+  for (const label of topLevel) {
+    await expect(main.getByRole('link', { name: label, exact: true }).or(main.getByRole('button', { name: label, exact: true }))).toBeVisible();
+  }
+});
+
+// On a narrow screen the header's menu button opens the sidebar over the page, as a named
+// dialog with a close button of its own.
+test('on a narrow screen the sidebar opens as a menu that closes again', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
+  await mockSession(page);
+  await page.goto('/');
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden();
+  await page.locator('[data-shell="header"]').getByRole('button', { name: 'Open sidebar' }).click();
+  const menu = page.getByRole('dialog');
+  await expect(menu).toHaveAccessibleName(/\S/);
+  for (const label of topLevel) await expect(menu.getByText(label, { exact: true }).first()).toBeVisible();
+  await menu.getByRole('button', { name: 'Close sidebar' }).click();
+  await expect(menu).toBeHidden();
+});
 {%- if include_auth and auth_runtime == 'forge' and 'auth_stuck' in builtin_pages.split(',') %}
 
 // The gateway never answers who is signed in: the app still mounts, and the guard's
