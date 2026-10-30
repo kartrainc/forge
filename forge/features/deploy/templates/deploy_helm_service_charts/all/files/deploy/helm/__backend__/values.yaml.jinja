@@ -155,6 +155,10 @@ configMap:
     NODE_ENV: "production"
     LOG_LEVEL: "info"
     APP__SERVER__PORT: "{{ service.port }}"
+{%- if service.db_app_role %}
+    # the migration runs as the owner; {{ service.db_app_role }} cannot create tables
+    MIGRATE_ON_START: "false"
+{%- endif %}
 {%- elif service.language == "rust" %}
     PORT: "{{ service.port }}"
     RUST_LOG: "info"

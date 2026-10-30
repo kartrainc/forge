@@ -337,6 +337,7 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
         api = _values(helm / "api" / "values.yaml")
         gosvc = _values(helm / "gosvc" / "values.yaml")
         mail = _values(helm / "mail" / "values.yaml")
+        mail_role_script = (helm / "mail" / "files" / "db-app-role.sh").is_file()
     assert api["migration"]["dbAppRole"] == "api_app"
     # the service connects as the runtime role, the migration as the owner
     assert api["secret"]["stringData"]["APP__DB__URL"] == (
@@ -346,7 +347,16 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
         "postgresql://api:CHANGEME@postgres-rw:5432/api"
     )
     assert gosvc["migration"]["dbAppRole"] == "gosvc_app"
-    assert mail["migration"]["dbAppRole"] == ""
+    # a Node backend serves as its runtime role too: Prisma reads DATABASE_URL, and the server no longer migrates
+    assert mail["migration"]["dbAppRole"] == "mail_app"
+    assert mail["secret"]["stringData"]["DATABASE_URL"] == (
+        "postgresql://mail_app:CHANGEME@postgres-rw:5432/mail"
+    )
+    assert mail["migration"]["ownerSecret"]["stringData"]["DATABASE_URL"] == (
+        "postgresql://mail:CHANGEME@postgres-rw:5432/mail"
+    )
+    assert mail["configMap"]["data"]["MIGRATE_ON_START"] == "false"
+    assert mail_role_script
 
 
 def test_a_backend_of_a_project_without_a_database_has_no_database_values() -> None:
@@ -603,6 +613,7 @@ def test_the_topology_lists_the_infrastructure_charts() -> None:
                 {"name": "api", "runtime": False},
                 {"name": "api_app", "runtime": True},
                 {"name": "mail", "runtime": False},
+                {"name": "mail_app", "runtime": True},
                 {"name": "keycloak", "runtime": False},
             ],
             "databases": [

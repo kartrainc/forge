@@ -84,6 +84,12 @@ Each safeguard below is an option, so a project can choose another strategy.
   `tenant-isolation` job that migrates a Postgres service container, runs the
   script and runs the isolation tests as that role (`REQUIRE_APP_ROLE_TEST=1`,
   so they fail there rather than skip, and skip in other jobs).
+- Node backends of a `shared_rls` project serve as `<db_name>_app` too (`database.rls_app_role`): forge enforces no
+  RLS in them, but policies they bring in their Prisma migrations only bind a role that does not own the tables. Their
+  compose service and Helm chart (both layouts) connect as the role, `APP__DB__URL` and Prisma's `DATABASE_URL` alike;
+  `<backend>-migrate` and the migration Job keep the owner; the per-service chart carries `files/db-app-role.sh`; and
+  the entrypoint skips `prisma migrate deploy` under `MIGRATE_ON_START=false`, which they set. The
+  `tenant-isolation` CI job stays Python and Go, whose fragments enforce RLS.
 - `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
   startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
   through a role it belongs to (temporary tables do not count). The isolation

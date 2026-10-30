@@ -60,6 +60,13 @@ keep a different strategy.
   sets `database.rls_app_role=false` and points the DB URL at it; the startup
   guard refuses a superuser either way. Check with
   `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`.
+- **Node backends in a `shared_rls` project:** they now serve as `<db_name>_app` as well. Give the role a password
+  where your environment sets the DB URLs (compose does it for you; in Helm, the per-service postgres chart's
+  `roleSecrets.passwords.<db_name>_app`, or the umbrella's `migrateSecretEnv.APP_DB_PASSWORD`) and point the
+  service's `APP__DB__URL` and `DATABASE_URL` at it; the migration keeps the owner's URL. An entrypoint you edited
+  keeps running `prisma migrate deploy` as the server's role, which owns nothing: set it to skip under
+  `MIGRATE_ON_START=false` as the generated one does. Delete a `db-app-role.sh` you copied into the chart by hand:
+  the update writes the chart's own.
 - **Header or subdomain tenant without auth:** generation now fails. Enable
   authentication, use `token_claim`, or set `database.allow_unverified_tenant=true`
   when a trusted gateway owns the tenant header. With authentication, a request
