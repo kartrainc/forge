@@ -345,6 +345,17 @@ each behaviour change was reproduced by a failing test first.
     the structured report); the sidecar check resolves its path like the others.
 24. **ADR-015** lists the extras as implemented.
 
+### The first consumer's cutover
+
+Generating kartrainc/kartra-ai's console on `app-shell` (no extras, Kartra's own
+sign-in page, a placeholder for its unbuilt items) found two gaps.
+
+25. **Generated tests.** The router factory's tests assumed the `home` extra and the
+    built-in not-found and forbidden pages; they now assert the pages the app's own
+    configuration renders, so a project without them passes its generated tests.
+26. **Menus.** On the placeholder route, the item its `:item` names is the active
+    one, so the sidebar marks it and opens its parent, as for any other page.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

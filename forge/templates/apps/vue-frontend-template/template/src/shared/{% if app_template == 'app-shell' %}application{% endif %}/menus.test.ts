@@ -85,6 +85,7 @@ describe('the open sub-menu', () => {
         { path: '/orders', name: 'orders', component: Page },
         { path: '/help', name: 'help-page', component: Page, meta: { menu: 'help' } },
         { path: '/invoices', name: 'invoice-list', component: Page, meta: { menu: 'invoices' } },
+        { path: '/not-built/:item', name: 'not-built', component: Page },
       ],
     })
     await router.push('/orders')
@@ -97,6 +98,18 @@ describe('the open sub-menu', () => {
     await router.push('/invoices')
     await nextTick()
     expect(open!.value).toEqual(['sales'])
+    await router.push('/help')
+    await router.push({ name: 'not-built', params: { item: 'invoices' } })
+    await nextTick()
+    expect(open!.value).toEqual(['sales'])
+  })
+
+  it('takes the item the placeholder route names in its :item, an item of the layout only', () => {
+    const at = (name: string, item: string) => ({ matched: [{ name, meta: {} }], params: { item } }) as never
+    expect(resolveActiveItem(app.layouts.main!, at('not-built', 'invoices'))).toBe('invoices')
+    expect(resolveActiveItem(app.layouts.main!, at('not-built', 'audit'))).toBeNull() // the staff layout's
+    expect(resolveActiveItem(app.layouts.main!, at('elsewhere', 'invoices'))).toBeNull()
+    expect(resolveActiveItem(app.layouts.staff!, at('not-built', 'audit'))).toBeNull() // no placeholder there
   })
 
   it('takes the item whose route matches when no route names one', () => {

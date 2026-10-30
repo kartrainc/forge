@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
+import { extraPages, systemPages } from './pages'
 import { createApplicationRouter } from './router'
 import { testApplication, testAuth } from './testing'
 
@@ -54,18 +55,26 @@ describe('createApplicationRouter', () => {
     expect(r.resolve('/start').matched[0]?.components?.default).toBe(Wrapper)
   })
 
-  it('registers the built-in system pages and the page extras', () => {
+  // This app's own configuration decides which system pages and extras forge rendered
+  // (./pages.ts); a page the app does not have is never registered, and the project's
+  // route stands in for a system page it serves itself.
+  it('registers the built-in system pages and the page extras the app renders', () => {
     const config = testApplication({ builtin: ['not_found', 'forbidden'], extras: ['home'] })
+    const own = publicRoutes.filter(route =>
+      (route.name === 'not-found' && !systemPages.not_found) || (route.name === 'forbidden' && !systemPages.forbidden))
     const r = createApplicationRouter({
       auth: testAuth().auth,
       routes: { main: projectRoutes.main!.filter(route => route.name !== 'not-built').concat({ path: 'not-built/:item', name: 'not-built', component: Page }), staff: projectRoutes.staff! },
-      publicRoutes: publicRoutes.filter(route => route.name === 'login' || route.name === 'auth-stuck'),
+      publicRoutes: publicRoutes.filter(route => route.name === 'login' || route.name === 'auth-stuck').concat(own),
       history: createMemoryHistory(),
     }, config)
     expect(r.hasRoute('not-found')).toBe(true)
     expect(r.hasRoute('forbidden')).toBe(true)
     expect(r.resolve('/does-not-exist').name).toBe('not-found')
-    expect(r.resolve({ name: 'home' }).path).toBe('/home')
+    expect(r.resolve('/does-not-exist').matched.at(-1)?.components?.default).toBe(systemPages.not_found ?? Page)
+    expect(r.resolve('/forbidden').matched.at(-1)?.components?.default).toBe(systemPages.forbidden ?? Page)
+    expect(r.hasRoute('home')).toBe(Boolean(extraPages.home))
+    if (extraPages.home) expect(r.resolve({ name: 'home' }).path).toBe('/home')
   })
 
   it('refuses a configuration the composition cannot satisfy', () => {
@@ -97,7 +106,8 @@ describe('createApplicationRouter', () => {
     const r = router({}, config)
     await r.push('/')
     expect(r.currentRoute.value.name).toBe('start')
-    expect(r.resolve({ name: 'home' }).path).toBe('/home')
+    expect(r.hasRoute('home')).toBe(Boolean(extraPages.home))
+    if (extraPages.home) expect(r.resolve({ name: 'home' }).path).toBe('/home')
   })
 
   it('renders a project not-found route for every unknown address, keeping the address', () => {

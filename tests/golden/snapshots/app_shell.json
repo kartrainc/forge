@@ -393,20 +393,20 @@
       "sha256": "2becf08d6dd1a29c"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
-      "size": 5661,
-      "sha256": "d346e0213220aa1c"
+      "size": 6524,
+      "sha256": "a0240f6b966a8920"
     },
     "apps/frontend/src/shared/application/menus.ts": {
-      "size": 7257,
-      "sha256": "ccc5a9e1b00147c5"
+      "size": 7658,
+      "sha256": "7fb788aa0538e49e"
     },
     "apps/frontend/src/shared/application/pages.ts": {
       "size": 708,
       "sha256": "cc10dbf98e8ed353"
     },
     "apps/frontend/src/shared/application/router.test.ts": {
-      "size": 7236,
-      "sha256": "8128fa3bdc3973c3"
+      "size": 8097,
+      "sha256": "ee8621d8b0bb9d7b"
     },
     "apps/frontend/src/shared/application/router.ts": {
       "size": 7337,
