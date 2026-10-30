@@ -122,7 +122,7 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         # A pending proposal for a file forge stops writing has nowhere to go once the file
         # and its record are gone: it is resolved first, never dropped beside the file.
         for rel, _record in discontinued:
-            if (root / (rel + ".forge-merge")).exists():
+            if project_path(root, rel + ".forge-merge").exists():
                 raise ValueError(f"Resolve existing update conflict first: {rel}.forge-merge")
         left_in_place: list[str] = []
         for rel, record in discontinued:
@@ -167,6 +167,8 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         else:
             # Do not advance baselines when application is incomplete.
             writes = {k: v for k, v in writes.items() if k.endswith(".forge-merge")}
+        # Named in the report: an unchanged file can still be imported by the project's code.
+        taken_back = sorted(rel for rel, _record in discontinued if rel in writes)
         report = {
             "passed": not conflicts,
             "backends": [b.name for b in config.backends],
@@ -179,6 +181,7 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             "file_conflicts": len(conflicts),
             "conflicts": conflicts,
             "left_in_place": left_in_place,
+            "taken_back": taken_back,
             "changes": [
                 {"path": rel, "action": "delete" if body is None else "write"}
                 for rel, body in sorted(writes.items())

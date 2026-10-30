@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import functools
 
-from forge.config import FrontendFramework
+from forge.config import BACKEND_REGISTRY, BackendLanguage, FrontendFramework
 from forge.ui_kits import COLOR_SCHEME_CHOICES
 from forge.ui_kits import COLOR_SCHEMES as _COLOR_SCHEMES
 
@@ -123,10 +123,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--backend-name", metavar="NAME", help="Backend service name (default: backend)")
     p.add_argument("--backend-port", type=int, metavar="PORT")
-    p.add_argument("--python-version", choices=["3.13", "3.12", "3.11"])
-    p.add_argument("--node-version", choices=["26", "24", "22", "20", "18"])
-    p.add_argument("--rust-edition", choices=["2021", "2024"])
-    p.add_argument("--go-version", choices=["1.27", "1.26"])
+    # The version choices are the registry's, which the interactive prompt offers too.
+    for flag, language in (
+        ("--python-version", BackendLanguage.PYTHON),
+        ("--node-version", BackendLanguage.NODE),
+        ("--rust-edition", BackendLanguage.RUST),
+        ("--go-version", BackendLanguage.GO),
+    ):
+        p.add_argument(flag, choices=list(BACKEND_REGISTRY[language].version_choices))
 
     # Frontend. Choices are read at parser-build time (after plugin load, like
     # --backend-language), so a plugin that registered a frontend (e.g. solid)

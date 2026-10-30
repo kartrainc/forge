@@ -59,8 +59,13 @@ export function installGuards(router: Router, { auth, routing, enabled, timeoutM
       to.name === name ? true : { name, ...(query ? { query } : {}) }
     // The stalled-sign-in page is where a wait ends; entering it never waits again.
     if (routing.auth_stuck && to.name === routing.auth_stuck) return true
-    if (auth.isLoading.value && (await waitForAuth(auth.isLoading, timeoutMs)) === 'timeout') {
-      return routing.auth_stuck ? redirect(routing.auth_stuck, { next: to.fullPath }) : true
+    // Without a stalled-sign-in page, a wait that times out is judged as no sign-in yet.
+    if (
+      auth.isLoading.value
+      && (await waitForAuth(auth.isLoading, timeoutMs)) === 'timeout'
+      && routing.auth_stuck
+    ) {
+      return redirect(routing.auth_stuck, { next: to.fullPath })
     }
     const signedIn = auth.isAuthenticated.value
     if (requiresAuth(to) && !signedIn) {

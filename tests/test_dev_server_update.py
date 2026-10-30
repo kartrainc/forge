@@ -95,6 +95,7 @@ def test_disabling_takes_back_what_forge_wrote(project: Path) -> None:
     assert not {OVERLAY, WRAPPER} & _recorded(project)
     assert _stages(project) == 2
     assert report["left_in_place"] == []
+    assert report["taken_back"] == sorted([OVERLAY, WRAPPER])
     assert read_forge_toml(project / "forge.toml").frontend.dev_server is False
 
 
@@ -268,13 +269,17 @@ def test_the_text_output_names_a_file_left_in_place(
         "forge_version_after": "1",
         "file_conflicts": 0,
         "left_in_place": [OVERLAY],
+        "taken_back": [WRAPPER],
     }
     monkeypatch.setattr(
         "forge.sync.forge_to_project.updater.update_project", lambda *a, **k: summary
     )
     with pytest.raises(SystemExit):
         _run_update(Namespace(project_path=str(tmp_path), quiet=False, json_output=False))
-    assert f"left in place: {OVERLAY}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"left in place: {OVERLAY}" in out
+    assert f"taken back: {WRAPPER}" in out
 
     report = _build_update_report(tmp_path, summary, "merge")
     assert any(OVERLAY in warning for warning in report.warnings)
+    assert any(WRAPPER in warning for warning in report.warnings)

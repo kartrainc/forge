@@ -311,6 +311,27 @@ def _project_has_rust(config: ProjectConfig, active_fragments: set[str]) -> bool
     return "platform_auth_sdk_rust" in active_fragments
 
 
+#: The lowest patch of a Node major the workspace root accepts, where it is not ``.0.0``.
+_NODE_FLOORS = {22: "22.18.0"}
+
+
+def _workspace_node_engine(config: ProjectConfig) -> str:
+    """The workspace root's ``engines.node``: the oldest Node a member installs from it on.
+
+    A Node service keeps the ``node_version`` its recipe records and runs ``npm ci`` at the
+    root in its image; the frontends and SDKs are on forge's default, the registry's first.
+    """
+    from forge.config import BACKEND_REGISTRY  # noqa: PLC0415
+
+    majors = [
+        int(b.node_version.split(".")[0])
+        for b in config.backends
+        if b.language == BackendLanguage.NODE
+    ]
+    major = min([*majors, int(BACKEND_REGISTRY[BackendLanguage.NODE].version_choices[0])])
+    return ">=" + _NODE_FLOORS.get(major, f"{major}.0.0")
+
+
 def render_workspace_package_json(
     config: ProjectConfig,
     project_root: Path,
@@ -330,6 +351,7 @@ def render_workspace_package_json(
         {
             "project_slug": config.project_slug,
             "project_name": config.project_name,
+            "node_engine": _workspace_node_engine(config),
         }
     )
     pkg_path = project_root / "package.json"

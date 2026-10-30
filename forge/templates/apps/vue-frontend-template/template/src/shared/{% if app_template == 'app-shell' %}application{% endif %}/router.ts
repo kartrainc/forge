@@ -49,32 +49,41 @@ function routeNames(records: RouteRecordRaw[], names: string[] = []): string[] {
   return names
 }
 
-/** The record named `name` and the list it sits in, searching the children too. */
-function findRecord(records: RouteRecordRaw[], name: string): { record: RouteRecordRaw, siblings: RouteRecordRaw[], nested: boolean } | null {
+/** The records from the top down to the one named `name`, searching the children too. */
+function findChain(records: RouteRecordRaw[], name: string): RouteRecordRaw[] | null {
   for (const record of records) {
-    if (record.name === name) return { record, siblings: records, nested: false }
-    const found = record.children ? findRecord(record.children, name) : null
-    if (found) return { ...found, nested: true }
+    if (record.name === name) return [record]
+    const found = record.children ? findChain(record.children, name) : null
+    if (found) return [record, ...found]
   }
   return null
 }
 
-/**
- * A project route named as routing.not_found answers every unknown address too: a
- * catch-all beside it renders its component and keeps the address.
- */
-function addNotFoundCatchAll(records: RouteRecordRaw[], name: string): void {
-  const found = findRecord(records, name)
-  if (!found || found.record.path.includes(':pathMatch')) return
-  const { record, siblings, nested } = found
-  const catchAll = {
-    path: nested ? ':pathMatch(.*)*' : '/:pathMatch(.*)*',
+/** A record's view, meta and props at `path`, without its name, redirect or other children. */
+function copyView(record: RouteRecordRaw, path: string, child?: RouteRecordRaw): RouteRecordRaw {
+  return {
+    path,
     meta: { ...record.meta },
     ...('component' in record && record.component ? { component: record.component } : {}),
     ...('components' in record && record.components ? { components: record.components } : {}),
     ...('props' in record && record.props !== undefined ? { props: record.props } : {}),
-  }
-  siblings.push(catchAll as RouteRecordRaw)
+    ...(child ? { children: [child] } : {}),
+  } as RouteRecordRaw
+}
+
+/**
+ * A project route named as routing.not_found answers every unknown address too: one
+ * application-wide catch-all renders it inside the layout and the parents it sits in,
+ * and keeps the address.
+ */
+function addNotFoundCatchAll(records: RouteRecordRaw[], name: string): void {
+  const chain = findChain(records, name)
+  if (!chain || (chain.length === 1 && chain[0]!.path.includes(':pathMatch'))) return
+  const catchAll = chain.reduceRight<RouteRecordRaw | undefined>(
+    (child, record, index) => copyView(record, index === 0 ? '/:pathMatch(.*)*' : '', child),
+    undefined,
+  )
+  records.push(catchAll!)
 }
 
 function menuTargets(items: MenuItemConfig[]): string[] {

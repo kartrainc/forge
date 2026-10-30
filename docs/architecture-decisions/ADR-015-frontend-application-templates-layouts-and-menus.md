@@ -105,8 +105,9 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
    the router factory. `auth.runtime: forge` emits forge's `useAuth` and the
    session-timeout composable, which implement it; `auth.runtime: project` emits
    neither, and the project passes its own implementation. `auth.session_dialog`
-   is `builtin` (forge mounts its dialog) or `project`. The backends' SDKs, the
-   gatekeeper and the realm do not change.
+   is `builtin` (forge mounts its dialog, which only the generated auth stack has;
+   asked for without that stack, it is refused) or `project`. The backends' SDKs,
+   the gatekeeper and the realm do not change.
 
 6. **The seam.** Generated code never imports project code. Forge generates,
    under `src/shared/`, the application contracts, the resolved layouts, menus
@@ -122,7 +123,10 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
    opt-in for `app-shell`, by name in `extras`: `home`, `profile` and
    `settings` pages, `health` (schemas, composables and the indicator),
    `confirm` (the confirmation host, dialog and composable), `list_helpers`,
-   `msw` and `sentry`. `crud-app` keeps all of them.
+   `forms` (`useZodForm`), `capabilities` (`useCapabilities`, over forge's
+   `useAuth`), `event_stream` (`useEventStream`), `layout_helpers`
+   (`useBreakpoint`, `useContainerSize`, `usePageHeader`) and `msw`.
+   Observability stays on `include_sentry`. `crud-app` keeps all of them.
 
 8. **Discontinued scaffold files.** The owned update applies the dev-server
    rule to every scaffold file forge stops emitting: one unchanged since

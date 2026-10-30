@@ -325,6 +325,26 @@ by a failing test first, then fixed. What changed against the sections above:
     `@tsconfig/node22` as a devDependency; no tsconfig of the template extends
     either, so the compiler options do not change.
 
+### After the reviewers' round 1 on #16
+
+The review bots found one routing gap, two runtime issues and five smaller ones;
+each behaviour change was reproduced by a failing test first.
+
+19. **Routing.** A project route named as `not_found` answers unknown addresses
+    across the application: one top-level catch-all copies its chain of layout and
+    parents, so a destination under a second layout or a nested route renders in
+    them. Item 11's sibling catch-all only reached addresses under its parent.
+20. **Guards.** A stalled sign-in without `auth_stuck` is judged as no sign-in, so
+    a protected route stays closed.
+21. **Configuration.** An explicit `auth.session_dialog: builtin` is refused where
+    the generated auth stack is absent; left out, it falls back to `project`.
+22. **Node.** Amends 18: the choices are `26`, `24` and `22`, since vitest 5 runs on
+    `^22.12`, `^24` and `>=26`; the CLI's version flags take the registry's choices;
+    the workspace root's `engines` follows the oldest Node service.
+23. **Update.** The update names the files it takes back (text, JSON, a warning in
+    the structured report); the sidecar check resolves its path like the others.
+24. **ADR-015** lists the extras as implemented.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

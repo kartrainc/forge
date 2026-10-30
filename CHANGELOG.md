@@ -344,11 +344,13 @@ Each safeguard below is an option, so a project can choose another strategy.
 ### Node 26
 
 - Node 26 is the default and the baseline. `BackendConfig.node_version` and the
-  stack file's default are `26` (choices `26`, `24`, `22`, `20`, `18`, also on
-  `--node-version`), and the Node service template's `@types/node` follows
-  `node_version`. The frontend images, the e2e harness image and the generated
-  quality workflow run on `node:26-slim` / Node 26; `engines` asks for Node 26 in
-  the Vue, Svelte and workspace manifests; forge's own CI runs on Node 26.
+  stack file's default are `26` (choices `26`, `24` and `22`, which
+  `--node-version` takes from the registry; vitest 5 does not run on 20 or 18),
+  and the Node service template's `@types/node` follows `node_version`. The
+  frontend images, the e2e harness image and the generated quality workflow run
+  on `node:26-slim` / Node 26; `engines` asks for Node 26 in the Vue and Svelte
+  manifests, and the workspace root's for the oldest Node a Node service records
+  (Node 26 without one); forge's own CI runs on Node 26.
 - The Vue template takes the current libraries: vue 3.5.44, pinia 4.1.0,
   @tanstack/vue-query 5.105.0, @tanstack/vue-virtual 3.13.50, zod 4.6.7, ky
   2.2.0, @iconify-json/lucide 1.2.149, vite 8.3.5, @vitejs/plugin-vue 6.0.10,
@@ -384,8 +386,9 @@ Each safeguard below is an option, so a project can choose another strategy.
   names a missing route. See the frontend-layouts guide.
 - An owned update deletes a scaffold file forge stops emitting only on positive
   evidence (recorded as scaffold, written by forge, still scaffold under the
-  ownership policy, unchanged since emission), and reports any other as left in
-  place, keeping its record (the dev-server overlay's rule, generalised). It
+  ownership policy, unchanged since emission), names it as taken back
+  (`taken_back` in the JSON report), and reports any other as left in place,
+  keeping its record (the dev-server overlay's rule, generalised). It
   refuses to drop a file beside a pending `.forge-merge` proposal. Leaving the
   sample application, switching UI kits or dropping a page no longer leaves
   untracked files behind.

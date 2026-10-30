@@ -108,5 +108,37 @@ describe('createApplicationRouter', () => {
     expect(resolved.path).toBe('/no/such/page')
     expect(resolved.matched.at(-1)?.components?.default).toBe(Oops)
   })
+
+  it('renders a not-found route of another layout, in that layout, for every unknown address', () => {
+    const Oops = defineComponent({ setup: () => () => h('p', 'oops') })
+    const Staff = defineComponent({ setup: () => () => h(RouterView) })
+    const config = testApplication({ routing: { ...testApplication().routing, not_found: 'oops' } })
+    const r = router({
+      routes: { ...projectRoutes, staff: [...projectRoutes.staff!, { path: 'oops', name: 'oops', component: Oops }] },
+      publicRoutes: publicRoutes.filter(route => route.name !== 'not-found'),
+      layouts: { main: Wrapper, staff: Staff },
+    }, config)
+    for (const address of ['/missing', '/staff/missing']) {
+      const resolved = r.resolve(address)
+      expect(resolved.path).toBe(address)
+      expect(resolved.matched.map(record => record.components?.default)).toEqual([Staff, Oops])
+      expect(resolved.meta.layout).toBe('staff')
+    }
+  })
+
+  it('renders a nested not-found route inside every parent it sits in', () => {
+    const Oops = defineComponent({ setup: () => () => h('p', 'oops') })
+    const Help = defineComponent({ setup: () => () => h(RouterView) })
+    const config = testApplication({ routing: { ...testApplication().routing, not_found: 'oops' } })
+    const help = { path: 'help', component: Help, children: [{ path: 'oops', name: 'oops', component: Oops }] }
+    const r = router({
+      routes: { ...projectRoutes, staff: [...projectRoutes.staff!, help] },
+      publicRoutes: publicRoutes.filter(route => route.name !== 'not-found'),
+      layouts: { main: Wrapper, staff: Wrapper },
+    }, config)
+    const resolved = r.resolve('/no/such/page')
+    expect(resolved.path).toBe('/no/such/page')
+    expect(resolved.matched.map(record => record.components?.default)).toEqual([Wrapper, Help, Oops])
+  })
 })
 

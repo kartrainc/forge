@@ -76,6 +76,25 @@ class TestBackendVariantFlags:
         assert config.backends[0].language is BackendLanguage.RUST
         assert config.backends[0].rust_edition == "2021"
 
+    def test_version_flags_offer_the_registry_choices(self) -> None:
+        from forge.cli.parser import _build_parser
+        from forge.config import BACKEND_REGISTRY
+
+        actions = {a.dest: a for a in _build_parser()._actions}
+        for language, dest in (
+            (BackendLanguage.PYTHON, "python_version"),
+            (BackendLanguage.NODE, "node_version"),
+            (BackendLanguage.RUST, "rust_edition"),
+            (BackendLanguage.GO, "go_version"),
+        ):
+            assert list(actions[dest].choices) == list(BACKEND_REGISTRY[language].version_choices)
+
+    def test_node_versions_are_the_ones_the_template_toolchain_runs_on(self) -> None:
+        # vitest 5 runs on ^22.12, ^24 and >=26; Node 20 and 18 are past end of life.
+        from forge.config import BACKEND_REGISTRY
+
+        assert BACKEND_REGISTRY[BackendLanguage.NODE].version_choices == ("26", "24", "22")
+
     def test_python_version_flows_to_backend(self) -> None:
         args = _args_stub(backend_language="python", python_version="3.11")
         config = cli._build_config(args, {})

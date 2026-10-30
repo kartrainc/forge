@@ -151,7 +151,8 @@ The routing contracts: `/` always opens `landing` (the `home` extra sits at
 `/home`); `landing` may not be a system destination (the sign-in route, built in or
 not, the not-found, auth-stuck or forbidden route), which would loop, and the
 guards never redirect a visit to the route it is on. A project route named as
-`not_found` also answers every unknown address, keeping the address. Every
+`not_found` also answers every unknown address, inside the layout and the parents
+it sits in, keeping the address. Every
 `meta.requiresRole` along the matched routes must hold, and the deepest route that
 sets `meta.requiresAuth` decides whether it needs a sign-in. The app mounts without
 waiting for the authentication contract to start; a sign-in that does not answer
@@ -190,7 +191,10 @@ route the composition does not contain, or when two routes share a name. The
 slides over the page on narrow ones, and the two edge toggles; a wrapper passes
 its slots through to it. With `auth.runtime: project`, forge emits no
 `useAuth`, no session-timeout composable and no forge auth adapter, and
-`src/app/auth.ts` is a starter to implement.
+`src/app/auth.ts` is a starter to implement. `auth.session_dialog: builtin` mounts
+forge's session-timeout dialog, which only the generated auth stack has
+(`auth.mode: generate`, with Keycloak for its provider): asked for without it, the
+configuration is refused; left out, the app gets `project`.
 
 Changing a menu or a route contract is a configuration change: edit the stack
 file and the recipe's `config.frontend`, then run `forge --update`.

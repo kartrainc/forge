@@ -195,6 +195,17 @@ def test_the_builtin_dialog_needs_the_session_timeout_fragment() -> None:
     assert template_answers(fc, session_timeout=False)["session_dialog"] == "project"
 
 
+def test_an_explicit_builtin_dialog_needs_the_generated_auth_stack() -> None:
+    # Without Keycloak, auth.mode generate is coerced away: no session-timeout dialog exists.
+    asked = _project(_frontend(auth={"session_dialog": "builtin"}))
+    with pytest.raises(ValueError, match="does not generate"):
+        asked.validate()
+    _project(_frontend()).validate()  # left out, it falls back to the project's dialog
+    asked.include_keycloak = True
+    asked.backends[0].server_port = 5100  # off the gatekeeper's port
+    asked.validate()
+
+
 # --- stack intake and recipe ----------------------------------------------------------
 
 
@@ -376,6 +387,8 @@ def test_an_update_to_app_shell_takes_back_unchanged_sample_files(tmp_path: Path
         "apps/frontend/tests/integration/home-page.test.ts",
     ]:
         assert not (root / gone).exists(), gone
+        assert gone in report["taken_back"], gone  # named, so an import of one is traceable
+    assert edited not in report["taken_back"]
     recorded = read_forge_toml(root / "forge.toml").provenance
     assert edited in recorded
     assert "apps/frontend/src/shared/application/router.ts" in recorded

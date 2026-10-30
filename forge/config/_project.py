@@ -309,6 +309,7 @@ class ProjectConfig:
         if self.include_keycloak:
             self._validate_keycloak_ports(ports)
         self._validate_options()
+        self._validate_session_dialogs()
         self._validate_components_shape()
         self._validate_layer_modes()
         self._validate_service_discovery()
@@ -959,6 +960,26 @@ class ProjectConfig:
                     "serve the same host. Rename one."
                 )
             dns_names[fc.dns_name] = fc.name
+
+    def _validate_session_dialogs(self) -> None:
+        """An app that asks for forge's session dialog gets it, or is refused (ADR-015).
+
+        The dialog is the session-timeout fragment's, which only the generated auth stack
+        emits; an app that leaves ``auth.session_dialog`` out falls back to the project's.
+        """
+        from forge.capability_resolver import auth_stack_generated  # noqa: PLC0415
+        from forge.frontend_app import BUILTIN, is_app_shell  # noqa: PLC0415
+
+        if auth_stack_generated(self):
+            return
+        for fc in self.active_frontends:
+            if is_app_shell(fc) and (fc.auth or {}).get("session_dialog") == BUILTIN:
+                raise ValueError(
+                    f"Frontend '{fc.name}' asks for auth.session_dialog 'builtin', the "
+                    "session-timeout dialog of forge's generated auth stack, which this project "
+                    "does not generate (auth.mode generate, with Keycloak for its "
+                    "auth.provider). Set session_dialog to 'project' or leave it out."
+                )
 
     def _validate_frontend_pages(self) -> None:
         """An explicit page list names backend features: the template routes each page to its backend."""

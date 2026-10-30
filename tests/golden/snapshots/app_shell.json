@@ -385,12 +385,12 @@
       "sha256": "64735be39fef4cd4"
     },
     "apps/frontend/src/shared/application/guards.test.ts": {
-      "size": 4626,
-      "sha256": "d1f5414296d940d8"
+      "size": 4956,
+      "sha256": "23e523bb00c36b76"
     },
     "apps/frontend/src/shared/application/guards.ts": {
-      "size": 3491,
-      "sha256": "87cdbeb515f9ecfb"
+      "size": 3599,
+      "sha256": "2becf08d6dd1a29c"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
       "size": 5661,
@@ -405,12 +405,12 @@
       "sha256": "cc10dbf98e8ed353"
     },
     "apps/frontend/src/shared/application/router.test.ts": {
-      "size": 5422,
-      "sha256": "81e525310a368e7b"
+      "size": 7236,
+      "sha256": "8128fa3bdc3973c3"
     },
     "apps/frontend/src/shared/application/router.ts": {
-      "size": 7048,
-      "sha256": "a7edc82e5cc4c193"
+      "size": 7337,
+      "sha256": "ea2b4209f00cdf89"
     },
     "apps/frontend/src/shared/application/testing.ts": {
       "size": 3660,

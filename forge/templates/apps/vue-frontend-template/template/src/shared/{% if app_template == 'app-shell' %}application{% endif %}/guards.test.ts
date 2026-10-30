@@ -76,6 +76,14 @@ describe('installGuards', () => {
     expect(router.currentRoute.value.name).toBe('open')
   })
 
+  it('keeps a protected route closed when a stalled sign-in has no auth_stuck', async () => {
+    const { auth, isLoading } = testAuth(false)
+    isLoading.value = true
+    const router = build(auth, { landing: 'start', sign_in: 'login' })
+    await router.push('/')
+    expect(router.currentRoute.value.name).toBe('login')
+  })
+
   it('falls back to the landing route for a missing role', async () => {
     const router = build(testAuth(true).auth)
     await router.push('/secret')

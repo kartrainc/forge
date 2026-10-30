@@ -180,7 +180,8 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         template_dir="services/node-service-template",
         display_label="Node.js (Fastify)",
         version_field="node_version",
-        version_choices=("26", "24", "22", "20", "18"),
+        # The template's toolchain (vitest 5) runs on ^22.12, ^24 and >=26.
+        version_choices=("26", "24", "22"),
         toolchain=_node_toolchain_factory(),
         version="1.0.0",
     ),

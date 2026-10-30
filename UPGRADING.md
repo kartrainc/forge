@@ -661,6 +661,12 @@ Node 26 is the default runtime. On the next update:
   project recorded `22` and stays on it until you change it. A new stack file
   without `node_version` gets `26`. `@types/node` now follows `node_version`
   (`^<major>.0.0`), and the template's libraries take their latest patches.
+  The choices are `26`, `24` and `22` (the prompt and `--node-version`): the
+  template's toolchain (vitest 5) does not run on Node 20 or 18. A recipe that
+  records one of them keeps it; move it to `22` or newer.
+- **The workspace root's** `package.json` asks in `engines` for the oldest Node a
+  Node service records (`>=22.18.0` for `22`), Node 26 without one: each service's
+  image runs `npm ci` at the root on its own Node.
 - **The generated quality workflow and the e2e harness** run on Node 26.
 
 ### Frontend application templates (unreleased)
@@ -674,9 +680,12 @@ Three changes reach existing projects on their next update:
   longer emits (another UI kit, a page dropped from `features`, the sample
   application left for `app-shell`) is deleted when its record says forge wrote it
   as scaffold and it is unchanged; any other (edited, or recorded incompletely) is
-  listed as "left in place" and keeps its record. A pending `.forge-merge` beside
-  such a file stops the update until it is resolved. Before, only generated files
-  and the dev-server overlay were handled; the rest stayed on disk unrecorded.
+  listed as "left in place" and keeps its record. The update prints each file it
+  deletes as `taken back` (`taken_back` in the JSON report): code of yours that
+  imports one no longer builds. `forge --plan-update` lists them before anything is
+  written. A pending `.forge-merge` beside such a file stops the update until it is
+  resolved. Before, only generated files and the dev-server overlay were handled;
+  the rest stayed on disk unrecorded.
 - **Chat-less Vue apps lose three orphan files**: `src/features/ai_chat/ui_protocol.gen.ts`,
   `src/features/ai_chat/events.gen.ts` and `src/core/ui-protocol/types.ts`. Nothing in
   the template imports them without the chat.
