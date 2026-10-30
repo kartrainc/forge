@@ -146,7 +146,7 @@ then run architecture and all three native test suites against the candidate.
   stock TypeScript 7. The compatibility failure is tracked in
   [issue #357](https://github.com/cchifor/forge/issues/357); a compiler fork is not
   substituted automatically.
-- **Web frontends:** use Node 22.18 or newer. Vite 8 uses Rolldown build options.
+- **Web frontends:** use Node 26 or newer (see "Node 26" below). Vite 8 uses Rolldown build options.
   SvelteKit 3 puts adapter/preprocessor settings in the Vite plugin and replaces
   `$app/stores` with `$app/state`. Resolve application paths through
   `$app/paths.resolve()` so navigation respects the deployment base; runtime
@@ -341,16 +341,18 @@ before changing anything.
 #### Switching back to shadcn
 
 Set `ui_kit` back to `shadcn` the same way. The shadcn kit is regenerated and
-untouched screens are rewritten. The scaffold only Nuxt UI emits stays on disk
-without a forge record:
+untouched screens are rewritten. The scaffold only Nuxt UI emits is taken back
+where you never changed it; a file you changed stays, keeps its forge record and
+is listed as left in place (ADR-015):
 
 - `src/app/providers/head.ts` and `head.test.ts`, and `src/custom/theme/`.
   They import `@unhead/vue` and `@nuxt/ui`, which shadcn projects do not
-  depend on, so the type-check and the unit suite fail until you delete them.
+  depend on: move what you need out of an edited copy and delete it, or the
+  type-check and the unit suite fail.
 - The agent tooling: `.agents/skills/nuxt-ui/`, `.claude/skills/nuxt-ui/`,
-  `.mcp.json` and `.codex/config.toml`. Delete it, or keep what you added to
-  the MCP files elsewhere: while any of them remains unrecorded, a later
-  switch to Nuxt UI stops on the collision.
+  `.mcp.json` and `.codex/config.toml`. An edited copy stays recorded, so a
+  later switch to Nuxt UI keeps it (or proposes forge's newer version beside it
+  as a `.forge-merge` sidecar) instead of stopping on a collision.
 
 ### Go backend (unreleased)
 
@@ -646,6 +648,68 @@ nothing with one frontend.
   `fc.page_features(config.all_features)`.
 - **Template updates reach every backend.** A template bump now re-renders each
   backend of that language, not only the first one.
+
+### Node 26 (unreleased)
+
+Node 26 is the default runtime. On the next update:
+
+- **Frontend apps** build on `node:26-slim` (their Dockerfile is regenerated) and
+  their `package.json` asks for Node 26 in `engines` and takes the current
+  libraries; an edited `package.json` gets the new version as a `.forge-merge`
+  proposal. Run the frontend locally on Node 26.
+- **Node services** keep the `node_version` their recipe records: an existing
+  project recorded `22` and stays on it until you change it. A new stack file
+  without `node_version` gets `26`. `@types/node` now follows `node_version`
+  (`^<major>.0.0`), and the template's libraries take their latest patches.
+  The choices are `26`, `24` and `22` (forge's prompt, `--node-version` and the
+  template's Copier prompt): the template's toolchain (vitest 5) does not run on
+  Node 20 or 18. A recipe that records one of them keeps it; move it to `22` or
+  newer.
+- **Python services** are offered `3.13` and `3.14`, the versions the template's
+  Copier prompt takes; forge used to offer `3.12` and `3.11`, which Copier refused,
+  so no project records them.
+- **The workspace root's** `package.json` asks in `engines` for the oldest Node a
+  Node service records (`>=22.18.0` for `22`), Node 26 without one: each service's
+  image runs `npm ci` at the root on its own Node.
+- **The generated quality workflow and the e2e harness** run on Node 26.
+
+### Frontend application templates (unreleased)
+
+A project that sets nothing renders every file it rendered before, except the
+recipe, which records the new frontend keys with their defaults
+([ADR-015](docs/architecture-decisions/ADR-015-frontend-application-templates-layouts-and-menus.md)).
+Three changes reach existing projects on their next update:
+
+- **Discontinued scaffold files are taken back.** A scaffold file forge no
+  longer emits (another UI kit, a page dropped from `features`, the sample
+  application left for `app-shell`) is deleted when its record says forge wrote it
+  as scaffold and it is unchanged; any other (edited, or recorded incompletely) is
+  listed as "left in place" and keeps its record. The update prints each file it
+  deletes as `taken back` (`taken_back` in the JSON report): code of yours that
+  imports one no longer builds. `forge --plan-update` lists them before anything is
+  written. A pending `.forge-merge` beside such a file stops the update until it is
+  resolved. Before, only generated files and the dev-server overlay were handled;
+  the rest stayed on disk unrecorded.
+- **Chat-less Vue apps lose three orphan files**: `src/features/ai_chat/ui_protocol.gen.ts`,
+  `src/features/ai_chat/events.gen.ts` and `src/core/ui-protocol/types.ts`. Nothing in
+  the template imports them without the chat.
+- **Reserved page names** only refuse a backend feature a frontend renders as a
+  page.
+
+#### From `crud-app` to `app-shell`
+
+1. In the stack file and in the recipe's `config.frontend` (the primary's record;
+   `frontends[0]` mirrors it), set `app_template: app-shell`, `features: []`,
+   `layouts`, `routing.landing` (and any project destinations), `auth` and
+   `extras`.
+2. Run `forge --update`. It deletes the sample pages, tests and layout files the
+   project never edited and lists the edited ones as left in place.
+3. Move what the project still needs out of the files left in place, delete
+   them, and compose the project's routes, layout wrappers, menu actions and
+   authentication contract in `src/app/router/index.ts` and `src/app/auth.ts`.
+4. Run the gates: architecture, the unit, integration and e2e suites, coverage
+   and the content-security check. The generated tests of the application
+   runtime count toward the integration and e2e tiers.
 
 ## 1.0 → 1.1
 

@@ -10,7 +10,7 @@ backends:
     language: "node"
     features: ["products"]
     server_port: 5001
-    node_version: "22"
+    node_version: "26"
   - name: "rust-svc"
     language: "rust"
     features: ["tickets"]

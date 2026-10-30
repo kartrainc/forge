@@ -341,6 +341,71 @@ Each safeguard below is an option, so a project can choose another strategy.
   outside the plugin API that SemVer covers (`forge/api.py`), and forge's own
   callers and stack files are unaffected (UPGRADING).
 
+### Node 26
+
+- forge offers each backend language the versions its template's Copier prompt
+  takes, and a test holds the two lists together: Python is offered `3.13` and
+  `3.14` (`3.12` and `3.11` failed in Copier), Node `26`, `24` and `22`.
+
+- Node 26 is the default and the baseline. `BackendConfig.node_version` and the
+  stack file's default are `26` (choices `26`, `24` and `22`, which
+  `--node-version` and the template's Copier prompt take from the registry;
+  vitest 5 does not run on 20 or 18),
+  and the Node service template's `@types/node` follows `node_version`. The
+  frontend images, the e2e harness image and the generated quality workflow run
+  on `node:26-slim` / Node 26; `engines` asks for Node 26 in the Vue and Svelte
+  manifests, and the workspace root's for the oldest Node a Node service records
+  (Node 26 without one); forge's own CI runs on Node 26.
+- The Vue template takes the current libraries: vue 3.5.44, pinia 4.1.0,
+  @tanstack/vue-query 5.105.0, @tanstack/vue-virtual 3.13.50, zod 4.6.7, ky
+  2.2.0, @iconify-json/lucide 1.2.149, vite 8.3.5, @vitejs/plugin-vue 6.0.10,
+  vitest and @vitest/coverage-v8 5.0.5 (exact, and the vitest override),
+  @playwright/test 1.64.1, eslint 10.13.0, eslint-plugin-vue 10.12.0,
+  typescript-eslint 8.72.1, jsdom 30.1.3, msw 3.0.3, vue-tsc 3.3.13, prettier
+  3.9.10, autoprefixer 10.6.2, @sentry/vue 11.10.0, @types/node 26.6.6 and
+  @tsconfig/node26 26.0.1 in place of @tsconfig/node22. @nuxt/ui stays 4.12.0
+  and TypeScript ^6.0.3 (typescript-eslint's peer range ends below 6.1).
+- The Node service template takes fastify 5.12.7, @prisma/client,
+  @prisma/adapter-pg and prisma 7.10.1 (npm's `latest` for prisma is an 8.0
+  release candidate), dotenv 18.0.9, uuid 14.0.3, @biomejs/biome 2.6.4 and
+  vitest 5.0.5. The platform-auth Node SDK takes @types/node 26, vitest 5.0.5,
+  @biomejs/biome 2.6.4 and fastify 5.12.7, with its lockfile re-resolved; the
+  e2e harness takes @types/node 26 and @playwright/test 1.64.1; the Svelte
+  template and the workspace root's vitest override follow to 5.0.5, so one
+  workspace resolves one vitest.
+
+### Frontend application templates
+
+- `frontend.app_template` chooses what a Vue app contains
+  ([ADR-015](docs/architecture-decisions/ADR-015-frontend-application-templates-layouts-and-menus.md)).
+  `crud-app` (the default) is the sample application as before. `app-shell`
+  (with `ui_kit: nuxt-ui`) renders the boilerplate, a configurable shell and no
+  page: `layouts` (named, each with a `shell` and `primary`, `account` and
+  `footer` menus with sections and one level of sub-items), `routing`
+  (`landing`, `sign_in`, `not_found`, `auth_stuck`, `forbidden`, each `builtin`
+  or a project route), `auth` (`runtime: forge | project`, `session_dialog`) and
+  `extras` (the sample pages and helpers it wants). The first shell is
+  `header-sidebar`: a full-width header above Nuxt UI's dashboard sidebar,
+  page and right panel. A generated router factory composes the project's
+  routes, wrappers and actions once and refuses a menu item or contract that
+  names a missing route. See the frontend-layouts guide.
+- An owned update deletes a scaffold file forge stops emitting only on positive
+  evidence (recorded as scaffold, written by forge, still scaffold under the
+  ownership policy, unchanged since emission), names it as taken back
+  (`taken_back` in the JSON report), and reports any other as left in place,
+  keeping its record (the dev-server overlay's rule, generalised). It
+  refuses to drop a file beside a pending `.forge-merge` proposal. Leaving the
+  sample application, switching UI kits or dropping a page no longer leaves
+  untracked files behind.
+- Vue apps without `include_chat` no longer receive the chat's
+  `ui_protocol.gen.ts`, `events.gen.ts` and `src/core/ui-protocol/`.
+- A backend feature named like a reserved page (`settings`, `home`, …) is
+  refused only for a frontend that renders it as a page.
+- The recipe records `app_template`, `layouts` (as a list of named entries, so
+  their order survives), `routing`, `auth` and `extras`;
+  `scripts/check_generated_quality.py` takes `--frontend-app-template app-shell`
+  and a `vue/app-shell` lane runs it.
+
 ### Changed — manifest schema v4 → v5
 
 - `forge.toml` records several frontends in a `[[forge.frontends]]` array,

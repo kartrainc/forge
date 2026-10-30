@@ -18,7 +18,7 @@ env:
   # registry snapshot, so an upstream release cannot turn this required check
   # red without a commit. Scheduled and manual runs resolve against the live
   # registry. Advance the snapshot as the maintainer runbook describes.
-  FORGE_NPM_SNAPSHOT: '2026-10-18T00:00:00Z'
+  FORGE_NPM_SNAPSHOT: '2026-10-29T13:00:00Z'
 jobs:
   policy:
     strategy:
@@ -73,6 +73,16 @@ jobs:
           - language: vue
             kit: two-apps
             args: --auth --features items,orders --extra-frontend admin:nuxt-ui
+          # The page-free app-shell template (ADR-015): two layouts with
+          # sub-menus, the page extras as menu targets, every system page
+          # built in. Its generated runtime tests carry the coverage gate.
+          - language: vue
+            kit: app-shell
+            args: --ui-kit nuxt-ui --auth --frontend-app-template app-shell
+          # The same without sign-in: forge's no-auth composable behind the contract.
+          - language: vue
+            kit: app-shell-no-auth
+            args: --ui-kit nuxt-ui --frontend-app-template app-shell
           # The Node template without a database (http-service): its own
           # entrypoint, error and route tests carry the coverage gate.
           - language: node
@@ -101,7 +111,7 @@ jobs:
           python-version: '3.13'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         if: matrix.language == 'rust'
         with:

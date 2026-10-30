@@ -26,7 +26,7 @@ from forge.variable_mapper import (
     ("language", "version_attr", "version_value"),
     [
         (BackendLanguage.PYTHON, "python_version", "3.13"),
-        (BackendLanguage.NODE, "node_version", "22"),
+        (BackendLanguage.NODE, "node_version", "26"),
         (BackendLanguage.RUST, "rust_edition", "2024"),
     ],
 )

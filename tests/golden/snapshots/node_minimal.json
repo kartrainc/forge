@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -13,8 +13,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -26,15 +26,15 @@
     },
     ".forge/quality.json": {
       "size": 762,
-      "sha256": "29c3d69721defe91"
+      "sha256": "a43281dc1b7d5869"
     },
     ".github/workflows/ci.yml": {
       "size": 1043,
-      "sha256": "d361f9a78c897752"
+      "sha256": "14ab0f296baaa847"
     },
     ".github/workflows/quality.yml": {
       "size": 3420,
-      "sha256": "59c4ec23d78fa45a"
+      "sha256": "7c2d78f2bc68408b"
     },
     ".gitignore": {
       "size": 523,
@@ -61,8 +61,8 @@
       "sha256": "<version-dependent>"
     },
     "package.json": {
-      "size": 692,
-      "sha256": "2afa1e798ef1f8de"
+      "size": 691,
+      "sha256": "d33edd38ffa8a1cd"
     },
     "services/api/.copier-answers.yml": {
       "size": 538,
@@ -82,7 +82,7 @@
     },
     "services/api/Dockerfile": {
       "size": 3800,
-      "sha256": "33b24ea634733ff4"
+      "sha256": "c4ad778effdb34a7"
     },
     "services/api/OBSERVABILITY.md": {
       "size": 2091,
@@ -129,8 +129,8 @@
       "sha256": "fc0726a647a0700c"
     },
     "services/api/package.json": {
-      "size": 1420,
-      "sha256": "b2852dbd7c1f5d12"
+      "size": 1417,
+      "sha256": "b41be8f4d86f6b9d"
     },
     "services/api/prisma/migrations/0001_initial/migration.sql": {
       "size": 2078,

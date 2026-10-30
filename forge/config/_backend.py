@@ -172,7 +172,8 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         template_dir="services/python-service-template",
         display_label="Python (FastAPI)",
         version_field="python_version",
-        version_choices=("3.13", "3.12", "3.11"),
+        # The template's Copier prompt offers these, and Copier refuses any other.
+        version_choices=("3.13", "3.14"),
         toolchain=_python_toolchain_factory(),
         version="1.0.0",
     ),
@@ -180,7 +181,8 @@ BACKEND_REGISTRY: dict[BackendLanguage | _PluginLanguage, BackendSpec] = {
         template_dir="services/node-service-template",
         display_label="Node.js (Fastify)",
         version_field="node_version",
-        version_choices=("22", "20", "18"),
+        # The template's toolchain (vitest 5) runs on ^22.12, ^24 and >=26.
+        version_choices=("26", "24", "22"),
         toolchain=_node_toolchain_factory(),
         version="1.0.0",
     ),
@@ -282,7 +284,7 @@ class BackendConfig:
     # Omitted: ["items"], or none for an app template that owns no database (resolved in __post_init__).
     features: list[str] = field(default_factory=_default_features)
     python_version: str = "3.13"
-    node_version: str = "22"
+    node_version: str = "26"
     rust_edition: str = "2024"
     go_version: str = "1.27"
     server_port: int = 5000

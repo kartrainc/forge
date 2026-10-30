@@ -438,8 +438,10 @@ def test_update_removes_outputs_left_at_the_old_root_placement(
     updated = read_forge_toml(manifest_path).provenance
     assert not [rel for rel in updated if rel.startswith("src/") or rel == ".keep"]
     assert updated["mcp.config.example.json"]["fragment_name"] == "mcp_config"
-    # An editable file the generator no longer writes stays for the owner.
-    assert (project / ".keep").is_file()
+    # An editable file the generator no longer writes is taken back while it is
+    # unchanged since emission (ADR-015); an edited one would stay, reported.
+    assert not (project / ".keep").exists()
+    assert ".keep" not in report["left_in_place"]
     assert verify_architecture(project)["passed"]
 
 

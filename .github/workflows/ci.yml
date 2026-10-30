@@ -301,7 +301,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Install rustup stable
         # The setup-rust actions add churn; one-liner is stable + cached
         # implicitly by the runner image on ubuntu-latest.
@@ -353,7 +353,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26"
 
       - name: npm audit (Node workspace packages)
         run: |
@@ -400,7 +400,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26"
       # Generated projects' post_generate.py runs `git init && git commit`
       # to seed an initial commit; without a configured identity the
       # commit fails with "empty ident name" and floods the log with
@@ -451,7 +451,7 @@ jobs:
       # their toolchains are absent.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable

@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -13,8 +13,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -26,7 +26,7 @@
     },
     ".forge/quality.json": {
       "size": 760,
-      "sha256": "1bc78f1bb06ce743"
+      "sha256": "bf935581de5be655"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -34,7 +34,7 @@
     },
     ".github/workflows/quality.yml": {
       "size": 3420,
-      "sha256": "59c4ec23d78fa45a"
+      "sha256": "7c2d78f2bc68408b"
     },
     ".gitignore": {
       "size": 523,

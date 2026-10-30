@@ -44,10 +44,11 @@ entity_plural:
 node_version:
   type: str
   help: "Node.js version"
-  default: "22"
+  default: "26"
   choices:
-    - "22"
+    - "26"
     - "24"
+    - "22"
 
 include_error_envelope:
   type: bool

@@ -212,7 +212,7 @@ class ProjectConfig:
         carry an api_target at all; returns empty string in that case
         to match pre-typed behaviour.
         """
-        if isinstance(self.typed.frontend, (FrontendGenerate, FrontendExternal)):
+        if isinstance(self.typed.frontend, FrontendGenerate | FrontendExternal):
             return self.typed.frontend.api_target_url
         return ""
 
@@ -240,7 +240,7 @@ class ProjectConfig:
         ``none`` variant returns ``"local"`` to match the pre-typed
         ``options.get(..., "local")`` default.
         """
-        if isinstance(self.typed.frontend, (FrontendGenerate, FrontendExternal)):
+        if isinstance(self.typed.frontend, FrontendGenerate | FrontendExternal):
             return self.typed.frontend.api_target_type
         return "local"
 
@@ -309,6 +309,7 @@ class ProjectConfig:
         if self.include_keycloak:
             self._validate_keycloak_ports(ports)
         self._validate_options()
+        self._validate_session_dialogs()
         self._validate_components_shape()
         self._validate_layer_modes()
         self._validate_service_discovery()
@@ -960,6 +961,26 @@ class ProjectConfig:
                 )
             dns_names[fc.dns_name] = fc.name
 
+    def _validate_session_dialogs(self) -> None:
+        """An app that asks for forge's session dialog gets it, or is refused (ADR-015).
+
+        The dialog is the session-timeout fragment's, which only the generated auth stack
+        emits; an app that leaves ``auth.session_dialog`` out falls back to the project's.
+        """
+        from forge.capability_resolver import auth_stack_generated  # noqa: PLC0415
+        from forge.frontend_app import BUILTIN, is_app_shell  # noqa: PLC0415
+
+        if auth_stack_generated(self):
+            return
+        for fc in self.active_frontends:
+            if is_app_shell(fc) and (fc.auth or {}).get("session_dialog") == BUILTIN:
+                raise ValueError(
+                    f"Frontend '{fc.name}' asks for auth.session_dialog 'builtin', the "
+                    "session-timeout dialog of forge's generated auth stack, which this project "
+                    "does not generate (auth.mode generate, with Keycloak for its "
+                    "auth.provider). Set session_dialog to 'project' or leave it out."
+                )
+
     def _validate_frontend_pages(self) -> None:
         """An explicit page list names backend features: the template routes each page to its backend."""
         if not self.backends:
@@ -976,14 +997,18 @@ class ProjectConfig:
                 )
 
     def _validate_features_against_reserved(self) -> None:
-        """Backend feature names must not collide with frontend's reserved page names."""
-        if not self.active_frontends:
-            return
-        for bc in self.backends:
-            for f in bc.features:
+        """A backend feature a frontend renders as a page must not take a reserved page name.
+
+        Only the pages a frontend emits can collide with its own folders: a backend
+        feature named ``settings`` is refused for an app that renders a page per backend
+        feature, and accepted for one that lists its pages or renders none (ADR-015).
+        """
+        owners = {f: bc.name for bc in self.backends for f in bc.features}
+        for fc in self.active_frontends:
+            for f in fc.page_features(self.all_features):
                 if f in FRONTEND_RESERVED:
                     raise ValueError(
-                        f"Feature '{f}' on backend '{bc.name}' is reserved "
+                        f"Feature '{f}' on backend '{owners.get(f, '?')}' is reserved "
                         f"in the frontend template."
                     )
 

@@ -1,12 +1,14 @@
 """Tests for forge.docker_manager compose rendering."""
 
 import fnmatch
+import json
 from pathlib import PurePosixPath
 
 import yaml
 
 from forge.config import (
     BackendConfig,
+    BackendLanguage,
     FrontendConfig,
     FrontendFramework,
     ProjectConfig,
@@ -17,6 +19,7 @@ from forge.docker_manager import (
     render_frontend_dockerignore,
     render_keycloak_realm,
     render_nginx_conf,
+    render_workspace_package_json,
 )
 
 
@@ -243,7 +246,7 @@ class TestRenderFrontendDockerfile:
         path = render_frontend_dockerfile(config, tmp_path)
         content = path.read_text(encoding="utf-8")
 
-        assert "FROM node:22-slim AS builder" in content
+        assert "FROM node:26-slim AS builder" in content
         assert "FROM nginx:alpine" in content
         assert "run build" in content
 
@@ -445,3 +448,30 @@ class TestKeycloakRealmTenantClaim:
         assert sa is not None, "service-account-gatekeeper user missing"
         assert sa["serviceAccountClientId"] == "gatekeeper"
         assert sa["clientRoles"]["realm-management"] == ["manage-users", "view-users"]
+
+
+class TestWorkspaceRootEngines:
+    """A Node service installs from the workspace root in its image, on its own Node."""
+
+    def _engine(self, tmp_path, *node_versions):
+        backends = [
+            BackendConfig(
+                name=f"svc{i}",
+                project_name="Test App",
+                language=BackendLanguage.NODE,
+                node_version=version,
+                server_port=5000 + i,
+            )
+            for i, version in enumerate(node_versions)
+        ]
+        config = _make_config()
+        config.backends = backends or config.backends
+        path = render_workspace_package_json(config, tmp_path)
+        return json.loads(path.read_text(encoding="utf-8"))["engines"]["node"]
+
+    def test_forge_baseline_without_node_services(self, tmp_path):
+        assert self._engine(tmp_path) == ">=26.0.0"
+
+    def test_the_oldest_node_service_sets_the_floor(self, tmp_path):
+        assert self._engine(tmp_path, "26", "22") == ">=22.18.0"
+        assert self._engine(tmp_path, "24") == ">=24.0.0"

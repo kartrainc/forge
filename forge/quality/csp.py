@@ -107,6 +107,11 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
         stdout=sys.stderr,
         stderr=sys.stderr,
     )
+    # The results are a file: on CI, Playwright's git plugin prints to stdout.
+    # Not *.json: the coverage gate reads those as coverage reports.
+    report_file = output / "csp.results"
+    report_file.unlink(missing_ok=True)
+    env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(report_file)
     execution = output / "csp.execution"
     with execution.open("w", encoding="utf-8") as stream:
         # Not check=True: the reports are judged even when a test fails.
@@ -118,7 +123,7 @@ def check_content_security(service: Path, output: Path, *, ui_kit: str = "shadcn
             stdout=stream,
             stderr=sys.stderr,
         )
-    result = json.loads(execution.read_text(encoding="utf-8"))
+    result = json.loads(report_file.read_text(encoding="utf-8"))
     statistics = result["stats"]
     # A global error (the web server, setup or teardown) is reported apart
     # from the test statistics.

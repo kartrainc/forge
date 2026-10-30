@@ -36,6 +36,17 @@ and setup are done: the Vite plugin, `@nuxt/ui/vue-plugin`, `UApp` and the
 theme and `--ui-*` variables in `tokens.css`. Colour mode is Nuxt UI's own,
 backed by VueUse (`UColorModeSelect`, or `useColorMode` from `@vueuse/core`).
 
+A Vue frontend on the `app-shell` application template (`frontend.app_template`)
+takes its shell, menus and routing from the configuration: change
+`frontend.layouts`, `routing`, `auth` or `extras` in the stack file and in the
+recipe's `config.frontend`, then update; never edit `src/shared/application/`,
+`src/shared/layouts/` or `src/shared/system/`. Put pages under `src/features/`;
+compose their routes, the layout wrappers that fill the shell's slots (`logo`,
+`header`, `actions`, `footer`, `aside`) and the menu actions in
+`src/app/router/index.ts`; mark a route's menu item with `meta.menu`, supply
+badge values with `provideMenuBadges`, and keep the authentication contract in
+`src/app/auth.ts`.
+
 Validate with `forge --quality architecture --project-path . --json`.
 List test targets with `forge --quality inventory --project-path .` and run
 `forge --quality test --project-path .`. Run the coverage gate with

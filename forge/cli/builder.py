@@ -144,6 +144,13 @@ _FRONTEND_FLAG_FOR_KEY: dict[str, str] = {
     "layout": "layout",
     "ui_kit": "ui_kit",
     "dev_server": "dev_server",
+    # File-only keys (ADR-015): a menu or a routing table does not fit a flag,
+    # so these names match no argparse destination and the file always wins.
+    "app_template": "_file_only_app_template",
+    "layouts": "_file_only_layouts",
+    "routing": "_file_only_routing",
+    "auth": "_file_only_auth",
+    "extras": "_file_only_extras",
 }
 
 
@@ -202,7 +209,7 @@ def _build_backends_from_cfg(
                     # Omitted, the backend's own default: ["items"], or none without a database.
                     **_features_of(be_cfg.get("features")),
                     python_version=be_cfg.get("python_version", "3.13"),
-                    node_version=be_cfg.get("node_version", "22"),
+                    node_version=be_cfg.get("node_version", "26"),
                     rust_edition=be_cfg.get("rust_edition", "2024"),
                     go_version=str(be_cfg.get("go_version", "1.27")),
                     server_port=be_cfg.get("server_port", 5000 + i),
@@ -224,7 +231,7 @@ def _build_backends_from_cfg(
             # Omitted, the backend's own default: ["items"], or none without a database.
             **_features_of(r.get("features", "backend", "features", default=None)),
             python_version=r.get("python_version", "backend", "python_version", default="3.13"),
-            node_version=r.get("node_version", "backend", "node_version", default="22"),
+            node_version=r.get("node_version", "backend", "node_version", default="26"),
             rust_edition=r.get("rust_edition", "backend", "rust_edition", default="2024"),
             go_version=str(r.get("go_version", "backend", "go_version", default="1.27")),
             server_port=r.get("backend_port", "backend", "server_port", default=5000),
@@ -311,6 +318,11 @@ def _frontend_config(
         ui_kit=get("ui_kit", "shadcn"),
         dev_server=get("dev_server", False),
         name=name,
+        app_template=get("app_template", "crud-app"),
+        layouts=get("layouts", None),
+        routing=get("routing", None),
+        auth=get("auth", None),
+        extras=get("extras", None),
     )
 
 

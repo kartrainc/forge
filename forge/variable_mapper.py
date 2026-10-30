@@ -333,6 +333,7 @@ def vue_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict
         config, backend_name, backend_port, fc
     )
     from forge.codegen.event_union import AG_UI_CLIENT_VERSION, AG_UI_CORE_VERSION
+    from forge.frontend_app import template_answers
     from forge.frontend_csp import csp_enabled
     from forge.ui_kits import NUXT_UI_VERSION, nuxt_ui_primary
 
@@ -388,7 +389,18 @@ def vue_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict
         "vite_proxy_config": _build_vite_proxy_config(config),
         "ag_ui_client_version": AG_UI_CLIENT_VERSION,
         "ag_ui_core_version": AG_UI_CORE_VERSION,
+        # The application template (ADR-015): app_template, extras, auth_runtime,
+        # session_dialog, builtin_pages and the app-shell's resolved application.
+        **template_answers(fc, session_timeout=_session_timeout(config, fc)),
     }
+
+
+def _session_timeout(config: ProjectConfig, fc: FrontendConfig) -> bool:
+    """Whether the session-timeout fragment reaches ``fc`` (auth.mode generate, forge's runtime)."""
+    from forge.capability_resolver import auth_stack_generated  # noqa: PLC0415
+    from forge.frontend_app import auth_runtime  # noqa: PLC0415
+
+    return fc.include_auth and auth_runtime(fc) == "forge" and auth_stack_generated(config)
 
 
 def svelte_context(config: ProjectConfig, fc: FrontendConfig | None = None) -> dict[str, Any]:

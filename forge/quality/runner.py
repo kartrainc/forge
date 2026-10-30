@@ -308,6 +308,11 @@ def run_browser(root: Path, item: dict, output: Path, env: dict[str, str]) -> st
     # the unit and integration suites do. No gateway serves /auth/* here, so a
     # suite that runs with authentication on answers the session in the page:
     # the template's tests/e2e/session.ts, or a project's own mocks.
+    # The results are a file: on CI, Playwright's git plugin prints to stdout.
+    # Not *.json: the coverage gate reads those as coverage reports.
+    report = output / "e2e.results"
+    report.unlink(missing_ok=True)
+    env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(report)
     execution = output / "e2e.execution"
     with execution.open("w", encoding="utf-8") as stream:
         subprocess.run(
@@ -325,7 +330,7 @@ def run_browser(root: Path, item: dict, output: Path, env: dict[str, str]) -> st
             stdout=stream,
             stderr=sys.stderr,
         )
-    statistics = json.loads(execution.read_text(encoding="utf-8"))["stats"]
+    statistics = json.loads(report.read_text(encoding="utf-8"))["stats"]
     if (
         statistics.get("unexpected", 0)
         or statistics.get("flaky", 0)

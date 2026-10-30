@@ -457,32 +457,29 @@ def test_switching_back_to_shadcn_and_again_follows_upgrading(tmp_path: Path) ->
         recipe.write_text(json.dumps(data), encoding="utf-8")
         return update_owned_project(root)
 
-    left = [
-        "apps/frontend/src/app/providers/head.ts",
+    # forge takes back the Nuxt UI scaffold the project never changed; what it
+    # changed stays where it is, keeps its record and is reported (ADR-015).
+    edited = "apps/frontend/src/app/providers/head.ts"
+    (root / edited).write_text("// ours\n", encoding="utf-8")
+    taken_back = [
         "apps/frontend/src/custom/theme/nuxt-ui.config.ts",
         ".mcp.json",
         ".codex/config.toml",
         ".claude/skills/nuxt-ui/SKILL.md",
     ]
-    assert switch("shadcn")["passed"]
+    report = switch("shadcn")
+    assert report["passed"]
+    assert report["left_in_place"] == [edited]
     assert (root / "apps/frontend/src/shared/ui").is_dir()
     provenance = read_forge_toml(root / "forge.toml").provenance
-    for rel in left:
-        assert (root / rel).is_file() and rel not in provenance, rel
-    # While any of them remains unrecorded, switching again stops before writing.
-    with pytest.raises(ValueError, match="collides with user file"):
-        switch("nuxt-ui")
-    for rel in (
-        "apps/frontend/src/app/providers/head.ts",
-        "apps/frontend/src/app/providers/head.test.ts",
-        "apps/frontend/src/custom/theme",
-        ".agents/skills/nuxt-ui",
-        ".claude/skills/nuxt-ui",
-        ".mcp.json",
-        ".codex/config.toml",
-    ):
-        path = root / rel
-        shutil.rmtree(path) if path.is_dir() else path.unlink()
-    assert switch("nuxt-ui")["passed"]
+    for rel in taken_back:
+        assert not (root / rel).exists() and rel not in provenance, rel
+    assert (root / edited).read_text(encoding="utf-8") == "// ours\n" and edited in provenance
+    # The edited file is still recorded as forge's, so switching again keeps the
+    # project's version instead of colliding with it, and restores the rest.
+    report = switch("nuxt-ui")
+    assert report["passed"] and report["conflicts"] == []
+    assert (root / edited).read_text(encoding="utf-8") == "// ours\n"
+    for rel in taken_back:
+        assert (root / rel).is_file(), rel
     assert "<UApp" in (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
-    assert (root / ".mcp.json").is_file()

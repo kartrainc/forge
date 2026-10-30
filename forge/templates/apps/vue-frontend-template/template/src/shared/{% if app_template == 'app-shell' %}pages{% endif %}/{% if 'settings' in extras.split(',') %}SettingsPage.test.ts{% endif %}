@@ -1,0 +1,21 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import SettingsPage from './SettingsPage.vue'
+
+const html = document.documentElement
+
+afterEach(() => {
+  document.body.innerHTML = ''
+  html.className = ''
+  localStorage.clear()
+})
+
+it('applies the colour mode chosen', async () => {
+  const page = mount(SettingsPage, { attachTo: document.body })
+  expect(page.get('h1').text()).toBe('Settings')
+  await page.get('[data-test="theme-select"]').trigger('click')
+  await vi.waitFor(() => expect(document.querySelector('[role="listbox"]')).not.toBeNull())
+  const dark = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.trim() === 'Dark')
+  dark!.click()
+  await vi.waitFor(() => expect(html.classList.contains('dark')).toBe(true))
+})

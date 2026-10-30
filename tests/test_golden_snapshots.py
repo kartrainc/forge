@@ -354,6 +354,59 @@ PRESETS = {
         ],
         include_keycloak=True,
     ),
+    # A Nuxt UI app on the page-free app-shell template (ADR-015): two layouts,
+    # sub-menus, an action, a placeholder route, the home extra as the landing
+    # route and the built-in system pages, with Keycloak so the session-timeout
+    # fragment and the built-in dialog are in the snapshot.
+    "app_shell": ProjectConfig(
+        project_name="snap_shell",
+        backends=[
+            BackendConfig(
+                name="api",
+                project_name="snap_shell",
+                language=BackendLanguage.PYTHON,
+                features=["items"],
+            )
+        ],
+        frontends=[
+            FrontendConfig(
+                project_name="snap_shell",
+                framework=FrontendFramework.VUE,
+                include_auth=True,
+                include_chat=False,
+                ui_kit="nuxt-ui",
+                app_template="app-shell",
+                features=[],
+                routing={"landing": "home"},
+                extras=["home"],
+                layouts={
+                    "console": {
+                        "shell": "header-sidebar",
+                        "placeholder": "home",
+                        "menus": {
+                            "primary": [
+                                {
+                                    "items": [
+                                        {"id": "overview", "label": "Overview", "icon": "i-lucide-house", "to": "home"},
+                                        {
+                                            "id": "sales",
+                                            "label": "Sales",
+                                            "children": [{"id": "orders", "label": "Orders"}],
+                                        },
+                                    ]
+                                },
+                            ],
+                            "account": [
+                                {"items": [{"id": "sign-out", "label": "Log out", "action": "sign-out"}]}
+                            ],
+                        },
+                    },
+                    "staff": {"menus": {"primary": [{"items": [{"id": "audit", "label": "Audit"}]}]}},
+                },
+            ),
+        ],
+        include_keycloak=True,
+    ),
 }
 
 

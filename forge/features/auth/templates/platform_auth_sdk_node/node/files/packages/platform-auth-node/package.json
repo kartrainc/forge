@@ -30,17 +30,17 @@
     "fastify-plugin": "^6.0.0"
   },
   "overrides": {
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
-    "@types/node": "^22.10.0",
-    "fastify": "^5.12.5",
+    "@biomejs/biome": "^2.6.4",
+    "@types/node": "^26.6.6",
+    "fastify": "^5.12.7",
     "typescript": "^6.0.3",
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.7"
   },
   "peerDependenciesMeta": {
     "fastify": {

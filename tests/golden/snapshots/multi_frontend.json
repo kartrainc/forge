@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -77,8 +77,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -157,8 +157,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 2485,
-      "sha256": "7d2563f4de4cc0fc"
+      "size": 2761,
+      "sha256": "42151d2a69460b2e"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -166,7 +166,7 @@
     },
     ".github/workflows/quality.yml": {
       "size": 3420,
-      "sha256": "59c4ec23d78fa45a"
+      "sha256": "7c2d78f2bc68408b"
     },
     ".gitignore": {
       "size": 523,
@@ -210,7 +210,7 @@
     },
     "apps/admin/Dockerfile": {
       "size": 561,
-      "sha256": "601806cd08a11e8c"
+      "sha256": "56ff1fc05ad2dbc5"
     },
     "apps/admin/README.md": {
       "size": 953,
@@ -233,8 +233,8 @@
       "sha256": "c00a25cf996153d5"
     },
     "apps/admin/package.json": {
-      "size": 1869,
-      "sha256": "0325159c7e707f0b"
+      "size": 1868,
+      "sha256": "9241e7c78a3859f7"
     },
     "apps/admin/playwright.csp.config.ts": {
       "size": 859,
@@ -316,10 +316,6 @@
       "size": 156,
       "sha256": "116d1f92db82f98a"
     },
-    "apps/admin/src/core/ui-protocol/types.ts": {
-      "size": 457,
-      "sha256": "8519e4e3e7f838c3"
-    },
     "apps/admin/src/custom/theme/nuxt-ui.config.ts": {
       "size": 1106,
       "sha256": "a0341d785997a7e8"
@@ -327,14 +323,6 @@
     "apps/admin/src/custom/theme/tokens.css": {
       "size": 619,
       "sha256": "027d68c5c8fe4e98"
-    },
-    "apps/admin/src/features/ai_chat/events.gen.ts": {
-      "size": 4093,
-      "sha256": "1f4a2ec3204179bd"
-    },
-    "apps/admin/src/features/ai_chat/ui_protocol.gen.ts": {
-      "size": 2139,
-      "sha256": "23d26ad54546e2c1"
     },
     "apps/admin/src/features/auth/components/SessionTimeoutModal.test.ts": {
       "size": 3499,
@@ -742,7 +730,7 @@
     },
     "apps/frontend/Dockerfile": {
       "size": 561,
-      "sha256": "601806cd08a11e8c"
+      "sha256": "56ff1fc05ad2dbc5"
     },
     "apps/frontend/README.md": {
       "size": 1073,
@@ -769,8 +757,8 @@
       "sha256": "c00a25cf996153d5"
     },
     "apps/frontend/package.json": {
-      "size": 2124,
-      "sha256": "c3b057c2d0716d36"
+      "size": 2123,
+      "sha256": "834e31b785e87549"
     },
     "apps/frontend/playwright.csp.config.ts": {
       "size": 859,
@@ -843,18 +831,6 @@
     "apps/frontend/src/app/styles/main.css": {
       "size": 6181,
       "sha256": "142445b3f8032448"
-    },
-    "apps/frontend/src/core/ui-protocol/types.ts": {
-      "size": 457,
-      "sha256": "8519e4e3e7f838c3"
-    },
-    "apps/frontend/src/features/ai_chat/events.gen.ts": {
-      "size": 4093,
-      "sha256": "1f4a2ec3204179bd"
-    },
-    "apps/frontend/src/features/ai_chat/ui_protocol.gen.ts": {
-      "size": 2139,
-      "sha256": "23d26ad54546e2c1"
     },
     "apps/frontend/src/features/auth/components/SessionTimeoutModal.test.ts": {
       "size": 3215,
@@ -2049,8 +2025,8 @@
       "sha256": "<version-dependent>"
     },
     "package.json": {
-      "size": 688,
-      "sha256": "6d0010f24a113cdc"
+      "size": 687,
+      "sha256": "3296cc08411c8ed9"
     },
     "packages/platform-auth/README.md": {
       "size": 1468,
@@ -2778,7 +2754,7 @@
     },
     "tests/e2e/Dockerfile": {
       "size": 461,
-      "sha256": "8ba57ee26349df3c"
+      "sha256": "804df94be7277607"
     },
     "tests/e2e/_tasks/answers.json": {
       "size": 87,
@@ -2818,7 +2794,7 @@
     },
     "tests/e2e/package.json": {
       "size": 517,
-      "sha256": "52c2a32691d1619d"
+      "sha256": "d6e77c2409bf8c2e"
     },
     "tests/e2e/playwright.config.ts": {
       "size": 679,

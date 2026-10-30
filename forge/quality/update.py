@@ -9,13 +9,15 @@ from pathlib import Path
 import tomlkit
 
 from forge.config import BackendLanguage
-from forge.docker_manager import is_dev_server_file
 from forge.errors import ForgeError
 from forge.quality.model import RECIPE, digest, ownership, project_path, read_recipe
 from forge.sync.manifest import read_forge_toml
 from forge.sync.provenance import ProvenanceCollector
 from forge.toolchains._runner import run_backend_cmd
 from forge.toolchains.go import TIDY
+
+#: The origins of what forge writes; ``user`` is the project's own.
+FORGE_ORIGINS = frozenset({"base-template", "fragment"})
 
 
 def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
@@ -32,7 +34,8 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
     for rel, record in old.provenance.items():
         if (
             record.get("ownership") != "generated"
-            and ownership(rel, record["origin"], record.get("template_name")) != "generated"
+            and ownership(rel, record.get("origin") or "base-template", record.get("template_name"))
+            != "generated"
         ):
             continue
         path = project_path(root, rel)
@@ -111,27 +114,43 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             # go.sum is resolved from its go.mod, so it follows that file's decision.
             if writes.get(module) is not None or not project_path(root, rel).exists():
                 writes[rel] = (candidate / rel).read_bytes()
-        for rel, record in old.provenance.items():
-            if record.get("ownership") == "generated" and rel not in new.provenance:
-                writes[rel] = None
+        discontinued = [
+            (rel, record)
+            for rel, record in old.provenance.items()
+            if rel not in new.provenance and record.get("origin") != "user"
+        ]
+        # A pending proposal for a file forge stops writing has nowhere to go once the file
+        # and its record are gone: it is resolved first, never dropped beside the file.
+        for rel, _record in discontinued:
+            if project_path(root, rel + ".forge-merge").exists():
+                raise ValueError(f"Resolve existing update conflict first: {rel}.forge-merge")
         left_in_place: list[str] = []
-        for rel, record in old.provenance.items():
-            if not is_dev_server_file(rel) or rel in new.provenance:
-                continue
-            # Only what forge wrote. A project's own file under one of these names is recorded
-            # as the project's (origin "user") and is never taken back.
-            if record.get("origin") == "user":
-                continue
-            # Forge no longer writes this overlay or wrapper (the option is off, for this app
-            # or for all). One left behind would name a Dockerfile target that is gone, so
-            # take back what is unchanged; a file the project edited stays and is reported.
-            # This runs on every update, not only the one that turned the option off: a kept
-            # file is recorded again each time, so turning the option on later never meets
-            # it as an unknown file.
-            path = project_path(root, rel)
-            if path.is_file() and digest(path) == record["sha256"]:
+        for rel, record in discontinued:
+            if record.get("ownership") == "generated":
                 writes[rel] = None
-            elif path.is_file():
+                continue
+            # Forge no longer writes this scaffold file: an option turned off (the dev-server
+            # overlay), another application template or UI kit, a page dropped from the
+            # configuration (ADR-015). One left behind would keep a page, a test or a Dockerfile
+            # target nothing renders any more, so it is taken back, but only on positive
+            # evidence that it is forge's untouched scaffold: recorded as scaffold, written by
+            # forge (a template or a fragment), still scaffold under today's policy, and
+            # unchanged since emission. Anything else (an edit, a record that is incomplete or
+            # contradicts itself) stays, keeps its record and is reported. This runs on every
+            # update, not only the one that dropped the file: a kept file is recorded again
+            # each time, so emitting it again later never meets it as an unknown file.
+            path = project_path(root, rel)
+            if not path.is_file():
+                continue
+            origin = record.get("origin")
+            if (
+                record.get("ownership") == "scaffold"
+                and origin in FORGE_ORIGINS
+                and ownership(rel, origin, record.get("template_name")) == "scaffold"
+                and digest(path) == record.get("sha256")
+            ):
+                writes[rel] = None
+            else:
                 left_in_place.append(rel)
         if not conflicts:
             for rel, record in old.provenance.items():
@@ -148,6 +167,8 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
         else:
             # Do not advance baselines when application is incomplete.
             writes = {k: v for k, v in writes.items() if k.endswith(".forge-merge")}
+        # Named in the report: an unchanged file can still be imported by the project's code.
+        taken_back = sorted(rel for rel, _record in discontinued if rel in writes)
         report = {
             "passed": not conflicts,
             "backends": [b.name for b in config.backends],
@@ -160,6 +181,7 @@ def update_owned_project(root: Path, *, dry_run: bool = False) -> dict:
             "file_conflicts": len(conflicts),
             "conflicts": conflicts,
             "left_in_place": left_in_place,
+            "taken_back": taken_back,
             "changes": [
                 {"path": rel, "action": "delete" if body is None else "write"}
                 for rel, body in sorted(writes.items())

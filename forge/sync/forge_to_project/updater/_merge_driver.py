@@ -161,6 +161,7 @@ def frontend_targets(
         component_fragments_for_kit,
         selected_component_fragments,
     )
+    from forge.frontend_app import FORGE_AUTH_RUNTIME_FRAGMENTS, auth_runtime  # noqa: PLC0415
     from forge.ui_kits import applies_to  # noqa: PLC0415
 
     selected = selected_component_fragments(config)
@@ -168,6 +169,10 @@ def frontend_targets(
     for fc in config.active_frontends:
         kit = fc.ui_kit if applies_to(fc.framework) else None
         excluded = selected - component_fragments_for_kit(config, kit) if kit else frozenset()
+        # An app whose authentication runtime is the project's own (ADR-015) takes
+        # none of forge's frontend auth runtime.
+        if auth_runtime(fc) == "project":
+            excluded = frozenset(excluded) | FORGE_AUTH_RUNTIME_FRAGMENTS
         app_dir = (app_dirs or {}).get(fc.name) or project_root / "apps" / fc.name
         targets.append(FrontendTarget(fc.framework, app_dir, kit, frozenset(excluded), fc.name))
     return tuple(targets)

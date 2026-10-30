@@ -53,7 +53,7 @@ from forge.codegen.ui_protocol import (
 from forge.codegen.ui_protocol import (
     load_all as load_ui_schemas,
 )
-from forge.config import BackendLanguage
+from forge.config import BackendLanguage, FrontendFramework
 from forge.config._topology import database_backends
 from forge.domain.emitters import (
     emit_alembic_migration,
@@ -136,6 +136,16 @@ def _frontend_apps(config: ProjectConfig) -> list[tuple[FrontendConfig, Frontend
     return apps
 
 
+def _receives_chat_types(fc: FrontendConfig) -> bool:
+    """Whether the app gets the UI-protocol and event-union types of the chat UI.
+
+    The Vue template deletes its chat feature, the types' folder, when
+    ``include_chat`` is off; writing them there anyway left two orphan files in
+    every chat-less Vue app (ADR-015). Svelte and Flutter keep theirs.
+    """
+    return fc.framework != FrontendFramework.VUE or fc.include_chat
+
+
 def _app_components(config: ProjectConfig, fc: FrontendConfig, names: Iterable[str]) -> list[str]:
     """The selected components (of ``names``) that the app ``fc`` receives.
 
@@ -175,6 +185,8 @@ def _emit_ui_protocol(
         return
 
     for fc, layout in _frontend_apps(config):
+        if not _receives_chat_types(fc):
+            continue
         target = _frontend_root(project_root, fc) / layout.ui_protocol_path
         if layout.ui_protocol_emitter == "typescript":
             body = emit_typescript(schemas)
@@ -513,7 +525,7 @@ def _emit_event_union_pydantic(
         _write(target, body, collector)
 
     for fc, layout in _frontend_apps(config):
-        if not layout.event_union_path:
+        if not layout.event_union_path or not _receives_chat_types(fc):
             continue
         target = _frontend_root(project_root, fc) / layout.event_union_path
         if layout.ui_protocol_emitter == "typescript":

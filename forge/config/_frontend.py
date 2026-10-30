@@ -12,6 +12,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from forge.config._validators import validate_features, validate_port
 
@@ -230,6 +231,28 @@ class FrontendConfig:
     # The app's name: its ``apps/<name>`` folder and package name. The primary
     # frontend's default is the name every single-frontend project uses.
     name: str = PRIMARY_FRONTEND_NAME
+    # The application's shape (ADR-015, forge.frontend_app): ``crud-app`` is the
+    # sample application the template always rendered; ``app-shell`` renders the
+    # boilerplate and a configurable shell, and takes the four settings below,
+    # which ``crud-app`` refuses. They are plain mappings so the recipe stores and
+    # reads them unchanged.
+    app_template: str = "crud-app"
+    # The stack file writes ``layouts`` as a mapping of name to layout; it is kept
+    # as a list of ``{"name": ..., ...}`` entries so the order survives the recipe
+    # (written with sorted keys): the first layout is the one mounted at ``/``.
+    layouts: list[dict[str, Any]] | None = None
+    routing: dict[str, str] | None = None
+    auth: dict[str, str] | None = None
+    extras: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        # Only a well-formed mapping becomes the list; anything else (a body that is not
+        # a table, or one naming another layout) stays as it is for validation to refuse.
+        layouts = self.layouts
+        if isinstance(layouts, dict) and all(
+            isinstance(v, dict) and v.get("name", k) == k for k, v in layouts.items()
+        ):
+            self.layouts = [{**value, "name": name} for name, value in layouts.items()]
 
     @property
     def dns_name(self) -> str:
@@ -241,7 +264,12 @@ class FrontendConfig:
         return self.name.replace("_", "-")
 
     def page_features(self, all_features: Sequence[str]) -> list[str]:
-        """The CRUD pages this app renders: ``features`` when set, else every backend feature."""
+        """The CRUD pages this app renders: ``features`` when set, else every backend feature.
+
+        An ``app-shell`` app renders none (forge.frontend_app).
+        """
+        if self.app_template == "app-shell":
+            return []
         if self.features is None:
             return list(all_features)
         return list(self.features)
@@ -367,6 +395,11 @@ class FrontendConfig:
         from forge.ui_kits import check_frontend  # noqa: PLC0415
 
         check_frontend(self)
+        # The application template and, for ``app-shell``, its layouts, menus,
+        # routing, auth and extras (ADR-015). Local import for the same reason.
+        from forge.frontend_app import check_application  # noqa: PLC0415
+
+        check_application(self)
 
 
 def frontend_host_label(fc: FrontendConfig, *, primary: bool) -> str:

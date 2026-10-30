@@ -1,0 +1,29 @@
+{%- if auth_runtime == 'forge' -%}
+// The authentication contract the guards, the API client and the shell use: forge's
+// runtime (`useAuth` against the gateway's session), as auth.runtime: forge asks.
+import { forgeAuth } from '@/shared/application/forgeAuth'
+
+export const auth = forgeAuth()
+{%- else -%}
+// The authentication contract the guards, the API client and the shell use. With
+// auth.runtime: project forge renders no runtime: implement this contract with the
+// project's own (src/shared/application/contracts.ts describes it). Until then nobody is
+// signed in and signing in fails loudly.
+import { readonly, ref } from 'vue'
+import type { AuthContract } from '@/shared/application/contracts'
+
+const nobody = ref(false)
+
+export const auth: AuthContract = {
+  isAuthenticated: readonly(nobody),
+  isLoading: readonly(ref(false)),
+  user: readonly(ref(null)),
+  hasRole: () => false,
+  signIn: () => {
+    throw new Error('auth.runtime is project: implement the authentication contract in src/app/auth.ts.')
+  },
+  signOut: () => {
+    throw new Error('auth.runtime is project: implement the authentication contract in src/app/auth.ts.')
+  },
+}
+{%- endif %}

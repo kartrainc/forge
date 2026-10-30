@@ -45,8 +45,8 @@ class TestParseArgs:
         assert args.backend_port == 8080
 
     def test_python_version_choices(self):
-        args = self._parse("--python-version", "3.11")
-        assert args.python_version == "3.11"
+        args = self._parse("--python-version", "3.14")
+        assert args.python_version == "3.14"
 
     def test_invalid_python_version(self):
         with pytest.raises(SystemExit):

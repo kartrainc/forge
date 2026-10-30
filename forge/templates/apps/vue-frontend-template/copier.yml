@@ -111,6 +111,44 @@ security_csp:
   default: false
   help: "Build for the security.csp policy: the nonce placeholder (set by forge; see forge.frontend_csp)"
 
+# ─── Application template (ADR-015; set by forge from forge.frontend_app) ───
+
+app_template:
+  type: str
+  when: false
+  default: "crud-app"
+  help: "crud-app (sample pages and CRUD) or app-shell (boilerplate, configurable shell, no pages)"
+
+extras:
+  type: str
+  when: false
+  default: "home,profile,settings,health,confirm,list_helpers,forms,capabilities,event_stream,layout_helpers,msw"
+  help: "Comma-separated extras the app renders; crud-app renders every one"
+
+auth_runtime:
+  type: str
+  when: false
+  default: "forge"
+  help: "forge (useAuth and the session-timeout composable) or project (the project's own contract)"
+
+session_dialog:
+  type: str
+  when: false
+  default: "builtin"
+  help: "builtin (forge mounts its session-timeout dialog), project or none"
+
+builtin_pages:
+  type: str
+  when: false
+  default: ""
+  help: "Comma-separated system pages an app-shell app takes from forge (sign_in, not_found, auth_stuck, forbidden)"
+
+application:
+  type: str
+  when: false
+  default: "{}"
+  help: "The app-shell's resolved layouts, menus and routing as JSON (src/shared/application/config.ts)"
+
 consumed_services:
   type: str
   default: ""

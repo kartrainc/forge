@@ -317,7 +317,7 @@ do not wait for the weekly batch to fix an exploitable vulnerability.
 2. Resolve the latest stable releases together, read upstream migration notes,
    and adapt source/configuration where APIs change. Update mirrored canvas
    sources and generated workflow pins together. Keep runtime-specific types
-   aligned with the supported runtime (for example, Node 22 types for Node 22).
+   aligned with the supported runtime (for example, Node 26 types for Node 26).
    A compatibility hold must name the affected package, failing behavior, and
    follow-up issue. A community replacement for an incompatible compiler is a
    separate technology decision, not an ordinary version bump.

@@ -85,6 +85,120 @@ on shadcn-vue are refused as well; the refusal names the Nuxt UI component to
 use instead where there is one. `--color-scheme` takes the template's eight
 schemes for both kits and, for `nuxt-ui`, any Tailwind CSS 4.3 palette name.
 
+## Application templates
+
+`frontend.app_template` chooses what a Vue app contains
+([ADR-015](../architecture-decisions/ADR-015-frontend-application-templates-layouts-and-menus.md)):
+
+- `crud-app` *(default)*: the sample application — a CRUD slice per backend
+  feature, home, profile, settings and sign-in pages, and the layouts above.
+- `app-shell` (`ui_kit: nuxt-ui` only): the boilerplate, a configurable shell
+  and no page of its own. The project declares its layouts and their menus,
+  its routing contracts, its authentication settings and the extras it wants;
+  forge renders them, and the project composes its own pages into the router
+  factory forge generates. Nothing is written under `src/features/`.
+
+```yaml
+frontend:
+  framework: vue
+  ui_kit: nuxt-ui
+  app_template: app-shell
+  include_auth: true
+  auth: { runtime: forge, session_dialog: builtin }   # runtime: forge | project
+  extras: []                       # home, profile, settings, health, confirm, list_helpers,
+                                   # forms, capabilities, event_stream, layout_helpers, msw
+  routing:
+    landing: orders                # the route `/` opens; required
+    sign_in: builtin               # builtin, or a project route name
+    not_found: builtin
+    auth_stuck: builtin
+    forbidden: builtin
+  layouts:                         # the first is mounted at `/`, the others under `/<name>`
+    console:
+      shell: header-sidebar
+      placeholder: not-built       # a project route taking :item; without it such items are disabled
+      menus:
+        primary:                   # the sidebar
+          - items:
+              - { id: overview, label: Overview, icon: i-lucide-house, to: overview }
+              - id: sales
+                label: Sales
+                icon: i-lucide-shopping-cart
+                children:
+                  - { id: orders, label: Orders, to: orders }
+                  - { id: invoices, label: Invoices, badge: invoices }   # no destination: placeholder
+          - label: Settings        # a section's eyebrow label
+            items:
+              - { id: team, label: Team, icon: i-lucide-users }
+        account:
+          - items:
+              - { id: sign-out, label: Log out, icon: i-lucide-log-out, action: sign-out }
+        footer:
+          - items:
+              - { id: support, label: Support }
+```
+
+An item has at most one of `to` (a route name), `action` (an id the project
+passes to the router factory) and `children` (one level); ids are kebab-case and
+unique within a layout; `badge` names a key whose value the project supplies at
+runtime with `provideMenuBadges` (account-menu badges included). A route marks the
+item it belongs to with `meta.menu: <id>`; without it, the placeholder route marks
+the item its `:item` names, and any other route the item whose `to` it matches. The active item's parent is open, and follows navigation.
+A placeholder item opens the placeholder route with `{ item: <id> }` when that
+route takes `:item`, without params otherwise.
+
+The routing contracts: `/` always opens `landing` (the `home` extra sits at
+`/home`); `landing` may not be a system destination (the sign-in route, built in or
+not, the not-found, auth-stuck or forbidden route), which would loop, and the
+guards never redirect a visit to the route it is on. A project route named as
+`not_found` also answers every unknown address, inside the layout and the parents
+it sits in, keeping the address. Every
+`meta.requiresRole` along the matched routes must hold, and the deepest route that
+sets `meta.requiresAuth` decides whether it needs a sign-in. The app mounts without
+waiting for the authentication contract to start; a sign-in that does not answer
+in time ends on `auth_stuck`.
+
+What forge writes, and who owns it:
+
+| Path under `apps/<name>/` | Ownership |
+|---|---|
+| `src/shared/application/` (contracts, the rendered configuration, the router factory, guards, menus, the forge auth adapter) | generated |
+| `src/shared/layouts/HeaderSidebarShell.vue` | generated |
+| `src/shared/system/` (the built-in sign-in, not-found, auth-stuck and forbidden pages) | generated |
+| `src/shared/pages/` (the `home`, `profile` and `settings` extras) | generated |
+| `src/app/main.ts`, `src/app/App.vue`, `src/app/auth.ts`, `src/app/router/index.ts` | scaffold |
+| the tests beside those modules, `tests/integration/application.test.ts`, `tests/e2e/application.spec.ts` | scaffold |
+
+Generated code never imports project code. The project composes once, in
+`src/app/router/index.ts`:
+
+```ts
+const router = createApplicationRouter({
+  auth,                                   // src/app/auth.ts: forge's runtime or the project's
+  routes: { console: consoleRoutes },     // the project's pages, per layout
+  publicRoutes: [signInRoute],            // outside every layout
+  layouts: { console: ConsoleLayout },    // a wrapper filling the shell's slots
+  actions: { 'sign-out': () => auth.signOut() },
+  activeLayouts: ['console'],             // default: every layout (choose by host, for example)
+})
+```
+
+The factory throws when a menu item, a placeholder or a routing contract names a
+route the composition does not contain, or when two routes share a name. The
+`header-sidebar` shell renders a full-width header (slots `logo`, `header`,
+`actions`), a collapsible sidebar with the primary menu, the page with a
+`footer` slot, a right-hand `aside` panel that collapses on wide screens and
+slides over the page on narrow ones, and the two edge toggles; a wrapper passes
+its slots through to it. With `auth.runtime: project`, forge emits no
+`useAuth`, no session-timeout composable and no forge auth adapter, and
+`src/app/auth.ts` is a starter to implement. `auth.session_dialog: builtin` mounts
+forge's session-timeout dialog, which only the generated auth stack has
+(`auth.mode: generate`, with Keycloak for its provider): asked for without it, the
+configuration is refused; left out, the app gets `project`.
+
+Changing a menu or a route contract is a configuration change: edit the stack
+file and the recipe's `config.frontend`, then run `forge --update`.
+
 ## Architecture
 
 Two orthogonal concerns:

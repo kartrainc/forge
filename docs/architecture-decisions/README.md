@@ -23,3 +23,4 @@ proposals.
 | [012](ADR-012-a-list-of-frontends.md) | A list of frontends | Accepted |
 | [013](ADR-013-a-dev-server-overlay-for-the-compose-frontend.md) | A dev-server overlay for the Compose frontend | Proposed |
 | [014](ADR-014-a-node-http-service-without-a-database.md) | A Node HTTP service without a database | Proposed |
+| [015](ADR-015-frontend-application-templates-layouts-and-menus.md) | Frontend application templates, with layouts, menus and routing from the configuration | Proposed |

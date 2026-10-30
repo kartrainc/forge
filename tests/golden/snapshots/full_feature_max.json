@@ -1,8 +1,8 @@
 {
   "files": {
     ".agents/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".agents/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -13,8 +13,8 @@
       "sha256": "062d78308067ddd1"
     },
     ".claude/skills/forge-platform/SKILL.md": {
-      "size": 3547,
-      "sha256": "231e07d78aa97857"
+      "size": 4251,
+      "sha256": "778c0d24eb673918"
     },
     ".claude/skills/forge-platform/references/workloads.md": {
       "size": 2397,
@@ -25,8 +25,8 @@
       "sha256": "2ac15b8600196a9b"
     },
     ".forge/quality.json": {
-      "size": 2359,
-      "sha256": "a0ac33a8e8a11c7f"
+      "size": 2543,
+      "sha256": "91b2fc6ae6dee917"
     },
     ".github/workflows/ci.yml": {
       "size": 1089,
@@ -34,7 +34,7 @@
     },
     ".github/workflows/quality.yml": {
       "size": 3420,
-      "sha256": "59c4ec23d78fa45a"
+      "sha256": "7c2d78f2bc68408b"
     },
     ".gitignore": {
       "size": 523,
@@ -74,7 +74,7 @@
     },
     "apps/frontend/Dockerfile": {
       "size": 561,
-      "sha256": "601806cd08a11e8c"
+      "sha256": "56ff1fc05ad2dbc5"
     },
     "apps/frontend/README.md": {
       "size": 1628,
@@ -110,7 +110,7 @@
     },
     "apps/frontend/package.json": {
       "size": 2433,
-      "sha256": "322557f6bed98c72"
+      "sha256": "66c59ce65fd2fdc0"
     },
     "apps/frontend/playwright.quality.config.ts": {
       "size": 385,
@@ -1645,8 +1645,8 @@
       "sha256": "<version-dependent>"
     },
     "package.json": {
-      "size": 690,
-      "sha256": "eb4a595b30077947"
+      "size": 689,
+      "sha256": "0943c844a6bfeb90"
     },
     "packages/platform-auth/README.md": {
       "size": 1468,
@@ -2590,7 +2590,7 @@
     },
     "tests/e2e/Dockerfile": {
       "size": 461,
-      "sha256": "8ba57ee26349df3c"
+      "sha256": "804df94be7277607"
     },
     "tests/e2e/_tasks/answers.json": {
       "size": 88,
@@ -2630,7 +2630,7 @@
     },
     "tests/e2e/package.json": {
       "size": 519,
-      "sha256": "97016fa4267c48ad"
+      "sha256": "28b065fe490f0745"
     },
     "tests/e2e/playwright.config.ts": {
       "size": 679,

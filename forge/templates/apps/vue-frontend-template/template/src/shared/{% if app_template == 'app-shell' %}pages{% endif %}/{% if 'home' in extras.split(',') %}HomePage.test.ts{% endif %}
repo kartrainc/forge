@@ -1,0 +1,14 @@
+import { expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import HomePage from './HomePage.vue'
+import { setApplicationContext } from '@/shared/application/context'
+import { testAuth } from '@/shared/application/testing'
+
+it('greets the signed-in user', () => {
+  const { auth, user } = testAuth(true)
+  setApplicationContext({ auth, actions: {} })
+  user.value = { firstName: 'Dev' }
+  expect(mount(HomePage).get('h1').text()).toBe('Welcome, Dev')
+  user.value = null
+  expect(mount(HomePage).get('h1').text()).toBe('Welcome')
+})
