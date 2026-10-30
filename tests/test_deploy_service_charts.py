@@ -338,6 +338,7 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
         gosvc = _values(helm / "gosvc" / "values.yaml")
         mail = _values(helm / "mail" / "values.yaml")
         mail_role_script = (helm / "mail" / "files" / "db-app-role.sh").is_file()
+        mail_umbrella = _values(umbrella / "deploy" / "helm" / "values.yaml")["workloads"]["mail"]
     assert api["migration"]["dbAppRole"] == "api_app"
     # the service connects as the runtime role, the migration as the owner
     assert api["secret"]["stringData"]["APP__DB__URL"] == (
@@ -357,6 +358,14 @@ def test_a_backend_with_an_app_role_carries_its_umbrella_workload() -> None:
     )
     assert mail["configMap"]["data"]["MIGRATE_ON_START"] == "false"
     assert mail_role_script
+    # the umbrella layout alike: the hook Job (templates/jobs.yaml) runs migrateCommand with migrateSecretEnv, the owner
+    assert mail_umbrella["dbAppRole"] == "mail_app"
+    assert mail_umbrella["hasMigrations"] is True
+    assert mail_umbrella["migrateCommand"] == ["npx", "prisma", "migrate", "deploy"]
+    assert mail_umbrella["env"]["MIGRATE_ON_START"] == "false"
+    for key in ("APP__DB__URL", "DATABASE_URL"):
+        assert mail_umbrella["secretEnv"][key] == "postgresql://mail_app:CHANGEME@postgres:5432/mail", key
+    assert mail_umbrella["migrateSecretEnv"]["DATABASE_URL"] == "postgresql://CHANGEME@postgres:5432/mail"
 
 
 def test_a_backend_of_a_project_without_a_database_has_no_database_values() -> None:
