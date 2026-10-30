@@ -65,7 +65,7 @@
       "sha256": "9a94950eef4a8084"
     },
     "forge.toml": {
-      "size": 77147,
+      "size": 77625,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -73,7 +73,7 @@
       "sha256": "07715a68b8077b4b"
     },
     "services/api-node/.copier-answers.yml": {
-      "size": 559,
+      "size": 566,
       "sha256": "<version-dependent>"
     },
     "services/api-node/.dockerignore": {
@@ -133,8 +133,8 @@
       "sha256": "45db927c79c57976"
     },
     "services/api-node/entrypoint.sh": {
-      "size": 306,
-      "sha256": "54144a1431680375"
+      "size": 676,
+      "sha256": "dcd6dac1cf1b47a8"
     },
     "services/api-node/package.json": {
       "size": 1425,
@@ -357,7 +357,7 @@
       "sha256": "264370db3ae0a104"
     },
     "services/api-py/.copier-answers.yml": {
-      "size": 556,
+      "size": 563,
       "sha256": "<version-dependent>"
     },
     "services/api-py/.env.example": {
