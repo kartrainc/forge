@@ -47,6 +47,11 @@ const props = withDefaults(defineProps<{
   asideButton?: boolean
   /** USlideover props for the right panel on narrow screens over the shell's: `overlay`, `modal`, `transition`, `title`, `ui`. */
   asideSlideover?: Omit<SlideoverProps, 'open' | 'side'>
+  /**
+   * Classes for the page's `main` and its `footer` in place of the shell's own (`p-4 sm:p-6`; `border-t border-default
+   * px-4 py-3 sm:px-6`): a project draws its own padding, and its footer's line and spacing.
+   */
+  page?: { main?: string, footer?: string }
 }>(), {
   asideBadge: undefined,
   sidebar: () => ({}),
@@ -56,6 +61,7 @@ const props = withDefaults(defineProps<{
   narrowSidebar: 'menu',
   asideButton: true,
   asideSlideover: () => ({}),
+  page: () => ({}),
 })
 
 defineSlots<{
@@ -288,12 +294,12 @@ function menuProps(isCollapsed: boolean) {
             </slot>
           </template>
           <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <main class="flex-1 p-4 sm:p-6">
+            <main class="flex-1" :class="page.main ?? 'p-4 sm:p-6'">
               <slot>
                 <RouterView />
               </slot>
             </main>
-            <footer v-if="slots.footer || hasFooter" class="border-t border-default px-4 py-3 sm:px-6">
+            <footer v-if="slots.footer || hasFooter" :class="page.footer ?? 'border-t border-default px-4 py-3 sm:px-6'">
               <slot name="footer" :items="footer">
                 <UNavigationMenu :items="footer" orientation="horizontal" aria-label="Footer" />
               </slot>

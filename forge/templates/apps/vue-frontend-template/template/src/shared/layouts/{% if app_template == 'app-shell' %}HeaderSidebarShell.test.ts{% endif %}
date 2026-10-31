@@ -199,6 +199,18 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(trigger().attributes('data-open')).toBe('false')
   })
 
+  it('pads the page and boxes the footer with the project\'s classes in place of its own', async () => {
+    const footer = () => h('p', 'Footer')
+    const own = await render({ footer })
+    expect(own.get('main').classes()).toEqual(['flex-1', 'p-4', 'sm:p-6'])
+    expect(own.get('footer').classes()).toEqual(['border-t', 'border-default', 'px-4', 'py-3', 'sm:px-6'])
+    own.unmount()
+    const shell = await render({ footer }, { page: { main: 'px-8 pt-10', footer: 'mx-8 mt-10 border-t pt-5' } })
+    // `flex-1` stays: it keeps the footer at the bottom of a short page
+    expect(shell.get('main').classes()).toEqual(['flex-1', 'px-8', 'pt-10'])
+    expect(shell.get('footer').classes()).toEqual(['mx-8', 'mt-10', 'border-t', 'pt-5'])
+  })
+
   it('folds the docked right panel in place, its content kept and out of reach, so a project can animate the fold', async () => {
     document.documentElement.style.fontSize = '16px'
     const shell = await render({ aside: chat }, { aside: { resizable: false } })

@@ -232,6 +232,7 @@ toggle the edge toggle and the header's "Show panel" button use.
 | `narrowSidebar` | `'menu'` | the sidebar below its breakpoint: `'menu'` hides it behind the header's menu button and opens it over the page (Nuxt UI's menu, with its own close button); `'collapsed'` keeps it, collapsed to icons, with no menu button, and leaves the user's wide-screen choice as it was |
 | `asideButton` | `true` | the header's "Show panel" button while the panel slides over the page; off when the project renders its own trigger |
 | `asideSlideover` | `{}` | `USlideover` props for the panel on narrow screens over the shell's own (`title: 'Panel'`): `overlay: false` and `modal: false` slide it over a page that stays usable, `transition`, `title`, `ui` |
+| `page` | `{}` | `{ main, footer }`: classes for the page's `main` and its `footer` in place of the shell's own (`p-4 sm:p-6`; `border-t border-default px-4 py-3 sm:px-6`), so a project draws its own padding and the footer's line and spacing; `main` keeps `flex-1`, which holds the footer at the bottom of a short page |
 
 Folded, the docked panel keeps its place at no width (`data-collapsed="true"`)
 instead of leaving the page: its content stays, out of reach (`inert`), and a
@@ -248,7 +249,9 @@ panel's width, so the page column is the browser's width less the sidebar and
 the panel. The docked panel is a right-hand `UDashboardSidebar`: its resize
 handle sits on its inner edge and drags towards the page. Its own
 `UDashboardGroup` (rendering no box) keeps it out of the group's sidebar state,
-which `UDashboardSidebarCollapse` and `UDashboardSidebarToggle` read.
+which `UDashboardSidebarCollapse` and `UDashboardSidebarToggle` read. `page`'s
+classes replace the shell's instead: `main` and `footer` are plain elements, which
+no tailwind-merge resolves.
 
 Menu badges are run-time values: an item's `badge` names a key, and the wrapper
 supplies the values with `provideMenuBadges`, a ref it may change at any time.

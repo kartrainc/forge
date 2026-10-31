@@ -403,7 +403,9 @@ Each safeguard below is an option, so a project can choose another strategy.
   `aside` (`actions`) and `docked` (`aside`). `asideSlideover` passes `USlideover`
   props for the panel on narrow screens (`overlay: false`, `modal: false`, …).
   Folded, the docked panel keeps its place at no width, its content inert, so its
-  state survives and a project can animate the fold in its own CSS.
+  state survives and a project can animate the fold in its own CSS. `page` sets the
+  classes of the page's `main` and `footer` in place of the shell's padding and the
+  footer's line, for a footer that sits inside the page's margins.
 - Fixed in the `header-sidebar` shell: the right panel's resize handle sits on its
   inner edge and drags towards the page (the panel is a right-hand
   `UDashboardSidebar`; a `UDashboardPanel`'s handle follows it, at the screen's
