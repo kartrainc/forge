@@ -369,6 +369,55 @@ sign-in page, a placeholder for its unbuilt items) found two gaps.
     The no-auth rendered lane names a page extra as `not_found`, so CI covers a
     project destination.
 
+### The shell's extension points (after #16)
+
+The first consumer's design needs sizes, breakpoints, a narrow sidebar and toggles
+of its own. The owner's rule: the shell stays design-agnostic, so forge gains
+generic extension points and fixes for the defects the consumer found, and the
+product's values stay in the project's wrapper. Each defect was reproduced by a
+failing test first (the shell's unit tests; the e2e starter for 31 and 32).
+
+29. **Pass-through.** `sidebar`, `aside` and `menu` props go over the shell's own
+    to `UDashboardSidebar`, the docked panel and the primary `UNavigationMenu`,
+    typed with Nuxt UI's prop types; `ui` objects merge per slot, the project's
+    classes after the shell's. With `menu.type: 'single'` the open sub-menu is one
+    string, `''` for none (`undefined` left the menu to its own state).
+30. **Breakpoints.** `breakpoints.{sidebar,aside,header}` (pixels or a media query,
+    1024 each) replace the one query; the shell's `ui` classes make Nuxt UI's `lg`
+    classes (the sidebar's root, menu, toggle and handle) follow them. The slots
+    get `sidebarNarrow`, `actions` the panel's `aside` control, `aside` `docked`.
+    `narrowSidebar: collapsed` keeps the sidebar as icons below its breakpoint: a
+    sidebar of its own (another id, neither resizable nor stored), so the user's
+    wide-screen choice stays. `asideButton`, the `aside-trigger`, `sidebar-toggle`
+    and `aside-toggle` slots complete the hooks.
+31. **Narrow menu.** The shell passed `ui.header: 'hidden'` and `toggle: false` to
+    drop a desktop toggle the desktop sidebar never renders (its header needs a
+    header slot); both only hid the menu's header and close button. Both go.
+32. **Collapsed names.** Nuxt UI hides a collapsed item's label (`hidden`), leaving
+    links and sub-menu buttons without a name; the shell passes
+    `linkLabel: 'inline sr-only'` while collapsed (`inline` displaces `hidden`,
+    which tailwind-merge keeps beside `sr-only`).
+33. **Right panel.** A `UDashboardPanel` renders its resize handle after itself, on
+    the screen's edge for a right-hand panel, and resizes as a left one. A
+    right-hand `UDashboardSidebar` (Nuxt UI's documented `side="right"`) puts it on
+    the inner edge and resizes towards the page, so the docked panel is one, with
+    `border-s`, and the page panel drops Nuxt UI's `lg:not-last:border-e`. A
+    second sidebar would write the group's sidebar state (`sidebarOpen`,
+    `sidebarCollapsed`, read by `UDashboardSidebarCollapse` and
+    `UDashboardSidebarToggle`) and hears the sidebar toggle's hook: it sits in a
+    `UDashboardGroup` of its own (`contents`, no box), and its menu is held closed.
+34. **Escape** closes the header expanded on a narrow screen.
+35. **zod.** `app-shell` with `security.csp` puts zod and `src/app/providers/csp.ts`
+    in one chunk (`vendor-zod`). Rolldown keeps the reference app's modules in the
+    entry chunk, so its gate never saw it; a project chunk that builds a schema
+    and is imported by the entry made zod probe for eval before the entry's body
+    set it jitless (reproduced with such a group: five `script-src 'eval'`
+    reports, none with `vendor-zod`). Svelte and Flutter are served without the
+    policy and set nothing jitless. `crud-app` keeps its output; it has the same
+    evaluation order and could take the group in a release of its own.
+36. **Badges** needed nothing: `badge` names a key and `provideMenuBadges` takes a
+    ref, so live counts already reach the menus; the guide shows it.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

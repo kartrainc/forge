@@ -78,7 +78,12 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
    slides over the page on narrow screens; and the two edge toggles. It is built
    from Nuxt UI's dashboard components and layout utilities, keeps its state in
    local storage, and imports no project code. A project fills the slots by
-   wrapping the shell in a component of its own.
+   wrapping the shell in a component of its own. The wrapper also sets the
+   shell's extension points: props passed over the shell's own to the Nuxt UI
+   components it composes, where each region turns narrow, whether the narrow
+   sidebar stays as icons, and slots for its own edge toggles and right-panel
+   trigger. The shell stays design-agnostic: its defaults are Nuxt UI's, and a
+   product's sizes, breakpoints and toggles are the project's to set.
 
 3. **Menus from the configuration.** Each layout may declare a `primary` menu
    (the sidebar), an `account` menu and a `footer` menu. A menu is a list of

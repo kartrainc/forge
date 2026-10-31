@@ -453,12 +453,12 @@
       "sha256": "d93d8731bb37d0ab"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.test.ts": {
-      "size": 5141,
-      "sha256": "19a528269361661a"
+      "size": 20246,
+      "sha256": "6f9a27e036379e5b"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
-      "size": 8933,
-      "sha256": "bbbe9ab74936a4c4"
+      "size": 18163,
+      "sha256": "75ab47e135d3a89d"
     },
     "apps/frontend/src/shared/observability/sentry.test.ts": {
       "size": 1155,
@@ -521,8 +521,8 @@
       "sha256": "53363b185599bcc8"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 5110,
-      "sha256": "98df69e84e463709"
+      "size": 6461,
+      "sha256": "b22634a701461d61"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -549,8 +549,8 @@
       "sha256": "9611582f3c200d0c"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2923,
-      "sha256": "ea4db8462c8e0fe0"
+      "size": 3334,
+      "sha256": "25edbc84a461175e"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,

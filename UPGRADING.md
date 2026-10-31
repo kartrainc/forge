@@ -711,6 +711,33 @@ Three changes reach existing projects on their next update:
    and the content-security check. The generated tests of the application
    runtime count toward the integration and e2e tiers.
 
+#### The `header-sidebar` shell's extension points
+
+An update brings the shell's new props and slots; a wrapper that sets none renders
+as before, with these differences:
+
+- **The right panel draws the line to the page** inside its own width
+  (`border-s`), and the page panel none. A project that drew that line in its
+  `aside` content, or removed Nuxt UI's line on the page panel in its theme
+  (`dashboardPanel`), removes its own.
+- **Collapsed sidebar labels** stay for assistive technology (`inline sr-only`);
+  a theme override that did the same (`navigationMenu`) can go.
+- **The folded right panel stays in the page** at no width, its content inert,
+  instead of leaving it: its state (a draft, a scroll position) survives the
+  fold. A test that looked for the panel's content to be gone after folding
+  finds it, `inert`, under `data-collapsed="true"`.
+- **The right panel's width** is stored under a new key (it is a
+  `UDashboardSidebar` now): a width the user dragged starts again from the
+  default once.
+- **The edge toggles** render only where they apply (the sidebar's on wide
+  screens, the panel's while it docks) instead of being hidden by CSS below
+  `lg`; a test that looked for them on a narrow screen finds none.
+- **A sidebar or panel the user cannot resize** takes its configured size again
+  after an update: Nuxt UI stores a size only for a resizable one now.
+- **`vite.config.ts`** (scaffold) gains the `vendor-zod` chunk group with
+  `security.csp`; a project that added its own merges the `.forge-merge` proposal
+  and keeps one.
+
 ## 1.0 → 1.1
 
 The 1.1 series opens the 12-month post-1.0 roadmap. Early alphas are additive except where called out below.

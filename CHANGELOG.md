@@ -389,6 +389,40 @@ Each safeguard below is an option, so a project can choose another strategy.
   page and right panel. A generated router factory composes the project's
   routes, wrappers and actions once and refuses a menu item or contract that
   names a missing route. See the frontend-layouts guide.
+- The `header-sidebar` shell takes extension points, all optional and rendering
+  as before when left out: `sidebar`, `aside` and `menu` pass props over its own
+  to the sidebar's `UDashboardSidebar`, the docked right panel and the primary
+  `UNavigationMenu` (sizes, `resizable`, `type: 'single'`, `tooltip`, `popover`,
+  `ui`, …); `breakpoints` sets where the sidebar, the right panel and the header
+  each turn narrow (1024 px each by default), and Nuxt UI's `lg` classes follow
+  it; `narrowSidebar: collapsed` keeps the sidebar on narrow screens as icons,
+  without a menu button; `asideButton: false` drops the header's "Show panel"
+  button. New slots: `aside-trigger` (`{ open, docked, toggle }`, at the shell's
+  root, for a trigger of the project's own), `sidebar-toggle` and `aside-toggle`
+  (`{ collapsed, toggle }`, the edge toggles). Slot props gain `sidebarNarrow`,
+  `aside` (`actions`) and `docked` (`aside`). `asideSlideover` passes `USlideover`
+  props for the panel on narrow screens (`overlay: false`, `modal: false`, …).
+  Folded, the docked panel keeps its place at no width, its content inert, so its
+  state survives and a project can animate the fold in its own CSS. `page` sets the
+  classes of the page's `main` and `footer` in place of the shell's padding and the
+  footer's line, for a footer that sits inside the page's margins.
+- Fixed in the `header-sidebar` shell: the right panel's resize handle sits on its
+  inner edge and drags towards the page (the panel is a right-hand
+  `UDashboardSidebar`; a `UDashboardPanel`'s handle follows it, at the screen's
+  edge, and drags as a left panel's); the line between the page and the panel is
+  drawn inside the panel, so the page column is the browser's width less the
+  sidebar and the panel (Nuxt UI drew it on the page, and a second one at the
+  screen's edge); the narrow screen's sidebar menu keeps its close button (the
+  shell hid the menu's header and dropped Nuxt UI's toggle); a collapsed
+  sidebar's links and sub-menu buttons keep their names for assistive
+  technology; Escape closes the header expanded on a narrow screen; a sidebar or
+  right panel the user cannot resize takes its configured size, not one Nuxt UI
+  stored under an earlier default (Nuxt UI stores a collapsible sidebar's size,
+  and a stored size wins; only a resizable one's is stored now).
+- `app-shell` with `security.csp`: zod and `src/app/providers/csp.ts` load as one
+  chunk (`vendor-zod`). Rolldown runs the chunks the entry imports before the
+  entry's own body, so a schema one of them built made zod probe for eval, which
+  the policy reported.
 - An owned update deletes a scaffold file forge stops emitting only on positive
   evidence (recorded as scaffold, written by forge, still scaffold under the
   ownership policy, unchanged since emission), names it as taken back
