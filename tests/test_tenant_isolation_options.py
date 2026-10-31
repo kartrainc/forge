@@ -272,6 +272,32 @@ def test_the_node_entrypoint_migrates_only_when_asked(tmp_path: Path) -> None:
     assert run(MIGRATE_ON_START="true") == ["npx prisma migrate deploy", "node dist/index.js"]
     # under database.rls_app_role the server connects as a role that owns nothing: the owner migrated already
     assert run(MIGRATE_ON_START="false") == ["node dist/index.js"]
+    # as Python's: only an exact "true" migrates, so an unexpected value never runs DDL as the server's role
+    assert run(MIGRATE_ON_START="yes") == ["node dist/index.js"]
+
+
+def test_a_node_service_under_the_app_role_says_forge_enforces_no_rls(tmp_path: Path) -> None:
+    root = _generate(tmp_path / "rls", BackendLanguage.PYTHON, BackendLanguage.NODE)
+    service = root / "services" / "api1"
+    migration = (service / "prisma/migrations/0001_initial/migration.sql").read_text(encoding="utf-8")
+    assert "-- ALTER TABLE \"items\" FORCE ROW LEVEL SECURITY;" in migration
+    assert "current_setting('app.current_tenant', true)" in migration
+    assert "api1_app reads and writes every tenant's rows" in migration
+    # every executable statement is the template's own: the example stays commented
+    assert not [line for line in migration.splitlines() if "ROW LEVEL SECURITY" in line and not line.startswith("--")]
+    operations = (service / "OPERATIONS.md").read_text(encoding="utf-8")
+    assert "## Tenant isolation (RLS)" in operations
+    assert "forge enforces no Row-Level Security in a Node service" in operations
+    assert "connects as `api1_app`" in operations
+
+    plain = _generate(tmp_path / "plain", BackendLanguage.NODE, **{"database.multitenancy": "none"})
+    service = plain / "services" / "api0"
+    assert "ROW LEVEL SECURITY" not in (service / "prisma/migrations/0001_initial/migration.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "Tenant isolation" not in (service / "OPERATIONS.md").read_text(encoding="utf-8")
+    # passed only when set, as use_database: other projects record the answers they did before
+    assert "db_app_role" not in (service / ".copier-answers.yml").read_text(encoding="utf-8")
 
 
 def test_compose_untouched_without_shared_rls(tmp_path: Path) -> None:

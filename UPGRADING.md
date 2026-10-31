@@ -66,7 +66,10 @@ keep a different strategy.
   service's `APP__DB__URL` and `DATABASE_URL` at it; the migration keeps the owner's URL. An entrypoint you edited
   keeps running `prisma migrate deploy` as the server's role, which owns nothing: set it to skip under
   `MIGRATE_ON_START=false` as the generated one does. Delete a `db-app-role.sh` you copied into the chart by hand:
-  the update writes the chart's own.
+  the update writes the chart's own. The initial migration gains a commented RLS example, which changes its checksum:
+  `prisma migrate deploy` ignores that, `prisma migrate dev` against an existing database reports it as modified, so
+  keep your applied copy. forge enforces no RLS in Node: add your policies and the per-request tenant binding
+  (OPERATIONS.md).
 - **Header or subdomain tenant without auth:** generation now fails. Enable
   authentication, use `token_claim`, or set `database.allow_unverified_tenant=true`
   when a trusted gateway owns the tenant header. With authentication, a request

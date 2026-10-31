@@ -61,3 +61,19 @@ CREATE TABLE "audit_logs" (
 
 -- CreateIndex
 CREATE INDEX "ix_bg_tasks_status_scheduled" ON "background_tasks"("status", "scheduled_at");
+{%- if db_app_role %}
+
+-- Tenant isolation (database.multitenancy=shared_rls). forge enforces no RLS in a
+-- Node service: it serves as {{ db_app_role }}, which owns no table, so a policy
+-- binds it, but there is none until a migration adds one, and until then
+-- {{ db_app_role }} reads and writes every tenant's rows. Each request must also
+-- bind its tenant in the transaction that runs its queries:
+--   SELECT set_config('app.current_tenant', $1, true)
+-- For "items", uncomment before the first deploy, or copy into a new migration
+-- once this one is applied:
+-- ALTER TABLE "items" ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE "items" FORCE ROW LEVEL SECURITY;
+-- CREATE POLICY "items_tenant_isolation" ON "items"
+--     USING ("customer_id" = current_setting('app.current_tenant', true))
+--     WITH CHECK ("customer_id" = current_setting('app.current_tenant', true));
+{%- endif %}

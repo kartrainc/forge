@@ -125,8 +125,8 @@
       "sha256": "bd0b60c4564fa83c"
     },
     "services/api/entrypoint.sh": {
-      "size": 671,
-      "sha256": "b334cf1cbc43b765"
+      "size": 697,
+      "sha256": "22d16340a3421692"
     },
     "services/api/package.json": {
       "size": 1420,

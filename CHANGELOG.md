@@ -88,8 +88,11 @@ Each safeguard below is an option, so a project can choose another strategy.
   RLS in them, but policies they bring in their Prisma migrations only bind a role that does not own the tables. Their
   compose service and Helm chart (both layouts) connect as the role, `APP__DB__URL` and Prisma's `DATABASE_URL` alike;
   `<backend>-migrate` and the migration Job keep the owner; the per-service chart carries `files/db-app-role.sh`; and
-  the entrypoint skips `prisma migrate deploy` under `MIGRATE_ON_START=false`, which they set. The
-  `tenant-isolation` CI job stays Python and Go, whose fragments enforce RLS.
+  the entrypoint migrates only under `MIGRATE_ON_START=true` (the default), as Python's does, and they set it to
+  `false`. Out of scope, deliberately: forge still enforces no RLS in Node (no tenant binding, no
+  `rls_startup_guard`, no isolation test, no `tenant-isolation` CI job), so until the project adds a policy the role
+  reads every tenant's rows. Their initial Prisma migration carries a commented `items` policy and their OPERATIONS.md
+  the steps (policy, per-request `set_config`, role check).
 - `database.rls_startup_guard` (default `true`): a `shared_rls` service exits at
   startup when its role is a superuser, has `BYPASSRLS` or owns tables, itself or
   through a role it belongs to (temporary tables do not count). The isolation

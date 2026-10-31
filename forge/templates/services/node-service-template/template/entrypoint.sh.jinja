@@ -2,18 +2,19 @@
 {%- if use_database | default(true) %}
 # Run Prisma migrations before the server comes up. The migrate
 # operation is idempotent — replicas that lose the race simply re-apply
-# nothing. MIGRATE_ON_START=false skips them: under database.rls_app_role the
-# server connects as a role that owns nothing, and the migrations run as the
-# owner in their own one-shot (compose <service>-migrate, the Helm hook Job).
+# nothing. Only MIGRATE_ON_START=true (the default) runs them. Under
+# database.rls_app_role it is false: the server connects as a role that owns
+# nothing, and the migrations run as the owner in their own one-shot (compose
+# <service>-migrate, the Helm hook Job).
 {%- endif %}
 set -eu
 {%- if use_database | default(true) %}
 
-if [ "${MIGRATE_ON_START:-true}" = "false" ]; then
-  echo "[entrypoint] MIGRATE_ON_START=false: migrations run as the owner, elsewhere"
-else
+if [ "${MIGRATE_ON_START:-true}" = "true" ]; then
   echo "[entrypoint] prisma migrate deploy"
   npx prisma migrate deploy
+else
+  echo "[entrypoint] MIGRATE_ON_START=${MIGRATE_ON_START}: skipping migrations"
 fi
 {%- endif %}
 

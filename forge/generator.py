@@ -499,6 +499,8 @@ def _generate_backends(
             # port-wired branch that would fail to compile if the module
             # isn't on disk. (Codex Phase B round 1 finding.)
             includes_error_envelope = any(rf.fragment.name == "error_port" for rf in plan.ordered)
+            from forge.config._topology import db_app_role as _db_app_role  # noqa: PLC0415
+
             _generate_single_backend(
                 bc,
                 backend_template_dir,
@@ -506,6 +508,7 @@ def _generate_backends(
                 quiet,
                 include_platform_auth=includes_platform_auth,
                 include_error_envelope=includes_error_envelope,
+                db_app_role=_db_app_role(bc, plan.option_values, config.database_mode),
                 base_template_dir=backend_base_dir,
                 dry_run=dry_run,
             )
@@ -1509,6 +1512,7 @@ def _generate_single_backend(
     *,
     include_platform_auth: bool = False,
     include_error_envelope: bool = False,
+    db_app_role: str = "",
     base_template_dir: str = "",
     dry_run: bool = False,
 ) -> Path:
@@ -1526,6 +1530,7 @@ def _generate_single_backend(
         bc,
         include_platform_auth=include_platform_auth,
         include_error_envelope=include_error_envelope,
+        db_app_role=db_app_role,
     )
     dst.mkdir(parents=True, exist_ok=True)
     if base_template_dir:

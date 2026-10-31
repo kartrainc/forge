@@ -78,3 +78,11 @@ use_database:
   type: bool
   when: false
   default: true
+
+# Set by the generator to the role the service serves as under
+# database.rls_app_role (shared_rls). Only passed when set, so every other
+# project renders and records exactly what it did before.
+db_app_role:
+  type: str
+  when: false
+  default: ""
