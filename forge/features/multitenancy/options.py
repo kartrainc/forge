@@ -224,7 +224,12 @@ Turn it off when the deployment already provides such a role; the service's
 database URL must then point at it, or ``database.rls_startup_guard`` stops the
 service.
 
-BACKENDS: python, go. Inert unless ``database.multitenancy=shared_rls``.""",
+Node backends get the role too, but forge enforces no RLS in them: no tenant
+binding, startup guard or isolation test. Their own policies (Prisma migrations)
+only bind a role that does not own the tables; the initial migration carries a
+commented example and OPERATIONS.md the steps.
+
+BACKENDS: python, go, node. Inert unless ``database.multitenancy=shared_rls``.""",
             category=FeatureCategory.PLATFORM,
             # Inert unless database.multitenancy=shared_rls, which itself
             # requires a database; true defaults must not reject database.mode=none.
@@ -248,6 +253,8 @@ when they get no Postgres or no such role (with ``database.rls_app_role`` the
 CI ``tenant-isolation`` job provides both).
 
 Turn it off only for a deployment that isolates tenants some other way.
+
+Node backends have no guard: forge enforces no RLS in them (``database.rls_app_role``).
 
 BACKENDS: python, go. Inert unless ``database.multitenancy=shared_rls``.""",
             category=FeatureCategory.PLATFORM,

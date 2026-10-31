@@ -37,6 +37,32 @@ npx prisma migrate deploy   # then: node dist/index.js
 `prisma migrate deploy` is idempotent and safe under concurrent replica boots —
 replicas that lose the race apply nothing. To run out-of-band, execute the same
 command against the target `DATABASE_URL` before starting the app.
+{%- if db_app_role %}
+
+Under `database.rls_app_role` the server connects as `{{ db_app_role }}`, which
+owns no table and cannot run DDL, and does not migrate (`MIGRATE_ON_START=false`).
+The migrations run as the database owner before it starts: the compose
+`<service>-migrate` one-shot, or the Helm migration Job, then
+`db-app-role.sh` creates the role and refreshes its grants. Run them by hand
+with the owner's `DATABASE_URL`, never the server's.
+
+## Tenant isolation (RLS)
+
+forge enforces no Row-Level Security in a Node service: there is no tenant
+binding, no startup guard and no generated isolation test, as Python and Go
+have. Serving as `{{ db_app_role }}` only makes a policy bind; until a migration
+adds one, the service reads and writes every tenant's rows. To isolate tenants:
+
+1. Enable and force RLS with a policy per tenant table, in a Prisma migration
+   (`prisma/migrations/0001_initial/migration.sql` carries a commented example
+   for `items`).
+2. Bind the tenant per request, in the transaction that runs its queries:
+   `SELECT set_config('app.current_tenant', $1, true)` inside
+   `prisma.$transaction`.
+3. Check the server's role cannot bypass RLS:
+   `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`
+   must return `false, false`, and the role must own no table.
+{%- endif %}
 {%- endif %}
 
 ## Graceful shutdown

@@ -139,6 +139,7 @@ def test_app_role_named_after_the_database() -> None:
     options = {"database.multitenancy": "shared_rls"}
     assert db_app_role(_backend(BackendLanguage.PYTHON), options, "generate") == "orders_api_app"
     assert db_app_role(_backend(BackendLanguage.GO), options, "generate") == "orders_api_app"
+    assert db_app_role(_backend(BackendLanguage.NODE), options, "generate") == "orders_api_app"
 
 
 @pytest.mark.parametrize(
@@ -151,7 +152,7 @@ def test_app_role_named_after_the_database() -> None:
             {"database.multitenancy": "shared_rls", "database.rls_app_role": False},
             "generate",
         ),
-        (BackendLanguage.NODE, {"database.multitenancy": "shared_rls"}, "generate"),
+        (BackendLanguage.RUST, {"database.multitenancy": "shared_rls"}, "generate"),
         (BackendLanguage.PYTHON, {"database.multitenancy": "shared_rls"}, "none"),
     ],
 )
@@ -226,6 +227,77 @@ def test_compose_keeps_the_owner_when_the_app_role_is_off(tmp_path: Path) -> Non
     }
     assert not (root / "deploy/compose/db-app-role.sh").exists()
     assert "MIGRATE_ON_START" not in services["api0"]["environment"]
+
+
+def test_compose_runs_a_node_service_as_the_app_role(tmp_path: Path) -> None:
+    # shared_rls needs a Python or Go backend; the Node one beside it serves as its role too
+    root = _generate(tmp_path, BackendLanguage.PYTHON, BackendLanguage.NODE)
+    services = _compose(root)["services"]
+    env = services["api1"]["environment"]
+    # the Zod config reads APP__DB__URL and Prisma DATABASE_URL: both name the role
+    assert env["APP__DB__URL"].startswith("postgresql://api1_app:api1_app_dev@")
+    assert env["DATABASE_URL"].startswith("postgresql://api1_app:api1_app_dev@")
+    assert env["MIGRATE_ON_START"] == "false"
+    assert "//postgres:postgres@" in services["api1-migrate"]["environment"]["DATABASE_URL"]
+    assert services["api1-db-role"]["environment"]["APP_DB_ROLE"] == "api1_app"
+    assert services["api1"]["depends_on"]["api1-db-role"] == {
+        "condition": "service_completed_successfully"
+    }
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX sh")
+def test_the_node_entrypoint_migrates_only_when_asked(tmp_path: Path) -> None:
+    root = _generate(tmp_path / "gen", BackendLanguage.PYTHON, BackendLanguage.NODE)
+    entrypoint = root / "services" / "api1" / "entrypoint.sh"
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    for tool in ("npx", "node"):
+        stub = stubs / tool
+        stub.write_text(f'#!/bin/sh\necho "{tool} $*" >> "{calls}"\n', encoding="utf-8")
+        stub.chmod(0o755)
+
+    def run(**env: str) -> list[str]:
+        calls.write_text("", encoding="utf-8")
+        subprocess.run(
+            ["sh", str(entrypoint)],
+            cwd=entrypoint.parent,
+            env={"PATH": f"{stubs}:/usr/bin:/bin", **env},
+            check=True,
+            capture_output=True,
+        )
+        return calls.read_text(encoding="utf-8").splitlines()
+
+    assert run() == ["npx prisma migrate deploy", "node dist/index.js"]
+    assert run(MIGRATE_ON_START="true") == ["npx prisma migrate deploy", "node dist/index.js"]
+    # under database.rls_app_role the server connects as a role that owns nothing: the owner migrated already
+    assert run(MIGRATE_ON_START="false") == ["node dist/index.js"]
+    # as Python's: only an exact "true" migrates, so an unexpected value never runs DDL as the server's role
+    assert run(MIGRATE_ON_START="yes") == ["node dist/index.js"]
+
+
+def test_a_node_service_under_the_app_role_says_forge_enforces_no_rls(tmp_path: Path) -> None:
+    root = _generate(tmp_path / "rls", BackendLanguage.PYTHON, BackendLanguage.NODE)
+    service = root / "services" / "api1"
+    migration = (service / "prisma/migrations/0001_initial/migration.sql").read_text(encoding="utf-8")
+    assert "-- ALTER TABLE \"items\" FORCE ROW LEVEL SECURITY;" in migration
+    assert "current_setting('app.current_tenant', true)" in migration
+    assert "api1_app reads and writes every tenant's rows" in migration
+    # every executable statement is the template's own: the example stays commented
+    assert not [line for line in migration.splitlines() if "ROW LEVEL SECURITY" in line and not line.startswith("--")]
+    operations = (service / "OPERATIONS.md").read_text(encoding="utf-8")
+    assert "## Tenant isolation (RLS)" in operations
+    assert "forge enforces no Row-Level Security in a Node service" in operations
+    assert "connects as `api1_app`" in operations
+
+    plain = _generate(tmp_path / "plain", BackendLanguage.NODE, **{"database.multitenancy": "none"})
+    service = plain / "services" / "api0"
+    assert "ROW LEVEL SECURITY" not in (service / "prisma/migrations/0001_initial/migration.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "Tenant isolation" not in (service / "OPERATIONS.md").read_text(encoding="utf-8")
+    # passed only when set, as use_database: other projects record the answers they did before
+    assert "db_app_role" not in (service / ".copier-answers.yml").read_text(encoding="utf-8")
 
 
 def test_compose_untouched_without_shared_rls(tmp_path: Path) -> None:

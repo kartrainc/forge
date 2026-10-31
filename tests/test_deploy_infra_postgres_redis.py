@@ -105,7 +105,7 @@ def test_a_chart_only_for_a_component_the_project_runs(
 def test_the_postgres_values_follow_the_topology(helm: Path) -> None:
     values = _values(helm / "postgres")
     owner = {"login": True, "superuser": False}
-    # an owner per backend with a database, the runtime role of the one under RLS right after it, Keycloak's;
+    # an owner per backend with a database, the runtime role of each under RLS right after it, Keycloak's;
     # none for capture, and no owner may create roles
     assert values["roles"] == [
         {"name": "user_api", **owner},
@@ -118,11 +118,19 @@ def test_the_postgres_values_follow_the_topology(helm: Path) -> None:
             "replication": False,
         },
         {"name": "billing", **owner},
+        {
+            "name": "billing_app",
+            **owner,
+            "bypassrls": False,
+            "createdb": False,
+            "createrole": False,
+            "replication": False,
+        },
         {"name": "keycloak", **owner},
     ]
     assert values["roleSecrets"] == {
         "create": True,
-        "passwords": dict.fromkeys(["user_api", "user_api_app", "billing", "keycloak"], "CHANGEME"),
+        "passwords": dict.fromkeys(["user_api", "user_api_app", "billing", "billing_app", "keycloak"], "CHANGEME"),
     }
     assert values["databases"] == [
         {"name": "user_api", "owner": "user_api", "extensions": ["vector"]},
