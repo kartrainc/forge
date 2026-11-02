@@ -36,7 +36,7 @@ _KUBECONFORM_ARGS = (
     "{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json",
 )
 _DIGEST = "sha256:" + "0123456789abcdef" * 4
-_ROLES = ["user_api", "user_api_app", "billing", "keycloak"]
+_ROLES = ["user_api", "user_api_app", "billing", "billing_app", "keycloak"]
 
 
 @pytest.fixture(scope="module")
@@ -180,7 +180,7 @@ def test_postgres_declares_a_role_secret_and_database_per_topology_entry(helm: P
             "owner": "keycloak",
         },
     }
-    assert sorted(kind for kind, _ in docs) == ["Cluster"] + ["Database"] * 3 + ["Secret"] * 4
+    assert sorted(kind for kind, _ in docs) == ["Cluster"] + ["Database"] * 3 + ["Secret"] * 5
     for doc in docs.values():
         _assert_labels(doc, "database")
 

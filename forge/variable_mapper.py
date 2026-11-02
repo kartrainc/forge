@@ -100,6 +100,7 @@ def backend_context(
     *,
     include_platform_auth: bool = False,
     include_error_envelope: bool = False,
+    db_app_role: str = "",
 ) -> dict[str, Any]:
     """Build a Copier data dict for any backend template.
 
@@ -175,6 +176,10 @@ def backend_context(
     # its template default and its recorded answers byte-identical.
     if not backend_uses_database(bc.language, bc.app_template):
         ctx["use_database"] = False
+    # The role the backend serves as (database.rls_app_role); only passed when
+    # set, for the same reason.
+    if db_app_role:
+        ctx["db_app_role"] = db_app_role
     return ctx
 
 

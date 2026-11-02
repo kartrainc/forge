@@ -130,8 +130,13 @@ services:
       # ``APP__DB__URL`` is consumed by the Zod schema; ``DATABASE_URL``
       # is what Prisma reads. Both must point at the in-network postgres
       # host or boot will fail (Zod) / migrations will misroute (Prisma).
-      APP__DB__URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/{{ be.db_name }}"
+      APP__DB__URL: "postgresql://{{ be.db_app_role or 'postgres' }}:{{ (be.db_app_role ~ '_dev') if be.db_app_role else 'postgres' }}@postgres:5432/{{ be.db_name }}"
+      DATABASE_URL: "postgresql://{{ be.db_app_role or 'postgres' }}:{{ (be.db_app_role ~ '_dev') if be.db_app_role else 'postgres' }}@postgres:5432/{{ be.db_name }}"
+{% if be.db_app_role %}
+      # under database.rls_app_role the server does not migrate: {{ be.name }}-migrate
+      # does, with the owner's URL; {{ be.db_app_role }} cannot create tables
+      MIGRATE_ON_START: "false"
+{% endif %}
 {% endif %}
 {% elif be.language == "rust" %}
       PORT: "{{ be.port }}"

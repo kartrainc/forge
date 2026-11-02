@@ -71,6 +71,10 @@ workloads:
       NODE_ENV: "production"
       LOG_LEVEL: "info"
       APP__SERVER__PORT: "{{ be.port }}"
+{%- if be.db_app_role %}
+      # The migrate step runs as the owner; {{ be.db_app_role }} cannot create tables.
+      MIGRATE_ON_START: "false"
+{%- endif %}
 {%- elif be.language == "rust" %}
       PORT: "{{ be.port }}"
       RUST_LOG: "info"
@@ -140,8 +144,8 @@ workloads:
 {%- if be.language == "python" %}
       APP__DB__URL: "postgresql+asyncpg://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language == "node" %}
-      APP__DB__URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
-      DATABASE_URL: "postgresql://CHANGEME@postgres:5432/{{ be.db_name }}"
+      APP__DB__URL: "postgresql://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
+      DATABASE_URL: "postgresql://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- elif be.language in ("rust", "go") %}
       DATABASE_URL: "postgresql://{{ (be.db_app_role ~ ':') if be.db_app_role }}CHANGEME@postgres:5432/{{ be.db_name }}"
 {%- endif %}

@@ -57,10 +57,12 @@ def compute_render_postgres(
     return (has_backends and database_mode != "none") or include_keycloak
 
 
-# Languages whose ``shared_rls`` fragment enforces RLS, and the backend
-# template that isolates tenants by Keycloak realm instead (excluded from the
-# RLS fragments, so it keeps the owner role).
-_RLS_LANGUAGES: frozenset[BackendLanguage] = frozenset({BackendLanguage.PYTHON, BackendLanguage.GO})
+# Languages that serve as the ``database.rls_app_role`` role: Python and Go, whose ``shared_rls`` fragments enforce
+# RLS, and Node, whose Prisma migrations bring their own policies (it must not connect as the tables' owner either);
+# and the backend template that isolates tenants by Keycloak realm instead (it keeps the owner role).
+_APP_ROLE_LANGUAGES: frozenset[BackendLanguage] = frozenset(
+    {BackendLanguage.PYTHON, BackendLanguage.GO, BackendLanguage.NODE}
+)
 _RLS_EXCLUDED_APP_TEMPLATES: frozenset[str] = frozenset({"tenant-management-service"})
 
 
@@ -89,7 +91,7 @@ def project_keycloak_realm(config: ProjectConfig) -> str:
 def db_app_role(bc: BackendConfig, options: Mapping[str, object], database_mode: str) -> str:
     """The non-owner role ``bc`` serves requests as, or ``""`` for the owner.
 
-    Set for a ``shared_rls`` backend whose language enforces RLS while
+    Set for a ``shared_rls`` backend in a language that serves as it while
     ``database.rls_app_role`` is on: Postgres skips RLS for the superuser that
     owns the schema, so the service must not connect as it.
     """
@@ -102,7 +104,7 @@ def db_app_role(bc: BackendConfig, options: Mapping[str, object], database_mode:
         or not backend_uses_database(bc.language, bc.app_template)
         or option_value(options, "database.multitenancy") != "shared_rls"
         or not option_value(options, "database.rls_app_role")
-        or bc.language not in _RLS_LANGUAGES
+        or bc.language not in _APP_ROLE_LANGUAGES
         or (bc.app_template or "") in _RLS_EXCLUDED_APP_TEMPLATES
     ):
         return ""
