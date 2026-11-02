@@ -81,6 +81,9 @@ Gatekeeper container (Phase 2 cutover) to mint internal JWTs.""",
                     # ``session_timeout_service.dart``) — no collision
                     # with the existing per-frontend auth files.
                     "platform_auth_session_timeout_vue",
+                    # Vue's dialog over it, which an app-shell app with a
+                    # dialog of its own does not take (ADR-015).
+                    "platform_auth_session_dialog_vue",
                     "platform_auth_session_timeout_svelte",
                     "platform_auth_session_timeout_flutter",
                     # Phase 3 Wave 2 (cut over) — Python service-template

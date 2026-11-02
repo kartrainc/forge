@@ -109,6 +109,13 @@ export default defineConfig({
 {%- else %}
             { name: 'vendor-radix', test: /node_modules\/radix-vue\// },
 {%- endif %}
+{%- if app_template == 'app-shell' and security_csp %}
+            // security.csp: zod and the module that sets it jitless (main.ts's first
+            // import) load as one chunk. Rolldown runs the chunks the entry imports
+            // before the entry's own body; a schema one of them built would make zod
+            // probe for eval, which the policy reports.
+            { name: 'vendor-zod', test: /node_modules\/zod\/|\/src\/app\/providers\/csp\.ts$/ },
+{%- endif %}
           ],
         },
       },

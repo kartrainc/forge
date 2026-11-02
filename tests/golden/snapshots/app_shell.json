@@ -189,7 +189,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 3461,
+      "size": 3424,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -369,12 +369,12 @@
       "sha256": "e1a714fea5724836"
     },
     "apps/frontend/src/shared/application/context.ts": {
-      "size": 1189,
-      "sha256": "62fe93d6b993bb68"
+      "size": 1692,
+      "sha256": "6f657a5d9e187f09"
     },
     "apps/frontend/src/shared/application/contracts.ts": {
-      "size": 2992,
-      "sha256": "46f4e8c49b13a00c"
+      "size": 3210,
+      "sha256": "d6098360b8282e0c"
     },
     "apps/frontend/src/shared/application/forgeAuth.test.ts": {
       "size": 1164,
@@ -385,12 +385,12 @@
       "sha256": "64735be39fef4cd4"
     },
     "apps/frontend/src/shared/application/guards.test.ts": {
-      "size": 4956,
-      "sha256": "23e523bb00c36b76"
+      "size": 6269,
+      "sha256": "c10828307537b4f5"
     },
     "apps/frontend/src/shared/application/guards.ts": {
-      "size": 3599,
-      "sha256": "2becf08d6dd1a29c"
+      "size": 4717,
+      "sha256": "a45d4e9656c34656"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
       "size": 6524,
@@ -405,12 +405,12 @@
       "sha256": "cc10dbf98e8ed353"
     },
     "apps/frontend/src/shared/application/router.test.ts": {
-      "size": 8097,
-      "sha256": "ee8621d8b0bb9d7b"
+      "size": 11045,
+      "sha256": "dceb118b89569750"
     },
     "apps/frontend/src/shared/application/router.ts": {
-      "size": 7337,
-      "sha256": "ea2b4209f00cdf89"
+      "size": 9064,
+      "sha256": "0488820677447628"
     },
     "apps/frontend/src/shared/application/testing.ts": {
       "size": 3660,
@@ -453,12 +453,12 @@
       "sha256": "d93d8731bb37d0ab"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.test.ts": {
-      "size": 5141,
-      "sha256": "19a528269361661a"
+      "size": 26849,
+      "sha256": "de3b7f0f155a6806"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
-      "size": 8933,
-      "sha256": "bbbe9ab74936a4c4"
+      "size": 19955,
+      "sha256": "097bd998122fbb81"
     },
     "apps/frontend/src/shared/observability/sentry.test.ts": {
       "size": 1155,
@@ -485,44 +485,44 @@
       "sha256": "441e723cdaf72bb9"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.test.ts": {
-      "size": 887,
-      "sha256": "d5baa2b3f0a0ff9d"
+      "size": 2091,
+      "sha256": "d16ea94134b49061"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.vue": {
-      "size": 798,
-      "sha256": "15f20601c783988b"
+      "size": 1444,
+      "sha256": "2d9d44772aba9bc2"
     },
     "apps/frontend/src/shared/system/ForbiddenPage.test.ts": {
       "size": 600,
       "sha256": "f01dd05f58e480d9"
     },
     "apps/frontend/src/shared/system/ForbiddenPage.vue": {
-      "size": 624,
-      "sha256": "7dfcada3db66aecc"
+      "size": 708,
+      "sha256": "e995f88f798d054d"
     },
     "apps/frontend/src/shared/system/NotFoundPage.test.ts": {
       "size": 601,
       "sha256": "9775a5211c3d4c68"
     },
     "apps/frontend/src/shared/system/NotFoundPage.vue": {
-      "size": 601,
-      "sha256": "82f92b3b31372eb7"
+      "size": 685,
+      "sha256": "41d196d0d1730d79"
     },
     "apps/frontend/src/shared/system/SignInPage.test.ts": {
-      "size": 1472,
-      "sha256": "034c1568c0dfddc2"
+      "size": 2145,
+      "sha256": "b13a62655727210a"
     },
     "apps/frontend/src/shared/system/SignInPage.vue": {
-      "size": 1855,
-      "sha256": "c4514b5af60f78de"
+      "size": 1865,
+      "sha256": "b265dc185537cb11"
     },
     "apps/frontend/src/test/setup.ts": {
       "size": 1035,
       "sha256": "53363b185599bcc8"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 5110,
-      "sha256": "98df69e84e463709"
+      "size": 6630,
+      "sha256": "b5865e9ac543af05"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -549,8 +549,8 @@
       "sha256": "9611582f3c200d0c"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2923,
-      "sha256": "ea4db8462c8e0fe0"
+      "size": 3334,
+      "sha256": "25edbc84a461175e"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,
@@ -881,7 +881,7 @@
       "sha256": "27ab0d81aa29dbb1"
     },
     "forge.toml": {
-      "size": 119569,
+      "size": 119567,
       "sha256": "<version-dependent>"
     },
     "package.json": {
@@ -1005,7 +1005,7 @@
       "sha256": "459f95079ae5c647"
     },
     "services/api/.copier-answers.yml": {
-      "size": 580,
+      "size": 543,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -1609,7 +1609,7 @@
       "sha256": "70e944b44e732aa4"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 609,
+      "size": 572,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {

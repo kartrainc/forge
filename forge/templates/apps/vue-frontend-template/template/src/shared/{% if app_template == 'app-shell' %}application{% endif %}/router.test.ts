@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
+import { useApplicationRouting } from './context'
+import { resolveActiveItem } from './menus'
 import { extraPages, systemPages } from './pages'
 import { createApplicationRouter } from './router'
 import { testApplication, testAuth } from './testing'
@@ -29,6 +31,7 @@ function router(options: Partial<Parameters<typeof createApplicationRouter>[0]> 
     auth: testAuth().auth,
     routes: projectRoutes,
     publicRoutes,
+    actions: { 'help': () => {}, 'sign-out': () => {} },
     history: createMemoryHistory(),
     ...options,
   }, config)
@@ -64,6 +67,7 @@ describe('createApplicationRouter', () => {
       (route.name === 'not-found' && !systemPages.not_found) || (route.name === 'forbidden' && !systemPages.forbidden))
     const r = createApplicationRouter({
       auth: testAuth().auth,
+      actions: { 'help': () => {}, 'sign-out': () => {} },
       routes: { main: projectRoutes.main!.filter(route => route.name !== 'not-built').concat({ path: 'not-built/:item', name: 'not-built', component: Page }), staff: projectRoutes.staff! },
       publicRoutes: publicRoutes.filter(route => route.name === 'login' || route.name === 'auth-stuck').concat(own),
       history: createMemoryHistory(),
@@ -83,6 +87,7 @@ describe('createApplicationRouter', () => {
     expect(() => router({ routes: { main: projectRoutes.main!.filter(route => route.name !== 'orders'), staff: [] } })).toThrow(/opens route 'orders'/)
     expect(() => router({ routes: { main: projectRoutes.main!.filter(route => route.name !== 'not-built'), staff: [] } })).toThrow(/placeholder names route 'not-built'/)
     expect(() => router({ publicRoutes: [...publicRoutes, { path: '/again', name: 'start', component: Page }] })).toThrow(/used twice: start/)
+    expect(() => router({ actions: { 'sign-out': () => {} } })).toThrow(/runs action 'help', which was not passed/)
     const config = testApplication()
     config.layouts.main!.shell = 'unknown'
     expect(() => router({}, config)).toThrow(/shell 'unknown'/)
@@ -117,6 +122,58 @@ describe('createApplicationRouter', () => {
     const resolved = r.resolve('/no/such/page')
     expect(resolved.path).toBe('/no/such/page')
     expect(resolved.matched.at(-1)?.components?.default).toBe(Oops)
+  })
+
+  it('sends every unknown address where a redirecting project not-found route goes', async () => {
+    const Oops = defineComponent({ setup: () => () => h('p', 'oops') })
+    const config = testApplication({ routing: { ...testApplication().routing, not_found: 'missing' } })
+    const r = router({
+      publicRoutes: [
+        ...publicRoutes.filter(route => route.name !== 'not-found'),
+        { path: '/missing', name: 'missing', redirect: { name: 'oops' } },
+        { path: '/404', name: 'oops', component: Oops },
+      ],
+    }, config)
+    await r.push('/no/such/page')
+    expect(r.currentRoute.value.name).toBe('oops')
+  })
+
+  it('starts a layout mounted alone at / on its own landing route, for the guards and the pages too', async () => {
+    const config = testApplication()
+    config.layouts.staff!.landing = 'staff-audit'
+    const { auth } = testAuth(true)
+    const r = router({ auth, activeLayouts: ['staff'], routes: { staff: [{ path: 'audit', name: 'staff-audit', component: Page }] } }, config)
+    await r.push('/')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+    expect(useApplicationRouting().landing).toBe('staff-audit')
+    await r.push('/login')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+  })
+
+  it('names the fix when the layouts mounted hold no landing route', () => {
+    expect(() => router({ activeLayouts: ['staff'] })).toThrow(/routing\.landing names route 'start'.*layouts\.staff\.landing/)
+    const config = testApplication()
+    config.layouts.staff!.landing = 'nowhere'
+    expect(() => router({ activeLayouts: ['staff'] }, config)).toThrow(/layouts\.staff\.landing names route 'nowhere'/)
+  })
+
+  it('opens a further layout\'s own landing route at /<layout>, the first layout keeping /', async () => {
+    const config = testApplication()
+    config.layouts.staff!.landing = 'staff-audit'
+    const r = router({ routes: { ...projectRoutes, staff: [{ path: 'audit', name: 'staff-audit', component: Page }] } }, config)
+    await r.push('/staff')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+    await r.push('/')
+    expect(r.currentRoute.value.name).toBe('start')
+    expect(useApplicationRouting().landing).toBe('start')
+  })
+
+  it('marks the menu item that opens a page extra, whatever its id', () => {
+    if (!extraPages.home) return
+    const config = testApplication({ extras: ['home'] })
+    config.layouts.main!.menus.primary[0]!.items.push({ id: 'overview', label: 'Overview', to: 'home' })
+    const r = router({}, config)
+    expect(resolveActiveItem(config.layouts.main!, r.resolve({ name: 'home' }))).toBe('overview')
   })
 
   it('renders a not-found route of another layout, in that layout, for every unknown address', () => {

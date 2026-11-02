@@ -231,7 +231,7 @@ def test_screens_and_crud_pages_render_on_nuxt_ui(app: Path) -> None:
 def test_fragments_render_and_update_from_the_kits_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The session-timeout fragment's ``files-nuxt-ui/`` dialog, generated and kept.
+    """The session-timeout dialog fragment's ``files-nuxt-ui/`` dialog, generated and kept.
 
     The preview and ``forge --update`` rebuild the project from ``forge.toml``,
     so they take the kit from the manifest's ``[forge.frontend]``; reading the
@@ -272,14 +272,15 @@ def test_fragments_render_and_update_from_the_kits_tree(
     generated = modal.read_text(encoding="utf-8")
     assert "<UModal" in generated and composable.is_file()
 
+    # The composable's fragment and the dialog's, a fragment of its own (ADR-015).
     timeout = [
         entry
         for entry in plan_update(root).file_decisions
-        if entry.fragment == "platform_auth_session_timeout_vue"
+        if entry.fragment in {"platform_auth_session_timeout_vue", "platform_auth_session_dialog_vue"}
     ]
-    assert {entry.rel_path for entry in timeout} >= {
-        "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue",
-        "apps/frontend/src/shared/composables/useSessionTimeout.ts",
+    assert {(entry.fragment, entry.rel_path) for entry in timeout} >= {
+        ("platform_auth_session_dialog_vue", "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue"),
+        ("platform_auth_session_timeout_vue", "apps/frontend/src/shared/composables/useSessionTimeout.ts"),
     }
     assert {entry.action for entry in timeout} == {"skipped-idempotent"}, timeout
 

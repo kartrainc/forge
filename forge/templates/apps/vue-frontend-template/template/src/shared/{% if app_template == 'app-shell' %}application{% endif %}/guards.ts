@@ -10,6 +10,26 @@ import type { AuthContract, RoutingKey } from './contracts'
 
 export const AUTH_INIT_TIMEOUT_MS = 5_000
 
+/**
+ * The address of this app that a `redirect` or `next` query names, or null. The browser's
+ * URL parser decides, as it would when the address is opened: `//host`, `/\host` and a
+ * path whose tab the parser drops into `//host` name another site. The path it returns is
+ * the normalised one, which is opened in turn, so it is checked again: dot segments
+ * normalise `/.//host` and `/a/..//host` to `//host`. An address the parser refuses
+ * (`//[`, `//a b`, or `/.//[` once normalised) names no page of the app either.
+ */
+export function returnPath(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('/')) return null
+  const origin = window.location.origin
+  try {
+    const url = new URL(value, origin)
+    const path = url.pathname + url.search + url.hash
+    return url.origin === origin && new URL(path, origin).origin === origin ? path : null
+  } catch {
+    return null
+  }
+}
+
 /** Every role the matched routes require: a parent's role does not stand in for a child's. */
 function requiredRoles(to: RouteLocationNormalized): string[] {
   return to.matched
@@ -17,11 +37,15 @@ function requiredRoles(to: RouteLocationNormalized): string[] {
     .filter((role): role is string => typeof role === 'string' && role.length > 0)
 }
 
-/** The deepest matched route that says whether it needs a sign-in decides (a child's false wins). */
+/**
+ * The deepest matched route that says whether it needs a sign-in decides (a child's false wins);
+ * a route that requires a role says it needs one, so no signed-out visit passes its role check.
+ */
 function requiresAuth(to: RouteLocationNormalized): boolean {
   for (let i = to.matched.length - 1; i >= 0; i -= 1) {
-    const value = to.matched[i]?.meta?.requiresAuth
-    if (typeof value === 'boolean') return value
+    const meta = to.matched[i]?.meta
+    if (typeof meta?.requiresRole === 'string' && meta.requiresRole) return true
+    if (typeof meta?.requiresAuth === 'boolean') return meta.requiresAuth
   }
   return false
 }

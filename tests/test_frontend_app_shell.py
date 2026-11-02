@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -182,6 +183,34 @@ def test_the_rendered_application_keeps_one_key_order_whatever_the_input() -> No
     assert list(first["layouts"]) == ["console", "staff"]
 
 
+def test_a_layout_names_a_landing_route_of_its_own() -> None:
+    layouts = copy.deepcopy(LAYOUTS)
+    layouts["staff"]["landing"] = "staff-home"
+    fc = _frontend(layouts=layouts)
+    fc.validate()
+    rendered = application_config(fc)["layouts"]
+    assert rendered["staff"]["landing"] == "staff-home"
+    # A layout without one renders as before: no key at all.
+    assert "landing" not in rendered["console"]
+
+
+@pytest.mark.parametrize(
+    ("landing", "message"),
+    [
+        ("Staff Home", "layouts.staff.landing must name the route"),
+        ("builtin", "layouts.staff.landing must name the route"),
+        # It stands in for routing.landing, so it loops the same way.
+        ("login", "layouts.staff.landing 'login' is also the sign_in destination"),
+        ("forbidden", "layouts.staff.landing 'forbidden' is also the forbidden destination"),
+    ],
+)
+def test_a_layout_landing_is_refused_where_routing_landing_would_be(landing: str, message: str) -> None:
+    layouts = copy.deepcopy(LAYOUTS)
+    layouts["staff"]["landing"] = landing
+    with pytest.raises(ValueError, match=message):
+        _frontend(layouts=layouts).validate()
+
+
 def test_template_answers_for_crud_app_select_every_extra() -> None:
     answers = template_answers(FrontendConfig(project_name="f", framework=FrontendFramework.VUE), session_timeout=True)
     assert answers["app_template"] == "crud-app"
@@ -341,6 +370,26 @@ def test_crud_app_renders_no_application_runtime(tmp_path: Path) -> None:
     assert not (app / "src/core").exists()
 
 
+def test_zod_and_its_jitless_setting_load_as_one_chunk(shell_app: Path) -> None:
+    # Rolldown runs the chunks the entry imports before the entry's own body, so zod and
+    # the module that sets it jitless (main.ts's first import) share one chunk: a schema
+    # any other chunk builds would otherwise make zod probe for eval under the policy.
+    vite = (shell_app / "vite.config.ts").read_text(encoding="utf-8")
+    group = re.search(r"\{ name: 'vendor-zod', test: /(.+)/ \}", vite)
+    assert group, "no vendor-zod chunk group"
+    test = re.compile(group.group(1))
+    assert test.search("/app/node_modules/zod/v4/core/core.js")
+    assert test.search("/app/apps/frontend/src/app/providers/csp.ts")
+    assert not test.search("/app/apps/frontend/src/app/providers/head.ts")
+    csp = (shell_app / "src/app/providers/csp.ts").read_text(encoding="utf-8")
+    assert "z.config({ jitless: true })" in csp
+    # In a vendor chunk, csp.ts may import zod and nothing else: an import of app code
+    # would make vendor-zod import the entry's chunks, a cycle that undoes the order.
+    imports = re.findall(r"^\s*import\b.*?from\s+['\"]([^'\"]+)['\"]", csp, flags=re.MULTILINE)
+    assert imports == ["zod"], imports
+    assert not re.search(r"\bimport\s*\(", csp)
+
+
 # --- reserved names -----------------------------------------------------------
 
 
@@ -407,6 +456,9 @@ def test_an_update_to_app_shell_takes_back_unchanged_sample_files(tmp_path: Path
         ({"routing": {"landing": "not-found"}}, "also the not_found destination"),
         ({"routing": {"landing": "forbidden"}}, "also the forbidden destination"),
         ({"routing": {"landing": "wait", "auth_stuck": "wait"}}, "also the auth_stuck destination"),
+        # So does a forbidden destination that is the sign-in route.
+        ({"routing": {"landing": "home", "forbidden": "login"}}, "forbidden .login. is also the sign_in"),
+        ({"routing": {"landing": "home", "sign_in": "enter", "forbidden": "enter"}}, "also the sign_in destination"),
         # Shapes are checked before defaults apply.
         ({"layouts": {"main": {"menus": []}}}, "menus must be a table"),
         ({"auth": []}, "auth must be a table"),
@@ -511,3 +563,46 @@ def test_an_update_refuses_to_drop_a_file_beside_its_sidecar(tmp_path: Path) -> 
     with pytest.raises(ValueError, match="Resolve existing update conflict first"):
         update_owned_project(root)
     assert (root / DISCONTINUED).is_file()
+
+
+# --- the review of #18 (2026-11-02) --------------------------------------------------
+
+
+def _auth_project(frontend: FrontendConfig) -> ProjectConfig:
+    """A project that generates the auth stack, so the session-timeout fragments apply."""
+    backend = BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)
+    return ProjectConfig(project_name="shell", backends=[backend], frontends=[frontend], include_keycloak=True)
+
+
+_DIALOG = (
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue",
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.test.ts",
+)
+
+
+@pytest.mark.parametrize(("dialog", "takes_it"), [("builtin", True), ("project", False)])
+def test_forge_writes_its_session_dialog_only_where_it_mounts_it(tmp_path: Path, dialog: str, takes_it: bool) -> None:
+    root = _render(_auth_project(_frontend(auth={"session_dialog": dialog})), tmp_path)
+    assert (root / "apps/frontend/src/shared/composables/useSessionTimeout.ts").is_file()
+    for rel in _DIALOG:
+        assert (root / rel).is_file() == takes_it, rel
+    app_vue = (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
+    assert ("SessionTimeoutModal" in app_vue) == takes_it
+
+
+def test_an_update_to_the_projects_session_dialog_takes_forges_back(tmp_path: Path) -> None:
+    root = _render(_auth_project(_frontend(auth={"session_dialog": "builtin"})), tmp_path)
+    recipe = root / ".forge" / "quality.json"
+    data = json.loads(recipe.read_text(encoding="utf-8"))
+    data["config"]["frontend"]["auth"] = {"session_dialog": "project"}
+    recipe.write_text(json.dumps(data), encoding="utf-8")
+
+    report = update_owned_project(root)
+
+    assert report["passed"], report
+    for rel in _DIALOG:
+        assert not (root / rel).exists(), rel
+    assert "SessionTimeoutModal" not in (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
+    recorded = read_forge_toml(root / "forge.toml").provenance
+    assert "apps/frontend/src/shared/composables/useSessionTimeout.ts" in recorded
+    assert not set(_DIALOG) & set(recorded)

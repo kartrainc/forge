@@ -48,6 +48,7 @@ def test_auth_mode_option_registered() -> None:
     assert "platform_auth_sdk_node" in enabled
     assert "platform_auth_sdk_rust" in enabled
     assert "platform_auth_session_timeout_vue" in enabled
+    assert "platform_auth_session_dialog_vue" in enabled
     assert "platform_auth_session_timeout_svelte" in enabled
     assert "platform_auth_session_timeout_flutter" in enabled
     assert "platform_auth_python_middleware" in enabled
@@ -58,9 +59,9 @@ def test_auth_mode_option_registered() -> None:
     # Gatekeeper is the issuer — now selected by auth.provider, NOT auth.mode.
     assert "platform_auth_gatekeeper" not in enabled
     assert "platform_auth_gatekeeper_keygen" not in enabled
-    assert len(enabled) == 11, (
-        f"auth.mode=generate should enable the 11 issuer-agnostic auth "
-        f"fragments after the provider split; got {len(enabled)}: {enabled}"
+    assert len(enabled) == 12, (
+        f"auth.mode=generate should enable the 12 issuer-agnostic auth "
+        f"fragments after the provider split and Vue's dialog split; got {len(enabled)}: {enabled}"
     )
     provider = OPTION_REGISTRY["auth.provider"]
     assert provider.default == "gatekeeper"

@@ -263,11 +263,13 @@ public cross-language contract — clients dispatch on them.
 
 ### Frontend session-timeout components
 
-Three fragments ship per-frontend session-timeout pieces:
+Four fragments ship per-frontend session-timeout pieces; Vue's dialog is a fragment of its own, which an
+`app-shell` app with `auth.session_dialog: project` does not take (ADR-015):
 
 | Frontend | Fragment | Location |
 | --- | --- | --- |
-| Vue 3 | `platform_auth_session_timeout_vue` | `apps/frontend/src/shared/composables/useSessionTimeout.ts` + `apps/frontend/src/features/auth/components/SessionTimeoutModal.vue` |
+| Vue 3 | `platform_auth_session_timeout_vue` | `apps/frontend/src/shared/composables/useSessionTimeout.ts` |
+| Vue 3 | `platform_auth_session_dialog_vue` | `apps/frontend/src/features/auth/components/SessionTimeoutModal.vue` |
 | Svelte 5 | `platform_auth_session_timeout_svelte` | `apps/frontend/src/lib/core/auth/session-timeout.svelte.ts` + `apps/frontend/src/lib/features/auth/components/SessionTimeoutModal.svelte` |
 | Flutter | `platform_auth_session_timeout_flutter` | `apps/frontend/lib/src/features/auth/data/session_timeout_service.dart` + `apps/frontend/lib/src/features/auth/presentation/session_timeout_modal.dart` |
 

@@ -191,9 +191,9 @@ def register_all(api: ForgeAPI) -> None:
 
     # Phase 8 — Frontend session-timeout (Vue).
     #
-    # Project-scoped, language-agnostic ("all"): ships ``useSessionTimeout``
-    # composable + ``SessionTimeoutModal`` component into the active Vue
-    # frontend tree (``apps/frontend/src/...``). Implements the BFF +
+    # Project-scoped, language-agnostic ("all"): ships the ``useSessionTimeout``
+    # composable into the active Vue frontend tree (``apps/frontend/src/...``);
+    # its dialog is ``platform_auth_session_dialog_vue`` below. Implements the BFF +
     # session-timeout SPA pattern from platform's RFC verbatim:
     #   - drift-immune countdown via Date.now() against idleExpiresAt
     #   - cross-tab leader election via BroadcastChannel
@@ -219,6 +219,31 @@ def register_all(api: ForgeAPI) -> None:
                 ),
             },
             target_frontends=(FrontendFramework.VUE,),
+        )
+    )
+
+    # The Vue session-timeout dialog (``SessionTimeoutModal``) over the
+    # composable, a fragment of its own so that an ``app-shell`` app whose
+    # ``auth.session_dialog`` is the project's receives none (ADR-015;
+    # ``forge.frontend_app.SESSION_DIALOG_FRAGMENTS``). ``crud-app`` always
+    # takes it, as it took the composable's files before.
+    api.add_fragment(
+        Fragment(
+            name="platform_auth_session_dialog_vue",
+            implementations={
+                BackendLanguage.PYTHON: FragmentImplSpec(
+                    fragment_dir=_impl("platform_auth_session_dialog_vue", "all"),
+                    scope="project",
+                ),
+            },
+            depends_on=("platform_auth_session_timeout_vue",),
+            target_frontends=(FrontendFramework.VUE,),
+            frontend_skip_reason=(
+                "The Svelte and Flutter session-timeout fragments ship their dialog "
+                "with the composable; only Vue's app-shell lets a project bring a "
+                "dialog of its own (auth.session_dialog, ADR-015), so only Vue's "
+                "dialog is a fragment apart."
+            ),
         )
     )
 

@@ -153,6 +153,28 @@ class TestCorepackHome:
         )
         assert f"corepack prepare {'yarn@1' if manager == 'yarn' else 'pnpm@10'} --activate" in deps
 
+    @pytest.mark.parametrize("dev_server", [False, True])
+    @pytest.mark.parametrize("manager", ["pnpm", "yarn"])
+    def test_the_image_installs_corepack_before_it_uses_it(
+        self, tmp_path: Path, manager: str, dev_server: bool
+    ) -> None:
+        # node:26-slim ships without corepack (Node 25 stopped bundling it).
+        content = _render(tmp_path, dev_server=dev_server, package_manager=manager)
+        stages = _stages(content)
+        # One stage starts from Node and installs corepack before it enables it; every
+        # other Node stage starts from that one, so none enables corepack without it.
+        node = [name for base, name in stages if base.startswith("node:")]
+        assert node == ["deps" if dev_server else "builder"]
+        first = _stage_body(content, node[0])
+        assert first.index("RUN npm install -g corepack@0.36.0") < first.index("corepack enable")
+        for base, name in stages:
+            if name and name != node[0]:
+                assert base in {stage for _, stage in stages}, (base, name)
+                assert "corepack" not in _stage_body(content, name)
+
+    def test_npm_installs_no_corepack(self, tmp_path: Path) -> None:
+        assert "corepack" not in _render(tmp_path, dev_server=True, package_manager="npm")
+
     def test_yarn_without_the_option_is_untouched(self, tmp_path: Path) -> None:
         content = _render(tmp_path, dev_server=False, package_manager="yarn")
         assert "COREPACK_HOME" not in content and "corepack prepare" not in content

@@ -24,6 +24,19 @@ it('signs in through the contract and returns where the visit started', async ()
   expect(router.currentRoute.value.fullPath).toBe('/somewhere')
 })
 
+it.each(['//elsewhere.example/x', '/\\elsewhere.example', '/\t/elsewhere.example', '/.//elsewhere.example', '//['])(
+  'signs in towards the landing route instead of %j',
+  async (redirect) => {
+    const { auth, calls } = testAuth(false)
+    setApplicationContext({ auth, actions: {} })
+    const router = await routerFor(application, `/sign-in-test?redirect=${encodeURIComponent(redirect)}`)
+    const page = mount(SignInPage, { global: { plugins: [router] } })
+    await page.get('[data-test="login-submit-btn"]').trigger('click')
+    await flushPromises()
+    expect(calls).toEqual([`signIn:${router.resolve({ name: application.routing.landing! }).fullPath}`])
+  },
+)
+
 it('sends a signed-in visit on to the landing route', async () => {
   setApplicationContext({ auth: testAuth(true).auth, actions: {} })
   const router = await routerFor(application, '/sign-in-test')

@@ -71,14 +71,21 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
 2. **Named layouts.** An `app-shell` frontend declares `layouts`, a mapping from
    a layout name to its `shell`, its menus and an optional placeholder route.
    Several layouts may share one app (a vendor console and a staff area on two
-   hosts, for example); the project chooses which are active at start-up. The
+   hosts, for example); the project chooses which are active at start-up, and a
+   layout may name its own landing route, which `/` opens while that layout is
+   the one mounted there (amended 2026-11-02, the review of #18). The
    first shell is `header-sidebar`: a full-width header with slots for the logo,
    the centre and the actions; a collapsible sidebar that renders the primary
    menu; the page with a footer slot; a right-hand panel slot that collapses and
    slides over the page on narrow screens; and the two edge toggles. It is built
    from Nuxt UI's dashboard components and layout utilities, keeps its state in
    local storage, and imports no project code. A project fills the slots by
-   wrapping the shell in a component of its own.
+   wrapping the shell in a component of its own. The wrapper also sets the
+   shell's extension points: props passed over the shell's own to the Nuxt UI
+   components it composes, where each region turns narrow, whether the narrow
+   sidebar stays as icons, and slots for its own edge toggles and right-panel
+   trigger. The shell stays design-agnostic: its defaults are Nuxt UI's, and a
+   product's sizes, breakpoints and toggles are the project's to set.
 
 3. **Menus from the configuration.** Each layout may declare a `primary` menu
    (the sidebar), an `account` menu and a `footer` menu. A menu is a list of
@@ -106,7 +113,8 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
    session-timeout composable, which implement it; `auth.runtime: project` emits
    neither, and the project passes its own implementation. `auth.session_dialog`
    is `builtin` (forge mounts its dialog, which only the generated auth stack has;
-   asked for without that stack, it is refused) or `project`. The backends' SDKs,
+   asked for without that stack, it is refused) or `project` (forge writes no
+   dialog: it is a fragment of its own, `platform_auth_session_dialog_vue`). The backends' SDKs,
    the gatekeeper and the realm do not change.
 
 6. **The seam.** Generated code never imports project code. Forge generates,

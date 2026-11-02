@@ -38,7 +38,18 @@ def _composable_path() -> Path:
 
 
 def _modal_path() -> Path:
-    return _fragment_root() / "features" / "auth" / "components" / "SessionTimeoutModal.vue"
+    # The dialog is a fragment of its own over the composable (ADR-015).
+    frag = FRAGMENT_REGISTRY["platform_auth_session_dialog_vue"]
+    root = Path(frag.implementations[BackendLanguage.PYTHON].fragment_dir) / "files" / "src"
+    return root / "features" / "auth" / "components" / "SessionTimeoutModal.vue"
+
+
+def test_the_dialog_is_a_fragment_over_the_composable() -> None:
+    dialog = FRAGMENT_REGISTRY["platform_auth_session_dialog_vue"]
+    assert dialog.depends_on == ("platform_auth_session_timeout_vue",)
+    assert dialog.target_frontends == FRAGMENT_REGISTRY["platform_auth_session_timeout_vue"].target_frontends
+    # The composable's fragment no longer carries the dialog.
+    assert not (_fragment_root() / "features").exists()
 
 
 def test_session_timeout_vue_fragment_registered() -> None:

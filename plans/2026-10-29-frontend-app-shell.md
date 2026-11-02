@@ -369,6 +369,124 @@ sign-in page, a placeholder for its unbuilt items) found two gaps.
     The no-auth rendered lane names a page extra as `not_found`, so CI covers a
     project destination.
 
+### The shell's extension points (after #16)
+
+The first consumer's design needs sizes, breakpoints, a narrow sidebar and toggles
+of its own. The owner's rule: the shell stays design-agnostic, so forge gains
+generic extension points and fixes for the defects the consumer found, and the
+product's values stay in the project's wrapper. Each defect was reproduced by a
+failing test first (the shell's unit tests; the e2e starter for 31 and 32).
+
+29. **Pass-through.** `sidebar`, `aside` and `menu` props go over the shell's own
+    to `UDashboardSidebar`, the docked panel and the primary `UNavigationMenu`,
+    typed with Nuxt UI's prop types; `ui` objects merge per slot, the project's
+    classes after the shell's. With `menu.type: 'single'` the open sub-menu is one
+    string, `''` for none (`undefined` left the menu to its own state).
+30. **Breakpoints.** `breakpoints.{sidebar,aside,header}` (pixels or a media query,
+    1024 each) replace the one query; the shell's `ui` classes make Nuxt UI's `lg`
+    classes (the sidebar's root, menu, toggle and handle) follow them. The slots
+    get `sidebarNarrow`, `actions` the panel's `aside` control, `aside` `docked`.
+    `narrowSidebar: collapsed` keeps the sidebar as icons below its breakpoint: a
+    sidebar of its own (another id, neither resizable nor stored), so the user's
+    wide-screen choice stays. `asideButton`, the `aside-trigger`, `sidebar-toggle`
+    and `aside-toggle` slots complete the hooks.
+31. **Narrow menu.** The shell passed `ui.header: 'hidden'` and `toggle: false` to
+    drop a desktop toggle the desktop sidebar never renders (its header needs a
+    header slot); both only hid the menu's header and close button. Both go.
+32. **Collapsed names.** Nuxt UI hides a collapsed item's label (`hidden`), leaving
+    links and sub-menu buttons without a name; the shell passes
+    `linkLabel: 'inline sr-only'` while collapsed (`inline` displaces `hidden`,
+    which tailwind-merge keeps beside `sr-only`).
+33. **Right panel.** A `UDashboardPanel` renders its resize handle after itself, on
+    the screen's edge for a right-hand panel, and resizes as a left one. A
+    right-hand `UDashboardSidebar` (Nuxt UI's documented `side="right"`) puts it on
+    the inner edge and resizes towards the page, so the docked panel is one, with
+    `border-s`, and the page panel drops Nuxt UI's `lg:not-last:border-e`. A
+    second sidebar would write the group's sidebar state (`sidebarOpen`,
+    `sidebarCollapsed`, read by `UDashboardSidebarCollapse` and
+    `UDashboardSidebarToggle`) and hears the sidebar toggle's hook: it sits in a
+    `UDashboardGroup` of its own (`contents`, no box), and its menu is held closed.
+34. **Escape** closes the header expanded on a narrow screen.
+35. **zod.** `app-shell` with `security.csp` puts zod and `src/app/providers/csp.ts`
+    in one chunk (`vendor-zod`). Rolldown keeps the reference app's modules in the
+    entry chunk, so its gate never saw it; a project chunk that builds a schema
+    and is imported by the entry made zod probe for eval before the entry's body
+    set it jitless (reproduced with such a group: five `script-src 'eval'`
+    reports, none with `vendor-zod`). Svelte and Flutter are served without the
+    policy and set nothing jitless. `crud-app` keeps its output; it has the same
+    evaluation order and could take the group in a release of its own.
+36. **Badges** needed nothing: `badge` names a key and `provideMenuBadges` takes a
+    ref, so live counts already reach the menus; the guide shows it.
+
+### The review of #18 (2026-11-02)
+
+A review of #18 and of #16's merged code, with a second opinion from Codex. Each fix
+below has a test that fails on #18's head (`7850a617`) and passes with it.
+
+37. **The panel and Nuxt UI's collapse.** Nuxt UI's `UDashboardSidebarCollapse` calls a
+    global hook every collapsible `UDashboardSidebar` hears, its own group or not, so
+    it folded the docked panel with the sidebar. The panel is no longer collapsible in
+    Nuxt UI's sense: the shell folds it by its width (`w-0`, `data-folded`), without
+    its line and resize handle.
+38. **Stored sizes.** `UDashboardGroup` reads `persistent` once, when it mounts; the
+    shell derived it from the current mode, so a page opened on the icons of a narrow
+    screen never stored a resizable sidebar's size. It follows `sidebar.resizable`.
+39. **`sidebar.collapsible: false`** left the edge toggle working on the shell's state
+    while Nuxt UI refused the collapse; the toggle goes and no stored collapse applies.
+40. **`ui` functions.** Nuxt UI applies a slot's function first and merges plain
+    classes after it, so `[shell, projectFunction]` let the shell win; the function
+    now gets the shell's classes and has the last word.
+41. **The stalled sign-in.** The built-in page's "Try again" reloaded the page itself,
+    which the guard lets through, so it never left; `next` was written and never read.
+    The page moves on to `next` once the contract stops loading, and "Try again" opens
+    `next` afresh. `returnPath()` (beside the guards) admits a `redirect` or `next`
+    only when the URL parser keeps it on the app's origin (`//host`, `/\host` and a
+    tabbed `/<tab>/host` passed the sign-in page's `startsWith('/')`).
+42. **Routing.** A route with `meta.requiresRole` needs a sign-in unless a deeper route
+    says it needs none (a public route with a role let a signed-out visit through); a
+    `forbidden` destination that is the sign-in route is refused (a signed-in visit
+    without the role looped); a redirecting `not_found` route answers unknown
+    addresses with its redirect; a page extra no longer sets `meta.menu` to its own
+    name, which left the item whose `to` opens it inactive; the factory throws for a
+    menu action the project did not pass. The e2e starter checks the address a menu
+    link names instead of a change of address, which a placeholder equal to the
+    landing route never makes.
+43. **Corepack.** Node stopped bundling corepack in 25: `node:26-slim` has none, and a
+    pnpm or yarn frontend's image failed at `corepack enable`. The image installs
+    corepack 0.36.0 first.
+44. **A layout's own landing.** `activeLayouts` chooses layouts per host, but the
+    contracts were the app's: a host mounting only a layout without the app's
+    landing route failed the factory's check, and the built-in pages and the
+    shell's logo linked to that route. The owner chose (2026-11-02) a `landing`
+    per layout: the layout mounted at `/` decides where `/` goes, for the guards,
+    the built-in pages and the logo too (`useApplicationRouting()`, the context's
+    routing); a further layout's own landing opens at `/<layout>`. The other four
+    destinations stay the app's: they are public routes or built-in pages, outside
+    every layout. Rejected: checking the contracts only against the active layouts
+    (the staff host's `/` still pointed at the vendors' landing), and contracts
+    passed per host from project code (the configuration owns them).
+45. **The dialog's fragment.** With `auth.session_dialog: project` forge still
+    wrote its dialog and the dialog's test under `src/features/`, which nothing
+    mounted. The dialog is a fragment of its own (`platform_auth_session_dialog_vue`,
+    over the composable's), withheld from such an app with the auth runtime's
+    fragments (`withheld_fragments`); Svelte and Flutter keep theirs together,
+    the fragment's `frontend_skip_reason` says why. `crud-app` output keeps its
+    bytes; its provenance names the new fragment.
+46. **The review bots' first round** (on `1255c8d4`). `returnPath()` checks the
+    normalised path too: dot segments normalise `/.//host` and `/a/..//host` to
+    `//host`, which the stalled sign-in page's "Try again" opened as another site.
+    The shell's Escape leaves the key to an open Reka UI layer
+    (`data-dismissable-layer`), which dismisses without `preventDefault`, so one
+    Escape no longer closes both a search's results and the expanded header. Two
+    tests pin assumptions the reviewers questioned: the Dockerfile has one Node
+    stage, which installs corepack, the others built from it; and `csp.ts`, in the
+    `vendor-zod` chunk, imports only zod (in a test, not a comment in the scaffold
+    `vite.config.ts`, which would reach every consumer as a merge proposal).
+47. **The review on `9a825862`.** `returnPath()` returns null for an address the
+    URL parser refuses: `new URL()` threw on `//[`, `/\[x` and `//a b` (and on
+    `/.//[` once normalised), so a crafted `redirect` broke the sign-in page and a
+    crafted `next` kept the auth-stuck page from rendering.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of

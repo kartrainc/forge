@@ -365,6 +365,9 @@ Each safeguard below is an option, so a project can choose another strategy.
   on `node:26-slim` / Node 26; `engines` asks for Node 26 in the Vue and Svelte
   manifests, and the workspace root's for the oldest Node a Node service records
   (Node 26 without one); forge's own CI runs on Node 26.
+- A pnpm or yarn frontend's image installs corepack (0.36.0, exact) before it
+  enables it: Node stopped bundling corepack in 25, so `node:26-slim` has none and
+  the image's `corepack enable` failed.
 - The Vue template takes the current libraries: vue 3.5.44, pinia 4.1.0,
   @tanstack/vue-query 5.105.0, @tanstack/vue-virtual 3.13.50, zod 4.6.7, ky
   2.2.0, @iconify-json/lucide 1.2.149, vite 8.3.5, @vitejs/plugin-vue 6.0.10,
@@ -398,6 +401,75 @@ Each safeguard below is an option, so a project can choose another strategy.
   page and right panel. A generated router factory composes the project's
   routes, wrappers and actions once and refuses a menu item or contract that
   names a missing route. See the frontend-layouts guide.
+- The `header-sidebar` shell takes extension points, all optional and rendering
+  as before when left out: `sidebar`, `aside` and `menu` pass props over its own
+  to the sidebar's `UDashboardSidebar`, the docked right panel and the primary
+  `UNavigationMenu` (sizes, `resizable`, `type: 'single'`, `tooltip`, `popover`,
+  `ui`, …); `breakpoints` sets where the sidebar, the right panel and the header
+  each turn narrow (1024 px each by default), and Nuxt UI's `lg` classes follow
+  it; `narrowSidebar: collapsed` keeps the sidebar on narrow screens as icons,
+  without a menu button; `asideButton: false` drops the header's "Show panel"
+  button. New slots: `aside-trigger` (`{ open, docked, toggle }`, at the shell's
+  root, for a trigger of the project's own), `sidebar-toggle` and `aside-toggle`
+  (`{ collapsed, toggle }`, the edge toggles). Slot props gain `sidebarNarrow`,
+  `aside` (`actions`) and `docked` (`aside`). `asideSlideover` passes `USlideover`
+  props for the panel on narrow screens (`overlay: false`, `modal: false`, …).
+  Folded, the docked panel keeps its place at no width, its content inert, so its
+  state survives and a project can animate the fold in its own CSS. `page` sets the
+  classes of the page's `main` and `footer` in place of the shell's padding and the
+  footer's line, for a footer that sits inside the page's margins. `header` sets
+  the header's sides and gaps and its actions' gap in place of the shell's.
+- Fixed in the `header-sidebar` shell: the right panel's resize handle sits on its
+  inner edge and drags towards the page (the panel is a right-hand
+  `UDashboardSidebar`; a `UDashboardPanel`'s handle follows it, at the screen's
+  edge, and drags as a left panel's); the line between the page and the panel is
+  drawn inside the panel, so the page column is the browser's width less the
+  sidebar and the panel (Nuxt UI drew it on the page, and a second one at the
+  screen's edge); the narrow screen's sidebar menu keeps its close button (the
+  shell hid the menu's header and dropped Nuxt UI's toggle); a collapsed
+  sidebar's links and sub-menu buttons keep their names for assistive
+  technology; Escape closes the header expanded on a narrow screen, once no open
+  layer in it (a search's results, a menu) takes the key first; a sidebar or
+  right panel the user cannot resize takes its configured size, not one Nuxt UI
+  stored under an earlier default (Nuxt UI stores a collapsible sidebar's size,
+  and a stored size wins; only a resizable one's is stored now); Nuxt UI's
+  `UDashboardSidebarCollapse` no longer folds the right panel with the sidebar
+  (its collapse is a global hook every collapsible `UDashboardSidebar` hears: the
+  shell folds the panel by its width, `data-folded` on its root, and hides its
+  resize handle while folded).
+- Fixed in `app-shell`'s routing: the built-in auth-stuck page moves on to the
+  address in its `next` once the sign-in answers, and "Try again" opens that
+  address afresh (it reloaded the stuck page itself, which the guard lets through,
+  so the page never left); the built-in sign-in and auth-stuck pages follow a
+  `redirect` or `next` query only to an address of the app, the normalised one
+  included (`//host`, `/\host`, a tabbed `/<tab>/host` and dot segments such as
+  `/.//host` reached another site), and fall back as for any other address when
+  the URL parser refuses the query (`//[` or `//a b` threw, which broke the
+  sign-in page and kept the auth-stuck page from rendering); a route with
+  `meta.requiresRole` needs a sign-in unless a deeper route says it needs none (a
+  public route with a role let a signed-out visit through); a `routing.forbidden`
+  that is the sign-in route is refused (a signed-in visit without the role looped
+  between it and the landing route); a project `not_found` route that redirects
+  answers unknown addresses with its redirect (the catch-all copied no view); a
+  page extra no longer marks a menu item named after it, so the item whose `to`
+  opens it is active; the router factory throws when a menu item names an action
+  the project did not pass, as it does for a missing route.
+- `app-shell` layouts may name a `landing` route of their own: `/` opens it while
+  that layout is the one mounted at `/` (`activeLayouts` mounting a host's
+  layouts), and so do the guards, the built-in pages' "Back to start" and the
+  shell's logo (`useApplicationRouting()`); a further layout's opens at
+  `/<layout>`. A host that mounts only a layout without the app's landing route
+  failed the router factory's check; the factory now names the fix.
+- Vue's session-timeout dialog is a fragment of its own,
+  `platform_auth_session_dialog_vue`, over the composable's: an `app-shell` app
+  with `auth.session_dialog: project` no longer receives forge's
+  `SessionTimeoutModal.vue` and its test, which nothing mounted, and an update to
+  `project` takes them back. `crud-app` and `builtin` apps receive the same files;
+  their provenance names the new fragment.
+- `app-shell` with `security.csp`: zod and `src/app/providers/csp.ts` load as one
+  chunk (`vendor-zod`). Rolldown runs the chunks the entry imports before the
+  entry's own body, so a schema one of them built made zod probe for eval, which
+  the policy reported.
 - An owned update deletes a scaffold file forge stops emitting only on positive
   evidence (recorded as scaffold, written by forge, still scaffold under the
   ownership policy, unchanged since emission), names it as taken back

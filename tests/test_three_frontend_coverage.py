@@ -185,7 +185,9 @@ class TestDiscovery:
         # removes one of these intentionally, update the set; if it
         # adds new Vue-shipping fragments, the main coverage test will
         # catch any missing siblings.
-        expected_subset = {"mcp_ui", "platform_auth_session_timeout_vue"}
+        # The session-timeout composable ships no Vue file since its dialog
+        # became a fragment of its own (ADR-015); the dialog does.
+        expected_subset = {"mcp_ui", "platform_auth_session_dialog_vue"}
         missing = expected_subset - found
         assert not missing, (
             f"Vue-shipping fragment walker missed known fragments: {sorted(missing)}. "

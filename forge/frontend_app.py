@@ -112,15 +112,20 @@ PAGE_EXTRAS: tuple[str, ...] = ("home", "profile", "settings")
 
 MENUS: tuple[str, ...] = ("primary", "account", "footer")
 
+#: Forge's session-timeout dialog, which an ``app-shell`` app receives only with
+#: ``auth.session_dialog: builtin``.
+SESSION_DIALOG_FRAGMENTS: frozenset[str] = frozenset({"platform_auth_session_dialog_vue"})
 #: The frontend fragments of forge's authentication runtime, which an app with
 #: ``auth.runtime: project`` does not receive.
-FORGE_AUTH_RUNTIME_FRAGMENTS: frozenset[str] = frozenset({"platform_auth_session_timeout_vue"})
+FORGE_AUTH_RUNTIME_FRAGMENTS: frozenset[str] = (
+    frozenset({"platform_auth_session_timeout_vue"}) | SESSION_DIALOG_FRAGMENTS
+)
 
 _KEBAB = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _ROUTE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 _ICON = re.compile(r"^i-[a-z0-9]+(?:-[a-z0-9]+)+$")
 _BADGE = re.compile(r"^[a-z][a-z0-9_-]*$")
-_LAYOUT_KEYS = frozenset({"shell", "placeholder", "menus"})
+_LAYOUT_KEYS = frozenset({"shell", "placeholder", "landing", "menus"})
 _SECTION_KEYS = frozenset({"label", "items"})
 _ITEM_KEYS = frozenset({"id", "label", "icon", "to", "action", "children", "badge"})
 _DESTINATIONS = ("to", "action", "children")
@@ -249,6 +254,12 @@ def _check_layouts(fc: FrontendConfig) -> None:
         placeholder = layout.get("placeholder")
         if placeholder is not None and not _is_route_name(placeholder):
             raise ValueError(f"{where}.placeholder must be a route name, got {placeholder!r}.")
+        landing = layout.get("landing")
+        if landing is not None and (not _is_route_name(landing) or landing == BUILTIN):
+            raise ValueError(
+                f"{where}.landing must name the route '/' opens while this layout is mounted "
+                f"there, got {landing!r}."
+            )
         raw_menus = layout.get("menus")
         menus = _require_mapping({} if raw_menus is None else raw_menus, f"{where}.menus")
         _unknown(menus.keys(), frozenset(MENUS), f"{where}.menus")
@@ -331,16 +342,36 @@ def _check_routing(fc: FrontendConfig) -> None:
             raise ValueError(f"routing.{key} needs include_auth.")
     # A landing route that is also a system destination loops: a signed-in visit of
     # the sign-in route goes to the landing route, which is the sign-in route again.
+    names: dict[str, str] = {}
     for key in ROUTING_KEYS[1:]:
         if key in _AUTH_DESTINATIONS and not fc.include_auth:
             continue
         value = routing.get(key, BUILTIN)
-        name = BUILTIN_ROUTE_NAMES[key] if value == BUILTIN else value
-        if landing == name:
+        names[key] = BUILTIN_ROUTE_NAMES[key] if value == BUILTIN else value
+        if landing == names[key]:
             raise ValueError(
                 f"routing.landing {landing!r} is also the {key} destination; the guards "
                 "would send a visit back and forth between them. Name another route."
             )
+    # So does a forbidden destination that is the sign-in route: a signed-in visit
+    # without the role goes there, and a signed-in visit of the sign-in route goes back.
+    if "sign_in" in names and names.get("forbidden") == names["sign_in"]:
+        raise ValueError(
+            f"routing.forbidden {names['sign_in']!r} is also the sign_in destination; "
+            "the guards would send a signed-in visit without the role back and forth "
+            "between it and the landing route. Name another route."
+        )
+    # A layout's own landing stands in for routing.landing while that layout is mounted
+    # at '/', so it loops the same way.
+    for layout_name, layout in layout_entries(fc):
+        own = layout.get("landing") if isinstance(layout, Mapping) else None
+        for key, name in names.items():
+            if own is not None and own == name:
+                raise ValueError(
+                    f"layouts.{layout_name}.landing {own!r} is also the {key} destination; "
+                    "the guards would send a visit back and forth between them. Name "
+                    "another route."
+                )
 
 
 def _check_auth(fc: FrontendConfig) -> None:
@@ -400,6 +431,22 @@ def session_dialog(fc: FrontendConfig) -> str:
     return str((fc.auth or {}).get("session_dialog", default))
 
 
+def withheld_fragments(fc: FrontendConfig) -> frozenset[str]:
+    """The frontend fragments forge does not write into ``fc``: none for ``crud-app``.
+
+    An ``app-shell`` app with the project's authentication runtime takes none of
+    forge's, and one with a session dialog other than forge's takes no dialog.
+    """
+    if not is_app_shell(fc):
+        return frozenset()
+    withheld: frozenset[str] = frozenset()
+    if auth_runtime(fc) == "project":
+        withheld |= FORGE_AUTH_RUNTIME_FRAGMENTS
+    if session_dialog(fc) != BUILTIN:
+        withheld |= SESSION_DIALOG_FRAGMENTS
+    return withheld
+
+
 def resolved_extras(fc: FrontendConfig) -> tuple[str, ...]:
     """The extras an app renders: all of them for ``crud-app``."""
     if not is_app_shell(fc):
@@ -443,6 +490,8 @@ def application_config(fc: FrontendConfig) -> dict[str, Any]:
         layouts[name] = {
             "shell": layout.get("shell", DEFAULT_SHELL),
             "placeholder": layout.get("placeholder"),
+            # Only when set, so a configuration without one renders as before.
+            **({"landing": layout["landing"]} if layout.get("landing") else {}),
             "menus": {menu: [_section(s) for s in menus.get(menu, [])] for menu in MENUS},
         }
     return {

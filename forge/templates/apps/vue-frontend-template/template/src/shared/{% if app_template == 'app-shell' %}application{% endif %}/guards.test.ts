@@ -1,8 +1,30 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { installGuards } from './guards'
+import { installGuards, returnPath } from './guards'
 import { testAuth } from './testing'
+
+describe('returnPath', () => {
+  it.each([
+    ['/somewhere', '/somewhere'],
+    ['/orders?tab=2#notes', '/orders?tab=2#notes'],
+    ['/x//y', '/x//y'],
+    ['/a/../b', '/b'],
+  ])('keeps an address of the app: %j', (value, path) => {
+    expect(returnPath(value)).toBe(path)
+  })
+
+  it.each([
+    '//elsewhere.example', '/\\elsewhere.example', '/\t/elsewhere.example', 'https://elsewhere.example',
+    // dot segments normalise these to `//elsewhere.example`
+    '/.//elsewhere.example', '/%2e//elsewhere.example', '/a/..//elsewhere.example',
+    // the parser throws on these, before and after the dot segments
+    '//[', '/\\[x', '//a b', '/.//[',
+    '', 'somewhere', 42, undefined,
+  ])('refuses anything else: %j', (value) => {
+    expect(returnPath(value)).toBeNull()
+  })
+})
 
 const Page = defineComponent({ setup: () => () => h('p') })
 const routes = [
@@ -11,6 +33,8 @@ const routes = [
   { path: '/stuck', name: 'stuck', component: Page },
   { path: '/open', name: 'open', component: Page },
   { path: '/login', name: 'login', component: Page },
+  // A public route, as the factory registers one, that also requires a role.
+  { path: '/staff', name: 'staff', component: Page, meta: { requiresAuth: false, requiresRole: 'admin' } },
   {
     path: '/area',
     component: Page,
@@ -108,6 +132,13 @@ describe('installGuards', () => {
     const router = build(testAuth(false).auth, { landing: 'start', sign_in: 'login' })
     await router.push('/area/public')
     expect(router.currentRoute.value.name).toBe('area-public')
+  })
+
+  it('takes a role as a sign-in a signed-out visit lacks, even on a public route', async () => {
+    const router = build(testAuth(false).auth, { landing: 'start', sign_in: 'login' })
+    await router.push('/open')
+    await router.push('/staff')
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/staff')
   })
 
   it('enters auth_stuck without waiting for the sign-in a second time', { timeout: 2_000 }, async () => {

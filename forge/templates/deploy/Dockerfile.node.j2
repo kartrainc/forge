@@ -13,6 +13,10 @@ WORKDIR /app
 # user can.
 ENV COREPACK_HOME=/usr/local/share/corepack
 {% endif %}
+{% if package_manager in ("pnpm", "yarn") %}
+# Node ships without corepack from 25 on: the image installs it, at a pinned version.
+RUN npm install -g corepack@0.36.0
+{% endif %}
 {% if package_manager == "pnpm" %}
 # The lockfile is written on the host by the pnpm that is installed there, and a newer major
 # refuses a lockfile that names versions younger than its minimumReleaseAge. forge records
