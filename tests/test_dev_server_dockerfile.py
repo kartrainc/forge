@@ -153,6 +153,18 @@ class TestCorepackHome:
         )
         assert f"corepack prepare {'yarn@1' if manager == 'yarn' else 'pnpm@10'} --activate" in deps
 
+    @pytest.mark.parametrize("dev_server", [False, True])
+    @pytest.mark.parametrize("manager", ["pnpm", "yarn"])
+    def test_the_image_installs_corepack_before_it_uses_it(
+        self, tmp_path: Path, manager: str, dev_server: bool
+    ) -> None:
+        # node:26-slim ships without corepack (Node 25 stopped bundling it).
+        content = _render(tmp_path, dev_server=dev_server, package_manager=manager)
+        assert content.index("RUN npm install -g corepack@0.36.0") < content.index("corepack enable")
+
+    def test_npm_installs_no_corepack(self, tmp_path: Path) -> None:
+        assert "corepack" not in _render(tmp_path, dev_server=True, package_manager="npm")
+
     def test_yarn_without_the_option_is_untouched(self, tmp_path: Path) -> None:
         content = _render(tmp_path, dev_server=False, package_manager="yarn")
         assert "COREPACK_HOME" not in content and "corepack prepare" not in content
