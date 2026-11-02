@@ -13,6 +13,8 @@ from forge.errors import ForgeError
 def run_quality(args: argparse.Namespace) -> int:
     root = Path(args.project_path or ".").resolve()
     try:
+        if getattr(args, "coverage_subjects", None) is not None and args.quality != "coverage":
+            raise ValueError("--coverage-subjects is for --quality coverage only")
         if args.quality == "architecture":
             from forge.quality.architecture import verify_architecture
 
@@ -49,8 +51,8 @@ def run_quality(args: argparse.Namespace) -> int:
                 json.loads(path.read_text(encoding="utf-8"))
                 for path in sorted((root / ".forge/coverage").glob("*/*.json"))
             ]
-            # --subjects a,b: gate the subjects a CI run tested (a subset); absent, every subject
-            selected = getattr(args, "subjects", None)
+            # --coverage-subjects a,b: gate the subjects a CI run tested (a subset); absent, every subject
+            selected = getattr(args, "coverage_subjects", None)
             only = (
                 {name for name in selected.replace(" ", ",").split(",") if name}
                 if selected is not None

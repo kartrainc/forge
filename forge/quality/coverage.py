@@ -203,7 +203,8 @@ def evaluate(
     only toward shared packages. A shared package is gated when it is named or
     a named subject's reports exercise it, from every report present; unnamed,
     it requires coverage only of its files the change touched, since the rest
-    may be exercised by consumers the run did not test. ``None`` gates every
+    may be exercised by consumers the run did not test (without a base, every
+    file counts as touched, as all source is new). ``None`` gates every
     subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
@@ -219,19 +220,22 @@ def evaluate(
             if report.get("subject") not in known:
                 failures.append(f"Unknown report subject: {report.get('subject')}")
     # every report present feeds the shared packages; only the named subjects' are gated
-    shared_sources = reports
+    # gated: the reports of the subjects gated; shared_sources: what feeds the shared packages.
+    # A full run uses every report for both; a subset gates the named subjects' reports, and every
+    # report of a declared subject still feeds the shared packages.
+    gated, shared_sources = reports, reports
     if only is not None:
+        gated = [report for report in reports if report.get("subject") in only]
         shared_sources = [report for report in reports if report.get("subject") in known]
-        reports = [report for report in reports if report.get("subject") in only]
     # Shared runtime packages are independently gated from the actual tests
     # exercising them. Never let a well-tested service hide an untested SDK.
-    expanded = list(reports)
+    expanded = list(gated)
     exercised: set[str] = set()
     for subject in subjects:
         if not subject.get("shared"):
             continue
         prefix = subject["path"] + "/"
-        if any(p.startswith(prefix) for report in reports for p in report.get("files", {})):
+        if any(p.startswith(prefix) for report in gated for p in report.get("files", {})):
             exercised.add(subject["name"])
         for suite in required_suites:
             files: dict = {}
@@ -304,14 +308,10 @@ def evaluate(
                     failures.append(f"{name}/{suite}: stale or missing source {rel}")
                     continue
                 lines = merged.setdefault(rel, {})
+                line_count = len(path.read_text(encoding="utf-8").splitlines())  # once per file
                 for raw_number, hits in entry.get("lines", {}).items():
                     number = int(raw_number)
-                    if (
-                        number < 1
-                        or number > len(path.read_text(encoding="utf-8").splitlines())
-                        or type(hits) is not int
-                        or hits < 0
-                    ):
+                    if number < 1 or number > line_count or type(hits) is not int or hits < 0:
                         raise ValueError(f"Invalid coverage counter: {rel}:{raw_number}")
                     lines[number] = max(lines.get(number, 0), hits)
                     stage_total += 1

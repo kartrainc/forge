@@ -633,9 +633,11 @@ def test_cli_execution_dispatch(project, monkeypatch, capsys, operation):
 
 
 @pytest.mark.parametrize(
-    ("subjects", "only"), [(None, None), ("api", {"api"}), ("api, web", {"api", "web"})]
+    ("coverage_subjects", "only"), [(None, None), ("api", {"api"}), ("api, web", {"api", "web"})]
 )
-def test_coverage_cli_passes_the_selected_subjects(project, monkeypatch, capsys, subjects, only):
+def test_coverage_cli_passes_the_selected_subjects(
+    project, monkeypatch, capsys, coverage_subjects, only
+):
     from forge.quality import coverage
 
     seen = {}
@@ -645,11 +647,33 @@ def test_coverage_cli_passes_the_selected_subjects(project, monkeypatch, capsys,
         project_path=str(project),
         suite="all",
         subject="ignored-as-before",
-        subjects=subjects,
+        coverage_subjects=coverage_subjects,
         base_ref=None,
     )
     assert run_quality(args) == 0
     assert seen["only"] == only
+
+
+def test_coverage_subjects_is_refused_outside_coverage(project, capsys):
+    args = argparse.Namespace(
+        quality="test",
+        project_path=str(project),
+        suite="all",
+        subject=None,
+        coverage_subjects="api",
+    )
+    assert run_quality(args) == 12
+    assert "for --quality coverage only" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_subject_abbreviations_still_resolve():
+    from forge.cli.parser import _build_parser, _orphan_subflags
+
+    parser = _build_parser()
+    for flag in ("--subj", "--subje", "--subjec"):
+        assert parser.parse_args(["--quality", "test", flag, "api"]).subject == "api"
+    # without --quality, the new flag is an orphan sub-flag, never a headless generation
+    assert _orphan_subflags(parser.parse_args(["--coverage-subjects", "api"]))
 
 
 # -- Go ---------------------------------------------------------------------

@@ -7,11 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Coverage gate for a subset of subjects
 
-- `forge --quality coverage --subjects a,b` (a new flag) gates only the named subjects, for a CI that tests only the
+- `forge --quality coverage --coverage-subjects a,b` (a new flag) gates only the named subjects, for a CI that tests only the
   subjects a change touches. Each named subject is gated in full. Backends and frontends not named are skipped and
   listed in the result's new `skipped` list. A shared package is gated when it is named or a named subject's reports
   exercise it, from every report present; unnamed, it requires coverage only of the files the change touched. An
-  unknown name or an empty list fails. Without `--subjects` the gate is unchanged, and `--subject` is untouched.
+  unknown name or an empty list fails; the flag is refused outside `--quality coverage`. Without
+  `--coverage-subjects` the gate is unchanged, and `--subject` (abbreviations included) is untouched.
 
 ### Per-service Helm charts
 
