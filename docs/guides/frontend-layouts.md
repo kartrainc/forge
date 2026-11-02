@@ -117,6 +117,7 @@ frontend:
     console:
       shell: header-sidebar
       placeholder: not-built       # a project route taking :item; without it such items are disabled
+      # landing: orders            # optional: this layout's start, in place of routing.landing
       menus:
         primary:                   # the sidebar
           - items:
@@ -149,14 +150,19 @@ route takes `:item`, without params otherwise.
 
 The routing contracts: `/` always opens `landing` (the `home` extra sits at
 `/home`); `landing` may not be a system destination (the sign-in route, built in or
-not, the not-found, auth-stuck or forbidden route), which would loop, and the
-guards never redirect a visit to the route it is on. A project route named as
-`not_found` also answers every unknown address, inside the layout and the parents
-it sits in, keeping the address. Every
-`meta.requiresRole` along the matched routes must hold, and the deepest route that
-sets `meta.requiresAuth` decides whether it needs a sign-in. The app mounts without
-waiting for the authentication contract to start; a sign-in that does not answer
-in time ends on `auth_stuck`.
+not, the not-found, auth-stuck or forbidden route), nor `forbidden` the sign-in
+route, which would loop, and the guards never redirect a visit to the route it is
+on. A project route named as `not_found` also answers every unknown address, inside
+the layout and the parents it sits in, keeping the address (a `not_found` route
+that redirects sends them where it redirects). Every `meta.requiresRole` along the
+matched routes must hold, and the deepest route that sets `meta.requiresAuth`
+decides whether it needs a sign-in; a route with `meta.requiresRole` needs one,
+unless a deeper route says it needs none. The app mounts without waiting for the
+authentication contract to start; a sign-in that does not answer in time ends on
+`auth_stuck`, with the address it started from in `next`. The built-in page moves
+on to that address once the sign-in answers, and its "Try again" opens it afresh.
+The built-in pages follow a `redirect` or `next` query only to an address of the
+app itself.
 
 What forge writes, and who owns it:
 
@@ -184,13 +190,35 @@ const router = createApplicationRouter({
 ```
 
 The factory throws when a menu item, a placeholder or a routing contract names a
-route the composition does not contain, or when two routes share a name. With
+route the composition does not contain, when a menu item names an action the
+project did not pass in `actions`, or when two routes share a name. With
 `auth.runtime: project`, forge emits no `useAuth`, no session-timeout composable
 and no forge auth adapter, and `src/app/auth.ts` is a starter to implement.
 `auth.session_dialog: builtin` mounts forge's session-timeout dialog, which only
 the generated auth stack has (`auth.mode: generate`, with Keycloak for its
 provider): asked for without it, the configuration is refused; left out, the app
-gets `project`.
+gets `project`. Forge writes its dialog (`src/features/auth/components/SessionTimeoutModal.vue`)
+only with `builtin`; with `project` the composable comes alone, and an update that
+switches to `project` takes the dialog back.
+
+`activeLayouts` mounts a subset of the layouts, one host's for example; the first
+one sits at `/`. The routing contracts are the app's, except `landing`: a layout
+may name its own, which `/` opens while that layout is the one at `/`, and which
+the guards, the built-in pages' "Back to start" and the shell's logo then use
+(`useApplicationRouting()` returns the contracts in force). A further layout's own
+landing opens at `/<layout>`. A host that mounts only a layout without the app's
+landing route needs one: the factory says so.
+
+```yaml
+layouts:
+  console: { menus: { … } }                    # vendors: / opens routing.landing
+  staff: { landing: staff-overview, menus: { … } }
+```
+
+```ts
+// One build, two hosts: staff.example.com mounts the staff area alone, at `/`.
+activeLayouts: location.hostname.startsWith('staff.') ? ['staff'] : ['console'],
+```
 
 Changing a menu or a route contract is a configuration change: edit the stack
 file and the recipe's `config.frontend`, then run `forge --update`.
@@ -225,7 +253,7 @@ toggle the edge toggle and the header's "Show panel" button use.
 |---|---|---|
 | `layout` | (required) | the layout whose menus the shell renders |
 | `asideBadge` | none | a badge on the right panel's default edge toggle while the panel is collapsed |
-| `sidebar` | `{}` | `UDashboardSidebar` props over the shell's own (`collapsible`, `collapsedSize: 4`, `defaultSize: 16`, `minSize: 12`, `maxSize: 22`, in rem): sizes, `resizable`, the narrow screen's `mode`, `menu` and `toggle`, `ui` |
+| `sidebar` | `{}` | `UDashboardSidebar` props over the shell's own (`collapsible`, `collapsedSize: 4`, `defaultSize: 16`, `minSize: 12`, `maxSize: 22`, in rem): sizes, `resizable`, `collapsible: false` (no edge toggle, never collapsed on a wide screen), the narrow screen's `mode`, `menu` and `toggle`, `ui`. Nuxt UI keeps a sidebar at least 4 rem wide (`min-w-16`): a smaller `collapsedSize` needs a smaller `min-w-*` in `ui.root` |
 | `aside` | `{}` | the docked panel's props over the shell's own (`defaultSize: 22`, `minSize: 16`, `maxSize: 32`, `resizable: true`): sizes, `resizable`, `class`, `ui` |
 | `menu` | `{}` | `UNavigationMenu` props of the primary menu over the shell's own (`tooltip`, `popover`): `type: 'single'` keeps one sub-menu open, `color`, `variant`, `highlight`, `ui` |
 | `breakpoints` | 1024 px each | `{ sidebar, aside, header }`: where each region turns narrow, as the pixels from which it is wide or a media query that matches while it is |
@@ -235,14 +263,19 @@ toggle the edge toggle and the header's "Show panel" button use.
 | `page` | `{}` | `{ main, footer }`: classes for the page's `main` and its `footer` in place of the shell's own (`p-4 sm:p-6`; `border-t border-default px-4 py-3 sm:px-6`), so a project draws its own padding and the footer's line and spacing; `main` keeps `flex-1`, which holds the footer at the bottom of a short page |
 | `header` | `{}` | `{ spacing, actions }`: classes for the header's spacing and its actions' gap in place of the shell's own (`gap-3 px-4`; `gap-2`), so a project sets its own sides and the space between the logo, the centre and the actions; both keep their flex row |
 
-Folded, the docked panel keeps its place at no width (`data-collapsed="true"`)
-instead of leaving the page: its content stays, out of reach (`inert`), and a
-project can animate the fold in its own CSS, a `transition` on the panel's width
-through `aside.ui.root`, for example. The sidebar's collapse is a width change
-too.
+Folded, the docked panel keeps its place at no width (`data-folded="true"`, `w-0`
+on its root) instead of leaving the page: its content stays, out of reach
+(`inert`), its line and resize handle go, and a project can animate the fold in its
+own CSS, a `transition` on the panel's width through `aside.ui.root`, for example.
+The sidebar's collapse is a width change too. The shell folds the panel itself,
+not with Nuxt UI's collapse: `UDashboardSidebarCollapse` collapses every
+collapsible `UDashboardSidebar` of the app through a global hook, and so folds the
+sidebar only.
 
 A `ui` object merges per Nuxt UI slot: the shell's classes come first and the
-project's after them, so tailwind-merge lets the project's win. The shell's own
+project's after them, so tailwind-merge lets the project's win; a project's
+function (Nuxt UI's `(defaults) => classes` form) receives Nuxt UI's defaults with
+the shell's classes, and its result stands. The shell's own
 classes make Nuxt UI's `lg` breakpoint follow `breakpoints`, keep the collapsed
 menu's labels for assistive technology (`inline sr-only`, where Nuxt UI hides
 them), and draw the line between the page and the docked panel inside the
@@ -273,7 +306,7 @@ provideMenuBadges(badges)
 <template>
   <HeaderSidebarShell
     layout="console"
-    :sidebar="{ defaultSize: 15, collapsedSize: 3.5 }"
+    :sidebar="{ defaultSize: 15, collapsedSize: 4 }"
     :aside="{ defaultSize: 24, resizable: false }"
     :menu="{ type: 'single' }"
     :breakpoints="{ sidebar: 768, aside: 1280 }"

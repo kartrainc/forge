@@ -356,6 +356,9 @@ Each safeguard below is an option, so a project can choose another strategy.
   on `node:26-slim` / Node 26; `engines` asks for Node 26 in the Vue and Svelte
   manifests, and the workspace root's for the oldest Node a Node service records
   (Node 26 without one); forge's own CI runs on Node 26.
+- A pnpm or yarn frontend's image installs corepack (0.36.0, exact) before it
+  enables it: Node stopped bundling corepack in 25, so `node:26-slim` has none and
+  the image's `corepack enable` failed.
 - The Vue template takes the current libraries: vue 3.5.44, pinia 4.1.0,
   @tanstack/vue-query 5.105.0, @tanstack/vue-virtual 3.13.50, zod 4.6.7, ky
   2.2.0, @iconify-json/lucide 1.2.149, vite 8.3.5, @vitejs/plugin-vue 6.0.10,
@@ -419,7 +422,37 @@ Each safeguard below is an option, so a project can choose another strategy.
   technology; Escape closes the header expanded on a narrow screen; a sidebar or
   right panel the user cannot resize takes its configured size, not one Nuxt UI
   stored under an earlier default (Nuxt UI stores a collapsible sidebar's size,
-  and a stored size wins; only a resizable one's is stored now).
+  and a stored size wins; only a resizable one's is stored now); Nuxt UI's
+  `UDashboardSidebarCollapse` no longer folds the right panel with the sidebar
+  (its collapse is a global hook every collapsible `UDashboardSidebar` hears: the
+  shell folds the panel by its width, `data-folded` on its root, and hides its
+  resize handle while folded).
+- Fixed in `app-shell`'s routing: the built-in auth-stuck page moves on to the
+  address in its `next` once the sign-in answers, and "Try again" opens that
+  address afresh (it reloaded the stuck page itself, which the guard lets through,
+  so the page never left); the built-in sign-in and auth-stuck pages follow a
+  `redirect` or `next` query only to an address of the app (`//host`, `/\host` and
+  a tabbed `/<tab>/host` passed the check); a route with `meta.requiresRole` needs a
+  sign-in unless a deeper route says it needs none (a public route with a role let
+  a signed-out visit through); a `routing.forbidden` that is the sign-in route is
+  refused (a signed-in visit without the role looped between it and the landing
+  route); a project `not_found` route that redirects answers unknown addresses with
+  its redirect (the catch-all copied no view); a page extra no longer marks a menu
+  item named after it, so the item whose `to` opens it is active; the router factory
+  throws when a menu item names an action the project did not pass, as it does for
+  a missing route.
+- `app-shell` layouts may name a `landing` route of their own: `/` opens it while
+  that layout is the one mounted at `/` (`activeLayouts` mounting a host's
+  layouts), and so do the guards, the built-in pages' "Back to start" and the
+  shell's logo (`useApplicationRouting()`); a further layout's opens at
+  `/<layout>`. A host that mounts only a layout without the app's landing route
+  failed the router factory's check; the factory now names the fix.
+- Vue's session-timeout dialog is a fragment of its own,
+  `platform_auth_session_dialog_vue`, over the composable's: an `app-shell` app
+  with `auth.session_dialog: project` no longer receives forge's
+  `SessionTimeoutModal.vue` and its test, which nothing mounted, and an update to
+  `project` takes them back. `crud-app` and `builtin` apps receive the same files;
+  their provenance names the new fragment.
 - `app-shell` with `security.csp`: zod and `src/app/providers/csp.ts` load as one
   chunk (`vendor-zod`). Rolldown runs the chunks the entry imports before the
   entry's own body, so a schema one of them built made zod probe for eval, which

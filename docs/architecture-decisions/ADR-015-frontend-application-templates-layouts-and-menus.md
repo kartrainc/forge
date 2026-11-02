@@ -71,7 +71,9 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
 2. **Named layouts.** An `app-shell` frontend declares `layouts`, a mapping from
    a layout name to its `shell`, its menus and an optional placeholder route.
    Several layouts may share one app (a vendor console and a staff area on two
-   hosts, for example); the project chooses which are active at start-up. The
+   hosts, for example); the project chooses which are active at start-up, and a
+   layout may name its own landing route, which `/` opens while that layout is
+   the one mounted there (amended 2026-11-02, the review of #18). The
    first shell is `header-sidebar`: a full-width header with slots for the logo,
    the centre and the actions; a collapsible sidebar that renders the primary
    menu; the page with a footer slot; a right-hand panel slot that collapses and
@@ -111,7 +113,8 @@ shape (`crud-service`, `http-service`), and the shape decides what is emitted.
    session-timeout composable, which implement it; `auth.runtime: project` emits
    neither, and the project passes its own implementation. `auth.session_dialog`
    is `builtin` (forge mounts its dialog, which only the generated auth stack has;
-   asked for without that stack, it is refused) or `project`. The backends' SDKs,
+   asked for without that stack, it is refused) or `project` (forge writes no
+   dialog: it is a fragment of its own, `platform_auth_session_dialog_vue`). The backends' SDKs,
    the gatekeeper and the realm do not change.
 
 6. **The seam.** Generated code never imports project code. Forge generates,

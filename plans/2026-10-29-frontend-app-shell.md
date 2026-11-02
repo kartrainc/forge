@@ -418,6 +418,61 @@ failing test first (the shell's unit tests; the e2e starter for 31 and 32).
 36. **Badges** needed nothing: `badge` names a key and `provideMenuBadges` takes a
     ref, so live counts already reach the menus; the guide shows it.
 
+### The review of #18 (2026-11-02)
+
+A review of #18 and of #16's merged code, with a second opinion from Codex. Each fix
+below has a test that fails on #18's head (`7850a617`) and passes with it.
+
+37. **The panel and Nuxt UI's collapse.** Nuxt UI's `UDashboardSidebarCollapse` calls a
+    global hook every collapsible `UDashboardSidebar` hears, its own group or not, so
+    it folded the docked panel with the sidebar. The panel is no longer collapsible in
+    Nuxt UI's sense: the shell folds it by its width (`w-0`, `data-folded`), without
+    its line and resize handle.
+38. **Stored sizes.** `UDashboardGroup` reads `persistent` once, when it mounts; the
+    shell derived it from the current mode, so a page opened on the icons of a narrow
+    screen never stored a resizable sidebar's size. It follows `sidebar.resizable`.
+39. **`sidebar.collapsible: false`** left the edge toggle working on the shell's state
+    while Nuxt UI refused the collapse; the toggle goes and no stored collapse applies.
+40. **`ui` functions.** Nuxt UI applies a slot's function first and merges plain
+    classes after it, so `[shell, projectFunction]` let the shell win; the function
+    now gets the shell's classes and has the last word.
+41. **The stalled sign-in.** The built-in page's "Try again" reloaded the page itself,
+    which the guard lets through, so it never left; `next` was written and never read.
+    The page moves on to `next` once the contract stops loading, and "Try again" opens
+    `next` afresh. `returnPath()` (beside the guards) admits a `redirect` or `next`
+    only when the URL parser keeps it on the app's origin (`//host`, `/\host` and a
+    tabbed `/<tab>/host` passed the sign-in page's `startsWith('/')`).
+42. **Routing.** A route with `meta.requiresRole` needs a sign-in unless a deeper route
+    says it needs none (a public route with a role let a signed-out visit through); a
+    `forbidden` destination that is the sign-in route is refused (a signed-in visit
+    without the role looped); a redirecting `not_found` route answers unknown
+    addresses with its redirect; a page extra no longer sets `meta.menu` to its own
+    name, which left the item whose `to` opens it inactive; the factory throws for a
+    menu action the project did not pass. The e2e starter checks the address a menu
+    link names instead of a change of address, which a placeholder equal to the
+    landing route never makes.
+43. **Corepack.** Node stopped bundling corepack in 25: `node:26-slim` has none, and a
+    pnpm or yarn frontend's image failed at `corepack enable`. The image installs
+    corepack 0.36.0 first.
+44. **A layout's own landing.** `activeLayouts` chooses layouts per host, but the
+    contracts were the app's: a host mounting only a layout without the app's
+    landing route failed the factory's check, and the built-in pages and the
+    shell's logo linked to that route. The owner chose (2026-11-02) a `landing`
+    per layout: the layout mounted at `/` decides where `/` goes, for the guards,
+    the built-in pages and the logo too (`useApplicationRouting()`, the context's
+    routing); a further layout's own landing opens at `/<layout>`. The other four
+    destinations stay the app's: they are public routes or built-in pages, outside
+    every layout. Rejected: checking the contracts only against the active layouts
+    (the staff host's `/` still pointed at the vendors' landing), and contracts
+    passed per host from project code (the configuration owns them).
+45. **The dialog's fragment.** With `auth.session_dialog: project` forge still
+    wrote its dialog and the dialog's test under `src/features/`, which nothing
+    mounted. The dialog is a fragment of its own (`platform_auth_session_dialog_vue`,
+    over the composable's), withheld from such an app with the auth runtime's
+    fragments (`withheld_fragments`); Svelte and Flutter keep theirs together,
+    the fragment's `frontend_skip_reason` says why. `crud-app` output keeps its
+    bytes; its provenance names the new fragment.
+
 ## Open points
 
 - `layout` (one overlay of `crud-app`) and `layouts` (the named layouts of
