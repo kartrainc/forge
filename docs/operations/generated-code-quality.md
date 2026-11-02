@@ -171,7 +171,10 @@ greater than 80% on changed lines):
 - a shared package is gated when it is named, when a named subject's reports
   exercise it, or when the change touched it, from every report present;
   unnamed, it requires coverage only of the files the change touched, since its
-  other files may be exercised by consumers the run did not test;
+  other files may be exercised by consumers the run did not test. Once gated, it
+  needs every required suite like any subject: a package the named subjects reach
+  only from their unit tests fails with `<package>: missing required e2e report`
+  (name the consumers whose suites reach it, or cover it there);
 - reports of subjects not named count only toward shared packages; an unknown
   name or an empty list fails.
 
