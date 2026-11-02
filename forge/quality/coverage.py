@@ -203,9 +203,9 @@ def evaluate(
     only toward shared packages. A shared package is gated when it is named or
     a named subject's reports exercise it, from every report present; unnamed,
     it requires coverage only of its files the change touched, since the rest
-    may be exercised by consumers the run did not test (without a base, every
-    file counts as touched, as all source is new). ``None`` gates every
-    subject.
+    may be exercised by consumers the run did not test; a shared package the
+    change touched is gated even when no named subject exercises it. A subset
+    needs ``base_ref``. ``None`` gates every subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
@@ -216,13 +216,13 @@ def evaluate(
         if not only:
             failures.append("No coverage subjects selected")
         failures.extend(f"Unknown subject: {name}" for name in sorted(only - known))
+        if delta is None:
+            failures.append(
+                "--coverage-subjects needs --base-ref: a subset gates what the change touched"
+            )
         for report in reports:
             if report.get("subject") not in known:
                 failures.append(f"Unknown report subject: {report.get('subject')}")
-    # every report present feeds the shared packages; only the named subjects' are gated
-    # gated: the reports of the subjects gated; shared_sources: what feeds the shared packages.
-    # A full run uses every report for both; a subset gates the named subjects' reports, and every
-    # report of a declared subject still feeds the shared packages.
     gated, shared_sources = reports, reports
     if only is not None:
         gated = [report for report in reports if report.get("subject") in only]
@@ -274,10 +274,11 @@ def evaluate(
                 failures.append(f"Unknown report subject: {report.get('subject')}")
     for subject in subjects:
         name, subject_path = subject["name"], subject["path"]
+        touched = delta is not None and any(rel.startswith(subject_path + "/") for rel in delta)
         if (
             only is not None
             and name not in only
-            and not (subject.get("shared") and name in exercised)
+            and not (subject.get("shared") and (name in exercised or touched))
         ):
             skipped.append(name)
             continue
@@ -308,7 +309,7 @@ def evaluate(
                     failures.append(f"{name}/{suite}: stale or missing source {rel}")
                     continue
                 lines = merged.setdefault(rel, {})
-                line_count = len(path.read_text(encoding="utf-8").splitlines())  # once per file
+                line_count = len(path.read_text(encoding="utf-8").splitlines())
                 for raw_number, hits in entry.get("lines", {}).items():
                     number = int(raw_number)
                     if number < 1 or number > line_count or type(hits) is not int or hits < 0:
@@ -326,7 +327,6 @@ def evaluate(
                 failures.append(f"{name}: missing required {suite} report")
         inventory = source_inventory(root, subject_path)
         if only is not None and name not in only and delta is not None:
-            # an unnamed shared package: its untouched files may be covered by consumers this run did not test
             inventory &= set(delta)
         for missing in sorted(inventory - merged.keys()):
             failures.append(f"{name}: source omitted from coverage: {missing}")

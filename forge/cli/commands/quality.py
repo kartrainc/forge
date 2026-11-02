@@ -51,10 +51,9 @@ def run_quality(args: argparse.Namespace) -> int:
                 json.loads(path.read_text(encoding="utf-8"))
                 for path in sorted((root / ".forge/coverage").glob("*/*.json"))
             ]
-            # --coverage-subjects a,b: gate the subjects a CI run tested (a subset); absent, every subject
             selected = getattr(args, "coverage_subjects", None)
             only = (
-                {name for name in selected.replace(" ", ",").split(",") if name}
+                {s.strip() for s in selected.split(",") if s.strip()}
                 if selected is not None
                 else None
             )

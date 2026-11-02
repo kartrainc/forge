@@ -168,16 +168,16 @@ subjects alone, each in full (all three suites, every source file, strictly
 greater than 80% on changed lines):
 
 - a backend or frontend not named needs no report and is listed under `skipped`;
-- a shared package is gated when it is named or a named subject's reports
-  exercise it, from every report present; unnamed, it requires coverage only of
-  the files the change touched, since its other files may be exercised by
-  consumers the run did not test;
+- a shared package is gated when it is named, when a named subject's reports
+  exercise it, or when the change touched it, from every report present;
+  unnamed, it requires coverage only of the files the change touched, since its
+  other files may be exercised by consumers the run did not test;
 - reports of subjects not named count only toward shared packages; an unknown
   name or an empty list fails.
 
-Without `--base-ref` all source is new, so every file counts as touched and an
-exercised shared package is gated on its whole inventory; pass the base in CI.
-`--coverage-subjects` is refused outside `--quality coverage`.
+A subset needs `--base-ref`, since it gates what the change touched; without it
+the gate fails. The list is comma-separated, and `--coverage-subjects` is refused
+outside `--quality coverage`.
 
 Without `--coverage-subjects` every subject is gated, as above, and `--subject` keeps its
 meaning for `--quality test`. Run the full gate where a

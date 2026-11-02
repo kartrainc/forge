@@ -74,7 +74,7 @@ report shows what the run did not cover.
 
 | Repo | Change |
 | --- | --- |
-| shipyard `forge-quality.yml` | input `subjects` (space- or comma-separated); for `gates: coverage`, `--coverage-subjects "$SUBJECTS"` when set |
+| shipyard `forge-quality.yml` | input `subjects` (comma-separated); for `gates: coverage`, `--coverage-subjects "$SUBJECTS"` with the run's `--base-ref` when set |
 | kartra-ai `.github/workflows/ci.yml` | `plan`: drop "one forge subject touched brings every forge leg"; new output `subjects` (the touched units' `forge.subject`); job `coverage` passes it. A push to `develop` keeps every leg and no `--coverage-subjects` |
 | kartra-ai | forge pin bump (with 6a, the Node runtime role, PR #17) |
 
