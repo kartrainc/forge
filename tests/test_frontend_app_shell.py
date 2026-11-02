@@ -423,6 +423,9 @@ def test_an_update_to_app_shell_takes_back_unchanged_sample_files(tmp_path: Path
         ({"routing": {"landing": "not-found"}}, "also the not_found destination"),
         ({"routing": {"landing": "forbidden"}}, "also the forbidden destination"),
         ({"routing": {"landing": "wait", "auth_stuck": "wait"}}, "also the auth_stuck destination"),
+        # So does a forbidden destination that is the sign-in route.
+        ({"routing": {"landing": "home", "forbidden": "login"}}, "forbidden .login. is also the sign_in"),
+        ({"routing": {"landing": "home", "sign_in": "enter", "forbidden": "enter"}}, "also the sign_in destination"),
         # Shapes are checked before defaults apply.
         ({"layouts": {"main": {"menus": []}}}, "menus must be a table"),
         ({"auth": []}, "auth must be a table"),

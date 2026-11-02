@@ -189,7 +189,7 @@
       "sha256": "77ac9733140f48bb"
     },
     "apps/frontend/.copier-answers.yml": {
-      "size": 3461,
+      "size": 3424,
       "sha256": "<version-dependent>"
     },
     "apps/frontend/.dockerignore": {
@@ -385,12 +385,12 @@
       "sha256": "64735be39fef4cd4"
     },
     "apps/frontend/src/shared/application/guards.test.ts": {
-      "size": 4956,
-      "sha256": "23e523bb00c36b76"
+      "size": 5473,
+      "sha256": "efde4cfec855f5b4"
     },
     "apps/frontend/src/shared/application/guards.ts": {
-      "size": 3599,
-      "sha256": "2becf08d6dd1a29c"
+      "size": 4326,
+      "sha256": "0bd0daaa3e7841d9"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
       "size": 6524,
@@ -405,12 +405,12 @@
       "sha256": "cc10dbf98e8ed353"
     },
     "apps/frontend/src/shared/application/router.test.ts": {
-      "size": 8097,
-      "sha256": "ee8621d8b0bb9d7b"
+      "size": 9418,
+      "sha256": "4c9ddc5897d997ce"
     },
     "apps/frontend/src/shared/application/router.ts": {
-      "size": 7337,
-      "sha256": "ea2b4209f00cdf89"
+      "size": 8156,
+      "sha256": "739a2a9f83cff345"
     },
     "apps/frontend/src/shared/application/testing.ts": {
       "size": 3660,
@@ -485,12 +485,12 @@
       "sha256": "441e723cdaf72bb9"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.test.ts": {
-      "size": 887,
-      "sha256": "d5baa2b3f0a0ff9d"
+      "size": 2057,
+      "sha256": "cc31b09079bbe4f8"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.vue": {
-      "size": 798,
-      "sha256": "15f20601c783988b"
+      "size": 1463,
+      "sha256": "bd6664d42692d6c5"
     },
     "apps/frontend/src/shared/system/ForbiddenPage.test.ts": {
       "size": 600,
@@ -509,20 +509,20 @@
       "sha256": "82f92b3b31372eb7"
     },
     "apps/frontend/src/shared/system/SignInPage.test.ts": {
-      "size": 1472,
-      "sha256": "034c1568c0dfddc2"
+      "size": 2113,
+      "sha256": "57cc15ffb3da49dc"
     },
     "apps/frontend/src/shared/system/SignInPage.vue": {
-      "size": 1855,
-      "sha256": "c4514b5af60f78de"
+      "size": 1838,
+      "sha256": "d1f4462c98bedad4"
     },
     "apps/frontend/src/test/setup.ts": {
       "size": 1035,
       "sha256": "53363b185599bcc8"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
-      "size": 6461,
-      "sha256": "b22634a701461d61"
+      "size": 6630,
+      "sha256": "b5865e9ac543af05"
     },
     "apps/frontend/tests/e2e/health.ts": {
       "size": 817,
@@ -1005,7 +1005,7 @@
       "sha256": "459f95079ae5c647"
     },
     "services/api/.copier-answers.yml": {
-      "size": 580,
+      "size": 543,
       "sha256": "<version-dependent>"
     },
     "services/api/.env.example": {
@@ -1609,7 +1609,7 @@
       "sha256": "70e944b44e732aa4"
     },
     "tests/e2e/.copier-answers.yml": {
-      "size": 609,
+      "size": 572,
       "sha256": "<version-dependent>"
     },
     "tests/e2e/Dockerfile": {

@@ -331,16 +331,25 @@ def _check_routing(fc: FrontendConfig) -> None:
             raise ValueError(f"routing.{key} needs include_auth.")
     # A landing route that is also a system destination loops: a signed-in visit of
     # the sign-in route goes to the landing route, which is the sign-in route again.
+    names: dict[str, str] = {}
     for key in ROUTING_KEYS[1:]:
         if key in _AUTH_DESTINATIONS and not fc.include_auth:
             continue
         value = routing.get(key, BUILTIN)
-        name = BUILTIN_ROUTE_NAMES[key] if value == BUILTIN else value
-        if landing == name:
+        names[key] = BUILTIN_ROUTE_NAMES[key] if value == BUILTIN else value
+        if landing == names[key]:
             raise ValueError(
                 f"routing.landing {landing!r} is also the {key} destination; the guards "
                 "would send a visit back and forth between them. Name another route."
             )
+    # So does a forbidden destination that is the sign-in route: a signed-in visit
+    # without the role goes there, and a signed-in visit of the sign-in route goes back.
+    if "sign_in" in names and names["forbidden"] == names["sign_in"]:
+        raise ValueError(
+            f"routing.forbidden {names['forbidden']!r} is also the sign_in destination; "
+            "the guards would send a signed-in visit without the role back and forth "
+            "between it and the landing route. Name another route."
+        )
 
 
 def _check_auth(fc: FrontendConfig) -> None:

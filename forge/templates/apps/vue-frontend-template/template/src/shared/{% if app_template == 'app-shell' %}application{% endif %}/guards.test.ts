@@ -11,6 +11,8 @@ const routes = [
   { path: '/stuck', name: 'stuck', component: Page },
   { path: '/open', name: 'open', component: Page },
   { path: '/login', name: 'login', component: Page },
+  // A public route, as the factory registers one, that also requires a role.
+  { path: '/staff', name: 'staff', component: Page, meta: { requiresAuth: false, requiresRole: 'admin' } },
   {
     path: '/area',
     component: Page,
@@ -108,6 +110,13 @@ describe('installGuards', () => {
     const router = build(testAuth(false).auth, { landing: 'start', sign_in: 'login' })
     await router.push('/area/public')
     expect(router.currentRoute.value.name).toBe('area-public')
+  })
+
+  it('takes a role as a sign-in a signed-out visit lacks, even on a public route', async () => {
+    const router = build(testAuth(false).auth, { landing: 'start', sign_in: 'login' })
+    await router.push('/open')
+    await router.push('/staff')
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/staff')
   })
 
   it('enters auth_stuck without waiting for the sign-in a second time', { timeout: 2_000 }, async () => {

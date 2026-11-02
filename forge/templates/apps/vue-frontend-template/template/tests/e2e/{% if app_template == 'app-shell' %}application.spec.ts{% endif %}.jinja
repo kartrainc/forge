@@ -53,17 +53,19 @@ if (application.builtin.includes('not_found')) test('an unknown address opens th
 });
 
 // The configuration names a sub-menu item with a route: opening its parent and the item
-// leaves the landing route for that route, and the parent stays open on it.
+// opens that route (the address its link names, which may be the landing route's own),
+// and the parent stays open on it.
 if (subMenuDestination) test('a sub-menu item opens its route and keeps its parent open', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await mockSession(page);
   await page.goto('/');
   const main = page.getByRole('navigation', { name: 'Main' });
-  const before = page.url();
   await main.getByRole('button', { name: subMenuDestination.parent.label }).click();
-  await main.getByRole('link', { name: subMenuDestination.child.label }).click();
-  await expect(page).not.toHaveURL(before);
+  const link = main.getByRole('link', { name: subMenuDestination.child.label });
+  const href = await link.getAttribute('href');
+  await link.click();
+  await expect(page).toHaveURL(new URL(href!, page.url()).href);
   await expect(main.getByRole('link', { name: subMenuDestination.child.label })).toBeVisible();
   await expect(page.getByText('Page not found')).toHaveCount(0);
   expect(errors).toEqual([]);
@@ -76,10 +78,11 @@ if (placeholder) test('an item without a destination opens the placeholder route
   await mockSession(page);
   await page.goto('/');
   const main = page.getByRole('navigation', { name: 'Main' });
-  const before = page.url();
   await main.getByRole('button', { name: placeholder.parent.label }).click();
-  await main.getByRole('link', { name: placeholder.child.label }).click();
-  await expect(page).not.toHaveURL(before);
+  const link = main.getByRole('link', { name: placeholder.child.label });
+  const href = await link.getAttribute('href');
+  await link.click();
+  await expect(page).toHaveURL(new URL(href!, page.url()).href);
   await expect(page.getByText('Page not found')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
