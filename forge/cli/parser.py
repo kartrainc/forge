@@ -58,10 +58,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--suite", choices=["unit", "integration", "e2e", "all"], default="all")
     p.add_argument(
-        "--subject",
+        "--subject", help="Run tests for one service or frontend from --quality inventory."
+    )
+    p.add_argument(
+        "--subjects",
         help=(
-            "Run tests for one service or frontend from --quality inventory; with --quality coverage, "
-            "a comma-separated list gates only those subjects (a CI that tested a subset)."
+            "With --quality coverage: a comma-separated list of subjects to gate (a CI that tested a "
+            "subset); absent, every subject is gated."
         ),
     )
     p.add_argument(

@@ -633,26 +633,23 @@ def test_cli_execution_dispatch(project, monkeypatch, capsys, operation):
 
 
 @pytest.mark.parametrize(
-    ("subject", "only"), [(None, None), ("api", {"api"}), ("api, web", {"api", "web"})]
+    ("subjects", "only"), [(None, None), ("api", {"api"}), ("api, web", {"api", "web"})]
 )
-def test_coverage_cli_passes_the_selected_subjects(project, monkeypatch, capsys, subject, only):
+def test_coverage_cli_passes_the_selected_subjects(project, monkeypatch, capsys, subjects, only):
     from forge.quality import coverage
 
     seen = {}
     monkeypatch.setattr(coverage, "evaluate", lambda *a, **k: seen.update(k) or {"passed": True})
     args = argparse.Namespace(
-        quality="coverage", project_path=str(project), suite="all", subject=subject, base_ref=None
+        quality="coverage",
+        project_path=str(project),
+        suite="all",
+        subject="ignored-as-before",
+        subjects=subjects,
+        base_ref=None,
     )
     assert run_quality(args) == 0
     assert seen["only"] == only
-
-
-def test_test_cli_refuses_a_subject_list(project, capsys):
-    args = argparse.Namespace(
-        quality="test", project_path=str(project), suite="all", subject="api,web"
-    )
-    assert run_quality(args) == 12
-    assert "a list is for --quality coverage" in json.loads(capsys.readouterr().out)["error"]
 
 
 # -- Go ---------------------------------------------------------------------

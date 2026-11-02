@@ -163,17 +163,20 @@ passes. See [capability limits](../reference/limitations.md).
 ### Subset runs
 
 A CI that tests only the subjects a change touches cannot hand the gate every
-subject's reports. `--quality coverage --subject api,web` gates the named
+subject's reports. `--quality coverage --subjects api,web` gates the named
 subjects alone, each in full (all three suites, every source file, strictly
 greater than 80% on changed lines):
 
 - a backend or frontend not named needs no report and is listed under `skipped`;
-- a shared package is gated when a named subject's reports exercise it, and
-  skipped otherwise;
-- reports of subjects not named are ignored; an unknown name or an empty list
-  fails.
+- a shared package is gated when it is named or a named subject's reports
+  exercise it, from every report present; unnamed, it requires coverage only of
+  the files the change touched, since its other files may be exercised by
+  consumers the run did not test;
+- reports of subjects not named count only toward shared packages; an unknown
+  name or an empty list fails.
 
-Without `--subject` every subject is gated, as above. Run the full gate where a
+Without `--subjects` every subject is gated, as above, and `--subject` keeps its
+meaning for `--quality test`. Run the full gate where a
 change merges (for instance on every push to the integration branch): a
 subset run proves only the subjects it names.
 

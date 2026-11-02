@@ -481,7 +481,9 @@ def test_only_gates_the_named_subjects(sources):
     root, source = sources
     _, targets = _second_service(root)
     reports = reports_for(root, source)  # api tested; web never ran
-    assert not evaluate(root, reports, targets)["passed"]  # the full gate still needs web
+    full = evaluate(root, reports, targets)
+    assert not full["passed"]  # the full gate still needs web
+    assert set(full) == {"passed", "subjects", "violations"}  # its result keeps its shape
     result = evaluate(root, reports, targets, only={"api"})
     assert result["passed"], result["violations"]
     assert [s["subject"] for s in result["subjects"]] == ["api"]
@@ -528,6 +530,52 @@ def test_only_gates_a_shared_package_a_named_subject_exercised(sources):
     result = evaluate(root, web_reports, targets, only={"web"})
     assert result["passed"], result["violations"]
     assert sorted(result["skipped"]) == ["api", "core"]
+
+
+def _two_consumers_of_core(root, source):
+    """api covers core/src/a.py, web covers core/src/b.py: each file of the shared package by one consumer."""
+    web_reports, targets = _second_service(root)
+    targets = targets + [{"name": "core", "path": "sdks/core", "shared": True}]
+    core = root / "sdks/core/src"
+    core.mkdir(parents=True)
+    for name in ("a", "b"):
+        (core / f"{name}.py").write_text(f"{name} = 1\n", encoding="utf-8")
+    api_reports = reports_for(root, source, 10)
+    for reports, name in ((api_reports, "a"), (web_reports, "b")):
+        for report in reports:
+            report["files"][f"sdks/core/src/{name}.py"] = {
+                "sha256": digest(core / f"{name}.py"),
+                "lines": {1: 1},
+            }
+    return api_reports, web_reports, targets
+
+
+def test_an_unnamed_shared_package_requires_only_its_changed_files(sources, monkeypatch):
+    root, source = sources
+    api_reports, _, targets = _two_consumers_of_core(root, source)
+    # api alone ran: core/src/b.py (web's) has no report in this run
+    monkeypatch.setattr("forge.quality.coverage.changed_lines", lambda root, base: {})
+    result = evaluate(root, api_reports, targets, base_ref="main", only={"api"})
+    assert result["passed"], result["violations"]
+    # the change touched b.py: it must be covered by this run
+    monkeypatch.setattr(
+        "forge.quality.coverage.changed_lines", lambda root, base: {"sdks/core/src/b.py": {1}}
+    )
+    result = evaluate(root, api_reports, targets, base_ref="main", only={"api"})
+    assert "core: source omitted from coverage: sdks/core/src/b.py" in result["violations"]
+
+
+def test_every_report_present_feeds_a_shared_package(sources):
+    root, source = sources
+    api_reports, web_reports, targets = _two_consumers_of_core(root, source)
+    reports = [*api_reports, *web_reports]
+    # web's reports are not gated, but they cover core's other file
+    assert evaluate(root, reports, targets, only={"api"})["passed"]
+    # a shared package named alone is gated from its consumers' reports, in full
+    result = evaluate(root, reports, targets, only={"core"})
+    assert result["passed"], result["violations"]
+    assert [s["subject"] for s in result["subjects"]] == ["core"]
+    assert not evaluate(root, api_reports, targets, only={"core"})["passed"]  # b.py omitted
 
 
 def test_only_refuses_unknown_and_empty_selections(sources):

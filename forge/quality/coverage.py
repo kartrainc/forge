@@ -199,9 +199,12 @@ def evaluate(
     describe the exact source currently on disk and every declared source.
 
     ``only`` gates the named subjects alone, for a CI that tested a subset: the
-    others need no report and are listed as skipped, their reports are ignored,
-    and a shared package is gated when a named subject's reports exercise it.
-    ``None`` gates every subject.
+    others need no report and are listed as skipped, and their reports count
+    only toward shared packages. A shared package is gated when it is named or
+    a named subject's reports exercise it, from every report present; unnamed,
+    it requires coverage only of its files the change touched, since the rest
+    may be exercised by consumers the run did not test. ``None`` gates every
+    subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
@@ -215,18 +218,25 @@ def evaluate(
         for report in reports:
             if report.get("subject") not in known:
                 failures.append(f"Unknown report subject: {report.get('subject')}")
+    # every report present feeds the shared packages; only the named subjects' are gated
+    shared_sources = reports
+    if only is not None:
+        shared_sources = [report for report in reports if report.get("subject") in known]
         reports = [report for report in reports if report.get("subject") in only]
     # Shared runtime packages are independently gated from the actual tests
     # exercising them. Never let a well-tested service hide an untested SDK.
     expanded = list(reports)
+    exercised: set[str] = set()
     for subject in subjects:
         if not subject.get("shared"):
             continue
         prefix = subject["path"] + "/"
+        if any(p.startswith(prefix) for report in reports for p in report.get("files", {})):
+            exercised.add(subject["name"])
         for suite in required_suites:
             files: dict = {}
             tests = 0
-            for report in reports:
+            for report in shared_sources:
                 if report.get("suite") != suite:
                     continue
                 matching = {
@@ -258,7 +268,6 @@ def evaluate(
         for report in reports:
             if report.get("subject") not in known:
                 failures.append(f"Unknown report subject: {report.get('subject')}")
-    exercised = {report.get("subject") for report in expanded}
     for subject in subjects:
         name, subject_path = subject["name"], subject["path"]
         if (
@@ -316,6 +325,9 @@ def evaluate(
             if suite not in seen:
                 failures.append(f"{name}: missing required {suite} report")
         inventory = source_inventory(root, subject_path)
+        if only is not None and name not in only and delta is not None:
+            # an unnamed shared package: its untouched files may be covered by consumers this run did not test
+            inventory &= set(delta)
         for missing in sorted(inventory - merged.keys()):
             failures.append(f"{name}: source omitted from coverage: {missing}")
         total = covered = changed = changed_covered = 0
@@ -352,4 +364,7 @@ def evaluate(
         )
     if not subjects:
         failures.append("No coverage subjects declared")
-    return {"passed": not failures, "subjects": metrics, "skipped": skipped, "violations": failures}
+    result = {"passed": not failures, "subjects": metrics, "violations": failures}
+    if only is not None:
+        result["skipped"] = skipped
+    return result

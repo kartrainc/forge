@@ -13,8 +13,8 @@ Today's behaviour:
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| CLI | `forge/cli/commands/quality.py:44-54` | loads every `.forge/coverage/*/*.json`, calls `evaluate(root, reports, subjects(recipe, root), base_ref=...)`; `--subject` is ignored here |
-| `--subject` | `forge/cli/parser.py:60-62` | one string, used by `--quality test` (`runner.py:34-44`) and `--quality resolve` |
+| CLI | `forge/cli/commands/quality.py:44-54` | loads every `.forge/coverage/*/*.json`, calls `evaluate(root, reports, subjects(recipe, root), base_ref=...)`; `--subjects` is ignored here |
+| `--subjects` | `forge/cli/parser.py:60-62` | one string, used by `--quality test` (`runner.py:34-44`) and `--quality resolve` |
 | subjects | `forge/quality/model.py:264-321` | backends (`services/<name>`), active frontends (`apps/<name>`), and shared packages found on disk (`packages/`, `sdks/`, …, `shared: True`) |
 | gate | `forge/quality/coverage.py:186-331` | builds shared subjects' reports from the other reports by path prefix (206-241); then, for every subject: all three suites present (291-293), every source file covered (294-296), changed lines > 80% (309-317) |
 
@@ -22,10 +22,10 @@ The changed lines (`--base-ref`) only narrow the > 80% check; they never choose 
 
 ## Change
 
-`--quality coverage --subject a,b`: gate the named subjects only. Without `--subject`, nothing changes.
+`--quality coverage --subjects a,b`: gate the named subjects only. Without `--subjects`, nothing changes.
 
 ```
-forge/cli/parser.py                  --subject help: one subject for test/resolve, a comma-separated list for coverage
+forge/cli/parser.py                  new --subjects (coverage only); --subject unchanged
 forge/cli/commands/quality.py        parse the list, pass subjects=... to evaluate
 forge/quality/coverage.py            evaluate(..., only: set[str] | None = None)
 tests/test_generated_quality.py      the cases below
@@ -40,16 +40,16 @@ CHANGELOG.md                         one entry
 | --- | --- | --- |
 | a named subject | gated in full | gated in full (three suites, source omission, > 80% on changed lines) |
 | a backend or frontend not named | gated, fails without reports | skipped: no report required, no metric |
-| a shared package | gated from every consumer's reports | gated only when a named subject's reports cover files under its path; otherwise skipped |
-| a report of a subject not named | merged | ignored (an artifact of an earlier leg is harmless) |
+| a shared package | gated from every consumer's reports | gated when named or exercised by a named subject, from every report present; unnamed, only the files the change touched must be covered; otherwise skipped |
+| a report of a subject not named | merged | counts only toward shared packages |
 | a report of a subject the recipe does not declare | fails `Unknown report subject` | unchanged |
 | a name in `only` the recipe does not declare | — | fails `Unknown subject: <name>` (a typo never passes silently) |
 | `only` empty after parsing | — | fails `No coverage subjects selected` |
-| a named subject that is shared | — | allowed: gated from the named consumers' reports, as today |
+| a named subject that is shared | — | gated in full from every consumer report present |
 
 A shared package is kept when a named consumer exercised it, so a change to `packages/platform-auth` still gates the
 package through the services that ran. A package no named subject touches has no reports in a subset run and is
-skipped instead of failing; the full run (no `--subject`) still requires it.
+skipped instead of failing; the full run (no `--subjects`) still requires it.
 
 The result keeps its shape: `subjects` lists the gated subjects only; a new `skipped` list names the others, so a
 report shows what the run did not cover.
@@ -67,25 +67,25 @@ report shows what the run did not cover.
   - an unknown name fails;
   - an empty list fails;
   - reports of unnamed subjects do not fail the gate.
-- **CLI:** `--quality coverage --subject a,b` passes the set; `--quality test --subject a,b` is refused (test stays
-  one subject).
+- **CLI:** `--quality coverage --subjects a,b` passes the set; without `--subjects` (even with `--subject`) the full
+  gate runs, as before.
 
 ## Consumers
 
 | Repo | Change |
 | --- | --- |
 | shipyard `forge-quality.yml` | input `subjects` (space- or comma-separated); for `gates: coverage`, `--subject "$SUBJECTS"` when set |
-| kartra-ai `.github/workflows/ci.yml` | `plan`: drop "one forge subject touched brings every forge leg"; new output `subjects` (the touched units' `forge.subject`); job `coverage` passes it. A push to `develop` keeps every leg and no `--subject` |
+| kartra-ai `.github/workflows/ci.yml` | `plan`: drop "one forge subject touched brings every forge leg"; new output `subjects` (the touched units' `forge.subject`); job `coverage` passes it. A push to `develop` keeps every leg and no `--subjects` |
 | kartra-ai | forge pin bump (with 6a, the Node runtime role, PR #17) |
 
 ## Why it is safe
 
 - **A skipped subject did not change:** its totals and source-omission checks cannot regress in that run.
-- **The full gate still runs at merge:** every push to `develop` runs every leg and the gate without `--subject`.
+- **The full gate still runs at merge:** every push to `develop` runs every leg and the gate without `--subjects`.
 - **Shared code changes still run everything:** `libs/**`, `packages/**` and `contracts/**` are in every kartra-ai
   unit's paths, so such a change still selects every subject.
 - **Opt-in:** the default stays the strict, whole-project gate. Another consumer is unaffected until it passes
-  `--subject`.
+  `--subjects`.
 
 ## Effort
 
