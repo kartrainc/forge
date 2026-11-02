@@ -167,16 +167,16 @@ subject's reports. `--quality coverage --coverage-subjects api,web` gates the na
 subjects alone, each in full (all three suites, every source file, strictly
 greater than 80% on changed lines):
 
-- a backend or frontend not named needs no report and is listed under `skipped`;
+- a backend or frontend not named needs no report and is listed under `skipped`,
+  unless the change touched its sources: then the gate fails and asks for it to
+  be named;
 - a shared package is gated when it is named, when a named subject's reports
   exercise it, or when the change touched its gated sources (not its tests),
-  from every report present; touched but reached by no report of the run, it
-  fails with a message to name a subject whose tests reach it;
-  unnamed, it requires coverage only of the files the change touched, since its
-  other files may be exercised by consumers the run did not test. Once gated, it
-  needs every required suite like any subject: a package the named subjects reach
-  only from their unit tests fails with `<package>: missing required e2e report`
-  (name the consumers whose suites reach it, or cover it there);
+  from every report present. Unnamed, it requires coverage only of the files the
+  change touched, and every required suite only when the change touched it: a
+  package the named subjects merely load is checked for fresh, consistent
+  reports, not for an e2e run they did not do. Touched but reached by no report
+  of the run, it fails with a message to name a subject whose tests reach it;
 - reports of subjects not named count only toward shared packages; an unknown
   name or an empty list fails.
 

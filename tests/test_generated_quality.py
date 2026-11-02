@@ -544,7 +544,7 @@ def test_only_gates_a_shared_package_a_named_subject_exercised(sources, subset):
     )
     assert any("core: new-code coverage" in v for v in result["violations"])
     # only web runs, and web never touches core: core is skipped, not failed
-    result = subset(root, web_reports, targets, {"web"})
+    result = subset(root, web_reports, targets, {"web"}, {})
     assert result["passed"], result["violations"]
     assert sorted(result["skipped"]) == ["api", "core"]
 
@@ -589,10 +589,10 @@ def test_every_report_present_feeds_a_shared_package(sources, subset):
     # web's reports are not gated, but they cover core's other file
     assert subset(root, reports, targets, {"api"})["passed"]
     # a shared package named alone is gated from its consumers' reports, in full
-    result = subset(root, reports, targets, {"core"})
+    result = subset(root, reports, targets, {"core"}, {})
     assert result["passed"], result["violations"]
     assert [s["subject"] for s in result["subjects"]] == ["core"]
-    assert not subset(root, api_reports, targets, {"core"})["passed"]  # b.py omitted
+    assert not subset(root, api_reports, targets, {"core"}, {})["passed"]  # b.py omitted
 
 
 def test_a_changed_shared_package_is_gated_even_when_unexercised(sources, subset):
@@ -635,6 +635,56 @@ def test_a_changed_shared_package_is_gated_from_reports_present(sources, subset)
     )
     assert result["passed"], result["violations"]
     assert "core" in [s["subject"] for s in result["subjects"]]
+
+
+def test_an_exercised_shared_package_needs_no_suite_the_change_did_not_reach(sources, subset):
+    root, source = sources
+    _, targets = _second_service(root)
+    core = root / "sdks/core/src/lib.py"
+    core.parent.mkdir(parents=True)
+    core.write_text("first = 1\n", encoding="utf-8")
+    targets = targets + [{"name": "core", "path": "sdks/core", "shared": True}]
+    api_reports = reports_for(root, source, 10)
+    api_reports[0]["files"]["sdks/core/src/lib.py"] = {"sha256": digest(core), "lines": {1: 1}}
+    # api reaches core from its unit tests alone, and the change did not touch core
+    result = subset(root, api_reports, targets, {"api"})
+    assert result["passed"], result["violations"]
+    # once the change touches core, every suite is required again
+    result = subset(
+        root, api_reports, targets, {"api"}, {**API_CHANGE, "sdks/core/src/lib.py": {1}}
+    )
+    assert "core: missing required integration report" in result["violations"]
+
+
+def test_an_exercised_shared_package_may_be_reached_by_a_file_without_executable_lines(
+    sources, subset
+):
+    root, source = sources
+    _, targets = _second_service(root)
+    types = root / "sdks/core/src/types.py"
+    types.parent.mkdir(parents=True)
+    types.write_text("", encoding="utf-8")
+    (root / "sdks/core/src/lib.py").write_text("x = 1\n", encoding="utf-8")
+    targets = targets + [{"name": "core", "path": "sdks/core", "shared": True}]
+    api_reports = reports_for(root, source, 10)
+    for report in api_reports:
+        report["files"]["sdks/core/src/types.py"] = {"sha256": digest(types), "lines": {}}
+    # api loads core only through a file with no executable line; the change did not touch core
+    result = subset(root, api_reports, targets, {"api"})
+    assert result["passed"], result["violations"]
+
+
+def test_an_unnamed_subject_the_change_touched_fails(sources, subset):
+    root, source = sources
+    _, targets = _second_service(root)
+    # the change edits api and web; the caller names api only
+    changed = {**API_CHANGE, "services/web/src/page.py": {1}}
+    result = subset(root, reports_for(root, source), targets, {"api"}, changed)
+    assert not result["passed"]
+    assert result["violations"] == [
+        "web: the change touched services/web/src/page.py; name web in --coverage-subjects"
+    ]
+    assert "web" not in result["skipped"]
 
 
 def test_a_subset_needs_a_base(sources):

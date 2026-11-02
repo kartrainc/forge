@@ -203,10 +203,12 @@ def evaluate(
     only toward shared packages. A shared package is gated when it is named or
     a named subject's reports exercise it, from every report present; unnamed,
     it requires coverage only of its files the change touched, since the rest
-    may be exercised by consumers the run did not test; a shared package whose
-    gated sources the change touched is gated even when no named subject
-    exercises it, and fails when no report reaches it. A subset needs
-    ``base_ref``. ``None`` gates every subject.
+    may be exercised by consumers the run did not test, and needs every suite
+    and executable coverage only when the change touched its sources; a shared
+    package whose gated sources the change touched is gated even when no named
+    subject exercises it, and fails when no report reaches it. A backend or
+    frontend left off the list whose sources the change touched fails. A subset
+    needs ``base_ref``. ``None`` gates every subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
@@ -277,9 +279,14 @@ def evaluate(
         name, subject_path = subject["name"], subject["path"]
         touched = (
             sorted(source_inventory(root, subject_path) & set(delta))
-            if only is not None and delta is not None and subject.get("shared")
+            if only is not None and delta is not None
             else []
         )
+        if only is not None and name not in only and touched and not subject.get("shared"):
+            failures.append(
+                f"{name}: the change touched {', '.join(touched)}; name {name} in --coverage-subjects"
+            )
+            continue
         if (
             only is not None
             and name not in only
@@ -338,8 +345,9 @@ def evaluate(
                 "covered": stage_covered,
                 "total": stage_total,
             }
+        exercised_only = only is not None and name not in only and not touched
         for suite in required_suites:
-            if suite not in seen:
+            if suite not in seen and not exercised_only:
                 failures.append(f"{name}: missing required {suite} report")
         inventory = source_inventory(root, subject_path)
         if only is not None and name not in only and delta is not None:
@@ -361,7 +369,7 @@ def evaluate(
                 if delta is None or number in delta.get(rel, set()):
                     changed += 1
                     changed_covered += hits > 0
-        if not total:
+        if not total and not exercised_only:
             failures.append(f"{name}: no executable source coverage")
         # Integer arithmetic makes exactly 80% fail without rounding ambiguity.
         if changed and changed_covered * 100 <= changed * 80:
