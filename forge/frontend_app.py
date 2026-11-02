@@ -112,9 +112,14 @@ PAGE_EXTRAS: tuple[str, ...] = ("home", "profile", "settings")
 
 MENUS: tuple[str, ...] = ("primary", "account", "footer")
 
+#: Forge's session-timeout dialog, which an ``app-shell`` app receives only with
+#: ``auth.session_dialog: builtin``.
+SESSION_DIALOG_FRAGMENTS: frozenset[str] = frozenset({"platform_auth_session_dialog_vue"})
 #: The frontend fragments of forge's authentication runtime, which an app with
 #: ``auth.runtime: project`` does not receive.
-FORGE_AUTH_RUNTIME_FRAGMENTS: frozenset[str] = frozenset({"platform_auth_session_timeout_vue"})
+FORGE_AUTH_RUNTIME_FRAGMENTS: frozenset[str] = (
+    frozenset({"platform_auth_session_timeout_vue"}) | SESSION_DIALOG_FRAGMENTS
+)
 
 _KEBAB = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _ROUTE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -424,6 +429,22 @@ def session_dialog(fc: FrontendConfig) -> str:
         return BUILTIN
     default = BUILTIN if auth_runtime(fc) == "forge" else "project"
     return str((fc.auth or {}).get("session_dialog", default))
+
+
+def withheld_fragments(fc: FrontendConfig) -> frozenset[str]:
+    """The frontend fragments forge does not write into ``fc``: none for ``crud-app``.
+
+    An ``app-shell`` app with the project's authentication runtime takes none of
+    forge's, and one with a session dialog other than forge's takes no dialog.
+    """
+    if not is_app_shell(fc):
+        return frozenset()
+    withheld: frozenset[str] = frozenset()
+    if auth_runtime(fc) == "project":
+        withheld |= FORGE_AUTH_RUNTIME_FRAGMENTS
+    if session_dialog(fc) != BUILTIN:
+        withheld |= SESSION_DIALOG_FRAGMENTS
+    return withheld
 
 
 def resolved_extras(fc: FrontendConfig) -> tuple[str, ...]:

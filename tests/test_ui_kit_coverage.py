@@ -89,7 +89,7 @@ def _shadcn_dependencies(fragment_dirs: list[Path], kit: str = "nuxt-ui") -> lis
 def test_the_lint_sees_the_vue_fragments() -> None:
     # Guard against a lint that silently checks nothing.
     names = set(_vue_fragments())
-    assert {"platform_auth_session_timeout_vue", "mcp_ui", "component_Checkbox"} <= names
+    assert {"platform_auth_session_dialog_vue", "mcp_ui", "component_Checkbox"} <= names
     assert len(names) >= 15
 
 
@@ -109,15 +109,13 @@ def test_the_shadcn_markers_catch_a_shadcn_tree() -> None:
 
 
 def test_a_kit_tree_replaces_the_shared_files_it_names() -> None:
-    # The session-timeout fragment ships its dialog for both kits.
-    (fragment_dir,) = _vue_fragments()["platform_auth_session_timeout_vue"]
+    # The session-timeout dialog's fragment ships the dialog for both kits.
+    (fragment_dir,) = _vue_fragments()["platform_auth_session_dialog_vue"]
     nuxt = dict(_rendered_files(fragment_dir, "nuxt-ui"))
     shadcn = dict(_rendered_files(fragment_dir, "shadcn"))
     modal = "src/features/auth/components/SessionTimeoutModal.vue"
     assert f"files-nuxt-ui/{modal}" in nuxt and f"files/{modal}" not in nuxt
     assert f"files/{modal}" in shadcn and f"files-nuxt-ui/{modal}" not in shadcn
-    composable = "files/src/shared/composables/useSessionTimeout.ts"
-    assert composable in nuxt and composable in shadcn
     assert "<UModal" in nuxt[f"files-nuxt-ui/{modal}"].read_text(encoding="utf-8")
 
 

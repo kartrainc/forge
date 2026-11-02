@@ -558,3 +558,46 @@ def test_an_update_refuses_to_drop_a_file_beside_its_sidecar(tmp_path: Path) -> 
     with pytest.raises(ValueError, match="Resolve existing update conflict first"):
         update_owned_project(root)
     assert (root / DISCONTINUED).is_file()
+
+
+# --- the review of #18 (2026-11-02) --------------------------------------------------
+
+
+def _auth_project(frontend: FrontendConfig) -> ProjectConfig:
+    """A project that generates the auth stack, so the session-timeout fragments apply."""
+    backend = BackendConfig(name="api", language=BackendLanguage.PYTHON, server_port=5010)
+    return ProjectConfig(project_name="shell", backends=[backend], frontends=[frontend], include_keycloak=True)
+
+
+_DIALOG = (
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.vue",
+    "apps/frontend/src/features/auth/components/SessionTimeoutModal.test.ts",
+)
+
+
+@pytest.mark.parametrize(("dialog", "takes_it"), [("builtin", True), ("project", False)])
+def test_forge_writes_its_session_dialog_only_where_it_mounts_it(tmp_path: Path, dialog: str, takes_it: bool) -> None:
+    root = _render(_auth_project(_frontend(auth={"session_dialog": dialog})), tmp_path)
+    assert (root / "apps/frontend/src/shared/composables/useSessionTimeout.ts").is_file()
+    for rel in _DIALOG:
+        assert (root / rel).is_file() == takes_it, rel
+    app_vue = (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
+    assert ("SessionTimeoutModal" in app_vue) == takes_it
+
+
+def test_an_update_to_the_projects_session_dialog_takes_forges_back(tmp_path: Path) -> None:
+    root = _render(_auth_project(_frontend(auth={"session_dialog": "builtin"})), tmp_path)
+    recipe = root / ".forge" / "quality.json"
+    data = json.loads(recipe.read_text(encoding="utf-8"))
+    data["config"]["frontend"]["auth"] = {"session_dialog": "project"}
+    recipe.write_text(json.dumps(data), encoding="utf-8")
+
+    report = update_owned_project(root)
+
+    assert report["passed"], report
+    for rel in _DIALOG:
+        assert not (root / rel).exists(), rel
+    assert "SessionTimeoutModal" not in (root / "apps/frontend/src/app/App.vue").read_text(encoding="utf-8")
+    recorded = read_forge_toml(root / "forge.toml").provenance
+    assert "apps/frontend/src/shared/composables/useSessionTimeout.ts" in recorded
+    assert not set(_DIALOG) & set(recorded)

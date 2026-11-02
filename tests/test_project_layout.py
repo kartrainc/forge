@@ -268,9 +268,18 @@ def test_rendered_vue_project_keeps_frontend_fragments_in_the_app(
     _assert_frontend_layout(vue_project, _VUE_FRONTEND_FILES)
     provenance = read_forge_toml(vue_project / "forge.toml").provenance
     assert provenance[_VUE_FRONTEND_FILES[0]]["fragment_name"] == (
+        "platform_auth_session_dialog_vue"
+    )
+    assert provenance[_VUE_FRONTEND_FILES[1]]["fragment_name"] == (
         "platform_auth_session_timeout_vue"
     )
-    _assert_preview_matches(vue_project, monkeypatch, "platform_auth_session_timeout_vue", "mcp_ui")
+    _assert_preview_matches(
+        vue_project,
+        monkeypatch,
+        "platform_auth_session_timeout_vue",
+        "platform_auth_session_dialog_vue",
+        "mcp_ui",
+    )
 
 
 def test_rendered_svelte_project_keeps_frontend_fragments_in_the_app(

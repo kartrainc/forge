@@ -199,13 +199,20 @@ def test_a_root_fragment_is_applied_once_with_several_apps(tmp_path: Path, monke
 
 
 def test_session_timeout_lands_in_each_app_with_its_kit(tmp_path: Path) -> None:
-    frag = FRAGMENT_REGISTRY["platform_auth_session_timeout_vue"]
-    tree = Path(frag.implementations[BackendLanguage.PYTHON].fragment_dir)
-    rf = ResolvedFragment(fragment=frag, target_backends=(BackendLanguage.PYTHON,))
+    # The composable's fragment and the dialog's, a fragment of its own (ADR-015).
+    timeout, dialog = (
+        FRAGMENT_REGISTRY[name]
+        for name in ("platform_auth_session_timeout_vue", "platform_auth_session_dialog_vue")
+    )
+    tree = Path(dialog.implementations[BackendLanguage.PYTHON].fragment_dir)
+    rfs = tuple(
+        ResolvedFragment(fragment=frag, target_backends=(BackendLanguage.PYTHON,))
+        for frag in (timeout, dialog)
+    )
     project_root = tmp_path / "proj"
     shadcn, nuxt = _apps(project_root, ("frontend", _VUE, "shadcn"), ("admin", _VUE, "nuxt-ui"))
 
-    apply_project_features(project_root, (rf,), quiet=True, frontends=[shadcn, nuxt])
+    apply_project_features(project_root, rfs, quiet=True, frontends=[shadcn, nuxt])
 
     modal = Path("src/features/auth/components/SessionTimeoutModal.vue")
     assert (shadcn.app_dir / modal).read_bytes() == (tree / "files" / modal).read_bytes()

@@ -15,6 +15,7 @@ fragments = [
     "platform_auth_sdk_rust",
     "platform_auth_sdk_go",
     "platform_auth_session_timeout_vue",
+    "platform_auth_session_dialog_vue",
     "platform_auth_session_timeout_svelte",
     "platform_auth_session_timeout_flutter",
     "platform_auth_python_middleware",
