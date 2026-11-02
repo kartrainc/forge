@@ -107,7 +107,9 @@ const sidebarNarrow = computed(() => !sidebarWide.value)
 const sidebarMode = computed(() => (sidebarWide.value ? 'wide' : props.narrowSidebar === 'collapsed' ? 'icons' : 'menu'))
 const storageKey = `shell-${props.layout}`
 const collapsed = useLocalStorage(`${storageKey}-sidebar-collapsed`, false)
-const sidebarCollapsed = computed(() => sidebarMode.value === 'icons' || collapsed.value)
+// A project's `sidebar.collapsible: false` keeps the wide sidebar open: no edge toggle, no stored collapse.
+const sidebarCollapsible = computed(() => props.sidebar.collapsible !== false)
+const sidebarCollapsed = computed(() => sidebarMode.value === 'icons' || (sidebarCollapsible.value && collapsed.value))
 const asideCollapsed = useLocalStorage(`${storageKey}-aside-collapsed`, false)
 const asideOpen = ref(false)
 const menuOpen = ref(false)
@@ -149,10 +151,18 @@ const asideControl = computed<AsideControl>(() => ({
   toggle: toggleAside,
 }))
 
-/** The shell's `ui` classes with the project's after them, so tailwind-merge lets the project's win. */
+/**
+ * The shell's `ui` classes with the project's after them, so tailwind-merge lets the project's win. A
+ * project's function replaces a slot's classes in Nuxt UI, which then adds the plain ones after it: it
+ * gets the classes the shell would give, so it has the last word too.
+ */
 function mergeUi(own: Ui, project: Ui | undefined): Ui {
   const merged: Ui = { ...own }
-  for (const [slot, classes] of Object.entries(project ?? {})) merged[slot] = slot in own ? [own[slot], classes] : classes
+  for (const [slot, classes] of Object.entries(project ?? {})) {
+    if (!(slot in own)) merged[slot] = classes
+    else if (typeof classes === 'function') merged[slot] = (defaults: string) => (classes as (value: string) => string)(`${defaults} ${own[slot] as string}`)
+    else merged[slot] = [own[slot], classes]
+  }
   return merged
 }
 
@@ -177,22 +187,22 @@ const sidebarProps = computed(() => ({
 // A right-hand UDashboardSidebar puts its resize handle on its inner edge and resizes
 // towards the page; it draws the line to the page inside its own width. Folded, it keeps
 // its place at no width rather than leaving the page, so its content stays and a project
-// can animate the fold (the width) in its own CSS.
+// can animate the fold (the width) in its own CSS. The shell folds it with its width, not
+// with Nuxt UI's collapse: UDashboardSidebarCollapse collapses every collapsible sidebar
+// of the app through a global hook, and would fold the panel with the sidebar.
 const asideProps = computed(() => ({
   defaultSize: 22,
   minSize: 16,
   maxSize: 32,
   resizable: true,
   ...props.aside,
-  collapsible: true,
-  collapsedSize: 0,
-  // Nothing scrolls at no width, in either axis (a hidden y makes a visible x scroll): a
-  // scrollable region without focusable content (inert) is an axe failure.
-  ui: mergeUi({
-    root: 'flex min-h-0 min-w-0 border-s border-default data-[collapsed=true]:border-s-0',
-    body: asideCollapsed.value ? 'p-0 overflow-hidden' : 'p-0',
-    handle: 'block',
-  }, props.aside.ui as Ui | undefined),
+  collapsible: false,
+  // Folded: no width, no line and no handle; nothing scrolls, in either axis (a hidden y
+  // makes a visible x scroll): a scrollable region without focusable content (inert) is an
+  // axe failure.
+  ui: mergeUi(asideCollapsed.value
+    ? { root: 'flex min-h-0 min-w-0 w-0', body: 'p-0 overflow-hidden', handle: 'hidden lg:hidden' }
+    : { root: 'flex min-h-0 min-w-0 border-s border-default', body: 'p-0', handle: 'block' }, props.aside.ui as Ui | undefined),
 }))
 const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
 
@@ -217,9 +227,10 @@ function menuProps(isCollapsed: boolean) {
   <!--
     Nuxt UI stores a collapsible sidebar's size with its collapse, and a stored size wins
     over the configured one: only a size the user can change is stored. The shell stores
-    the collapse itself.
+    the collapse itself. The group reads `persistent` once, when it mounts: it follows
+    the project's setting, not the icons of a narrow screen, which are never stored.
   -->
-  <UDashboardGroup unit="rem" storage="local" :storage-key="storageKey" :persistent="!!sidebarProps.resizable" class="flex-col">
+  <UDashboardGroup unit="rem" storage="local" :storage-key="storageKey" :persistent="!!sidebar.resizable" class="flex-col">
     <header
       class="relative z-20 flex h-(--ui-header-height) shrink-0 items-center border-b border-default bg-default"
       :class="header.spacing ?? 'gap-3 px-4'"
@@ -283,7 +294,7 @@ function menuProps(isCollapsed: boolean) {
 
       <UDashboardPanel :id="`${layout}-main`" :ui="{ root: 'min-h-0 lg:not-last:border-e-0' }">
         <div class="relative flex min-h-0 flex-1 flex-col">
-          <template v-if="sidebarMode === 'wide'">
+          <template v-if="sidebarMode === 'wide' && sidebarCollapsible">
             <slot name="sidebar-toggle" :collapsed="collapsed" :toggle="toggleSidebar">
               <UTooltip :text="collapsed ? 'Expand menu' : 'Collapse menu'" :content="{ side: 'right' }">
                 <UButton
@@ -359,10 +370,9 @@ function menuProps(isCollapsed: boolean) {
           :id="`${layout}-aside`"
           v-bind="asideProps"
           side="right"
-          :collapsed="asideCollapsed"
+          :data-folded="asideCollapsed"
           :open="false"
           :toggle="false"
-          @update:collapsed="(value: boolean) => (asideCollapsed = value)"
           @update:open="() => {}"
         >
           <aside class="flex min-h-0 flex-1 flex-col" data-shell="aside" :inert="asideCollapsed || undefined">

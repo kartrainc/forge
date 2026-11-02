@@ -14,15 +14,29 @@ const layout = Object.keys(application.layouts)[0]!
 let wrapper: VueWrapper | undefined
 const original = window.matchMedia
 
-/** A screen `width` pixels wide: a `(min-width: …px)` query matches from its width, any other query does not. */
-function screen(width: number) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => {
+/**
+ * A screen `width` pixels wide: a `(min-width: …px)` query matches from its width, any other query does not.
+ * The function it returns resizes the screen, telling every query's listeners.
+ */
+function screen(width: number): (to: number) => void {
+  let current = width
+  const listeners: { query: string, listener: (event: { matches: boolean }) => void }[] = []
+  const matches = (query: string) => {
     const minWidth = /min-width:\s*(\d+)px/.exec(query)
-    return {
-      matches: minWidth ? width >= Number(minWidth[1]) : false, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
-      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
-    }
-  }) as never
+    return minWidth ? current >= Number(minWidth[1]) : false
+  }
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    get matches() {
+      return matches(query)
+    },
+    media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+    addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => listeners.push({ query, listener }),
+    removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  })) as never
+  return (to: number) => {
+    current = to
+    for (const { query, listener } of listeners) listener({ matches: matches(query) })
+  }
 }
 
 async function render(slots: Record<string, unknown> = {}, props: Record<string, unknown> = {}) {
@@ -148,6 +162,21 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(typeof menu.props('modelValue')).toBe('string')
   })
 
+  it('lets a project\'s ui function have the last word over the shell\'s classes', async () => {
+    const shell = await render({ aside: chat }, { aside: { ui: { root: (defaults: string) => `${defaults} border-s-0` } } })
+    const aside = rootOf(shell.get('[data-shell="aside"]').element)
+    expect(aside.classList).toContain('border-s-0')
+    expect(aside.classList).not.toContain('border-s')
+    expect(aside.classList).toContain('min-w-0') // the shell's own classes reach the function
+  })
+
+  it('offers no collapse for a sidebar the project made not collapsible', async () => {
+    localStorage.setItem(`shell-${layout}-sidebar-collapsed`, 'true')
+    const shell = await render({}, { sidebar: { collapsible: false } })
+    expect(shell.find('[data-shell="sidebar-toggle"]').exists()).toBe(false)
+    expect(rootOf(shell.get('nav[aria-label="Main"]').element).dataset.collapsed).toBe('false')
+  })
+
   it('sizes a sidebar and a right panel the user cannot resize as configured, over a size stored before', async () => {
     // Nuxt UI stores a collapsible sidebar's size: a size stored under an earlier default would win over a new one.
     localStorage.setItem(`shell-${layout}-sidebar-${layout}-sidebar`, JSON.stringify({ size: 16, collapsed: false }))
@@ -170,6 +199,24 @@ describe('the header-sidebar shell on a wide screen', () => {
     await shell.get('[data-shell="aside-toggle"]').trigger('click')
     expect(shell.find('[data-test="chat"]').exists()).toBe(true)
     expect(shell.find('button[aria-label="Expand sidebar"]').exists()).toBe(true)
+  })
+
+  it('leaves the right panel as it is when Nuxt UI\'s own control collapses the sidebar', async () => {
+    const shell = await render({ default: () => h(UDashboardSidebarCollapse), aside: chat })
+    const aside = () => rootOf(shell.get('[data-shell="aside"]').element)
+    const sidebar = () => rootOf(shell.get('nav[aria-label="Main"]').element)
+    await shell.get('button[aria-label="Collapse sidebar"]').trigger('click')
+    await flushPromises()
+    expect(sidebar().dataset.collapsed).toBe('true')
+    expect(localStorage.getItem(`shell-${layout}-sidebar-collapsed`)).toBe('true')
+    expect(aside().dataset.folded).toBe('false')
+    expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeUndefined()
+    await shell.get('button[aria-label="Expand sidebar"]').trigger('click')
+    await shell.get('[data-shell="aside-toggle"]').trigger('click')
+    await shell.get('button[aria-label="Collapse sidebar"]').trigger('click')
+    await shell.get('button[aria-label="Expand sidebar"]').trigger('click')
+    await flushPromises()
+    expect(aside().dataset.folded).toBe('true')
   })
 
   it('lets the project render the edge toggles', async () => {
@@ -231,20 +278,33 @@ describe('the header-sidebar shell on a wide screen', () => {
     const shell = await render({ aside: chat }, { aside: { resizable: false } })
     const root = () => rootOf(shell.get('[data-shell="aside"]').element)
     const toggle = () => shell.get('[data-shell="aside-toggle"]')
-    expect(root().dataset.collapsed).toBe('false')
+    expect(root().dataset.folded).toBe('false')
     expect(root().style.getPropertyValue('--width')).toBe('22rem')
+    expect(root().classList.contains('w-(--width)')).toBe(true)
     await toggle().trigger('click')
     expect(shell.find('[data-test="chat"]').exists()).toBe(true)
-    expect(root().dataset.collapsed).toBe('true')
-    expect(root().style.getPropertyValue('--width')).toBe('0rem')
-    expect(root().classList.contains('data-[collapsed=true]:border-s-0')).toBe(true) // no line at no width
+    expect(root().dataset.folded).toBe('true')
+    // no width and no line; the configured width stays for the unfold
+    expect(root().classList.contains('w-0')).toBe(true)
+    expect(root().classList.contains('w-(--width)')).toBe(false)
+    expect(root().classList.contains('border-s')).toBe(false)
+    expect(root().style.getPropertyValue('--width')).toBe('22rem')
     // nothing to scroll at no width: a scrollable region without focusable content fails axe
     expect(root().querySelector('[data-slot="body"]')!.classList.contains('overflow-hidden')).toBe(true)
     expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeDefined()
     await toggle().trigger('click')
-    expect(root().dataset.collapsed).toBe('false')
+    expect(root().dataset.folded).toBe('false')
+    expect(root().classList.contains('w-0')).toBe(false)
     expect(shell.get('[data-shell="aside"]').attributes('inert')).toBeUndefined()
     expect(root().querySelector('[data-slot="body"]')!.classList.contains('overflow-hidden')).toBe(false)
+  })
+
+  it('hides a resizable right panel\'s handle while it is folded', async () => {
+    const shell = await render({ aside: chat })
+    const root = () => rootOf(shell.get('[data-shell="aside"]').element)
+    expect(handleOf(root())!.classList.contains('block')).toBe(true)
+    await shell.get('[data-shell="aside-toggle"]').trigger('click')
+    expect(handleOf(root())!.classList.contains('lg:hidden')).toBe(true)
   })
 })
 
@@ -373,5 +433,15 @@ describe('the header-sidebar shell\'s breakpoints', () => {
     await flushPromises()
     expect(document.body.querySelectorAll('[role="dialog"]')).toHaveLength(1)
     expect(document.body.querySelector('[role="dialog"] [data-test="chat"]')).toBeNull()
+  })
+
+  it('stores a resizable sidebar\'s size once the screen widens, when the page opened on icons', async () => {
+    const resize = screen(600)
+    const shell = await render({}, { sidebar: { resizable: true }, narrowSidebar: 'collapsed' })
+    expect(rootOf(shell.get('nav[aria-label="Main"]').element).dataset.collapsed).toBe('true')
+    resize(1300)
+    await flushPromises()
+    expect(rootOf(shell.get('nav[aria-label="Main"]').element).dataset.collapsed).toBe('false')
+    expect(localStorage.getItem(`shell-${layout}-sidebar-${layout}-sidebar`)).not.toBeNull()
   })
 })
