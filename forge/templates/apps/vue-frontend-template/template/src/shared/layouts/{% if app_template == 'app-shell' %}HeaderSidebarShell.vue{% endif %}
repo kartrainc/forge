@@ -52,6 +52,11 @@ const props = withDefaults(defineProps<{
    * px-4 py-3 sm:px-6`): a project draws its own padding, and its footer's line and spacing.
    */
   page?: { main?: string, footer?: string }
+  /**
+   * Classes for the header's spacing and its actions' gap in place of the shell's own (`gap-3 px-4`; `gap-2`): a project
+   * sets its own sides and the space between the logo, the centre and the actions.
+   */
+  header?: { spacing?: string, actions?: string }
 }>(), {
   asideBadge: undefined,
   sidebar: () => ({}),
@@ -62,6 +67,7 @@ const props = withDefaults(defineProps<{
   asideButton: true,
   asideSlideover: () => ({}),
   page: () => ({}),
+  header: () => ({}),
 })
 
 defineSlots<{
@@ -215,7 +221,8 @@ function menuProps(isCollapsed: boolean) {
   -->
   <UDashboardGroup unit="rem" storage="local" :storage-key="storageKey" :persistent="!!sidebarProps.resizable" class="flex-col">
     <header
-      class="relative z-20 flex h-(--ui-header-height) shrink-0 items-center gap-3 border-b border-default bg-default px-4"
+      class="relative z-20 flex h-(--ui-header-height) shrink-0 items-center border-b border-default bg-default"
+      :class="header.spacing ?? 'gap-3 px-4'"
       data-shell="header"
     >
       <template v-if="narrow && headerExpanded">
@@ -232,7 +239,7 @@ function menuProps(isCollapsed: boolean) {
         <div class="flex min-w-0 flex-1 justify-center">
           <slot v-if="!narrow" name="header" :narrow="false" :expanded="false" :collapse="() => {}" :sidebar-narrow="sidebarNarrow" />
         </div>
-        <div class="flex shrink-0 items-center gap-2">
+        <div class="flex shrink-0 items-center" :class="header.actions ?? 'gap-2'">
           <slot name="actions" :narrow="narrow" :expand-header="() => (headerExpanded = true)" :account="account" :sidebar-narrow="sidebarNarrow" :aside="asideControl">
             <UDropdownMenu v-if="hasAccount" :items="account" :content="{ align: 'end' }">
               <UButton icon="i-lucide-circle-user" color="neutral" variant="ghost" aria-label="Account" />

@@ -211,6 +211,21 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(shell.get('footer').classes()).toEqual(['mx-8', 'mt-10', 'border-t', 'pt-5'])
   })
 
+  it('spaces the header and its actions with the project\'s classes in place of its own', async () => {
+    const actions = () => h('button', { 'data-test': 'team' }, 'Team')
+    const actionsRow = (w: VueWrapper) => w.get('[data-test="team"]').element.parentElement!
+    const own = await render({ actions })
+    expect(own.get('[data-shell="header"]').classes()).toEqual(expect.arrayContaining(['gap-3', 'px-4']))
+    expect([...actionsRow(own).classList]).toEqual(['flex', 'shrink-0', 'items-center', 'gap-2'])
+    own.unmount()
+    const shell = await render({ actions }, { header: { spacing: 'gap-5 px-6', actions: 'gap-3' } })
+    const classes = shell.get('[data-shell="header"]').classes()
+    expect(classes).toEqual(expect.arrayContaining(['flex', 'items-center', 'gap-5', 'px-6']))
+    expect(classes).not.toContain('gap-3')
+    expect(classes).not.toContain('px-4')
+    expect([...actionsRow(shell).classList]).toEqual(['flex', 'shrink-0', 'items-center', 'gap-3'])
+  })
+
   it('folds the docked right panel in place, its content kept and out of reach, so a project can animate the fold', async () => {
     document.documentElement.style.fontSize = '16px'
     const shell = await render({ aside: chat }, { aside: { resizable: false } })
