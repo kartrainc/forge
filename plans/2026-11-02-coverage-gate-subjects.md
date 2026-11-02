@@ -13,8 +13,8 @@ Today's behaviour:
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| CLI | `forge/cli/commands/quality.py:44-54` | loads every `.forge/coverage/*/*.json`, calls `evaluate(root, reports, subjects(recipe, root), base_ref=...)`; `--subjects` is ignored here |
-| `--subjects` | `forge/cli/parser.py:60-62` | one string, used by `--quality test` (`runner.py:34-44`) and `--quality resolve` |
+| CLI | `forge/cli/commands/quality.py:44-54` | loads every `.forge/coverage/*/*.json`, calls `evaluate(root, reports, subjects(recipe, root), base_ref=...)`; `--subject` is ignored here |
+| `--subject` | `forge/cli/parser.py:60-62` | one string, used by `--quality test` (`runner.py:34-44`) and `--quality resolve` |
 | subjects | `forge/quality/model.py:264-321` | backends (`services/<name>`), active frontends (`apps/<name>`), and shared packages found on disk (`packages/`, `sdks/`, …, `shared: True`) |
 | gate | `forge/quality/coverage.py:186-331` | builds shared subjects' reports from the other reports by path prefix (206-241); then, for every subject: all three suites present (291-293), every source file covered (294-296), changed lines > 80% (309-317) |
 
@@ -26,7 +26,7 @@ The changed lines (`--base-ref`) only narrow the > 80% check; they never choose 
 
 ```
 forge/cli/parser.py                  new --subjects (coverage only); --subject unchanged
-forge/cli/commands/quality.py        parse the list, pass subjects=... to evaluate
+forge/cli/commands/quality.py        parse --subjects, pass only=... to evaluate
 forge/quality/coverage.py            evaluate(..., only: set[str] | None = None)
 tests/test_generated_quality.py      the cases below
 docs/reference/cli.md                the flag and its rule
@@ -74,7 +74,7 @@ report shows what the run did not cover.
 
 | Repo | Change |
 | --- | --- |
-| shipyard `forge-quality.yml` | input `subjects` (space- or comma-separated); for `gates: coverage`, `--subject "$SUBJECTS"` when set |
+| shipyard `forge-quality.yml` | input `subjects` (space- or comma-separated); for `gates: coverage`, `--subjects "$SUBJECTS"` when set |
 | kartra-ai `.github/workflows/ci.yml` | `plan`: drop "one forge subject touched brings every forge leg"; new output `subjects` (the touched units' `forge.subject`); job `coverage` passes it. A push to `develop` keeps every leg and no `--subjects` |
 | kartra-ai | forge pin bump (with 6a, the Node runtime role, PR #17) |
 
