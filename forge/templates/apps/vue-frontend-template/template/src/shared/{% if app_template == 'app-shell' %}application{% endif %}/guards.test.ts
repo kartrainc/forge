@@ -1,8 +1,28 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { installGuards } from './guards'
+import { installGuards, returnPath } from './guards'
 import { testAuth } from './testing'
+
+describe('returnPath', () => {
+  it.each([
+    ['/somewhere', '/somewhere'],
+    ['/orders?tab=2#notes', '/orders?tab=2#notes'],
+    ['/x//y', '/x//y'],
+    ['/a/../b', '/b'],
+  ])('keeps an address of the app: %j', (value, path) => {
+    expect(returnPath(value)).toBe(path)
+  })
+
+  it.each([
+    '//elsewhere.example', '/\\elsewhere.example', '/\t/elsewhere.example', 'https://elsewhere.example',
+    // dot segments normalise these to `//elsewhere.example`
+    '/.//elsewhere.example', '/%2e//elsewhere.example', '/a/..//elsewhere.example',
+    '', 'somewhere', 42, undefined,
+  ])('refuses anything else: %j', (value) => {
+    expect(returnPath(value)).toBeNull()
+  })
+})
 
 const Page = defineComponent({ setup: () => () => h('p') })
 const routes = [

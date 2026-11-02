@@ -13,12 +13,16 @@ export const AUTH_INIT_TIMEOUT_MS = 5_000
 /**
  * The address of this app that a `redirect` or `next` query names, or null. The browser's
  * URL parser decides, as it would when the address is opened: `//host`, `/\host` and a
- * path whose tab the parser drops into `//host` name another site.
+ * path whose tab the parser drops into `//host` name another site. The path it returns is
+ * the normalised one, which is opened in turn, so it is checked again: dot segments
+ * normalise `/.//host` and `/a/..//host` to `//host`.
  */
 export function returnPath(value: unknown): string | null {
   if (typeof value !== 'string' || !value.startsWith('/')) return null
-  const url = new URL(value, window.location.origin)
-  return url.origin === window.location.origin ? url.pathname + url.search + url.hash : null
+  const origin = window.location.origin
+  const url = new URL(value, origin)
+  const path = url.pathname + url.search + url.hash
+  return url.origin === origin && new URL(path, origin).origin === origin ? path : null
 }
 
 /** Every role the matched routes require: a parent's role does not stand in for a child's. */

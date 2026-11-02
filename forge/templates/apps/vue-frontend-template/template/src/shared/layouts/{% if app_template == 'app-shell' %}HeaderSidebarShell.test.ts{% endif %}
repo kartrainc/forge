@@ -4,6 +4,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import UApp from '@nuxt/ui/components/App.vue'
 import UDashboardSidebarCollapse from '@nuxt/ui/components/DashboardSidebarCollapse.vue'
 import UNavigationMenu from '@nuxt/ui/components/NavigationMenu.vue'
+import UPopover from '@nuxt/ui/components/Popover.vue'
 import USlideover from '@nuxt/ui/components/Slideover.vue'
 import HeaderSidebarShell from './HeaderSidebarShell.vue'
 import { application } from '@/shared/application/config'
@@ -355,6 +356,28 @@ describe('the header-sidebar shell on a narrow screen', () => {
     expect(shell.find('[data-test="search"]').exists()).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await nextTick()
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+  })
+
+  it('leaves an Escape to the layer open in its header first, and closes on the next', async () => {
+    const shell = await render({
+      header: () => h(UPopover, { defaultOpen: true }, {
+        default: () => h('input', { 'data-test': 'search' }),
+        content: () => h('p', { 'data-test': 'results' }, 'Results'),
+      }),
+      actions: ({ expandHeader }: { expandHeader: () => void }) => h('button', { 'data-test': 'open-search', 'onClick': expandHeader }, 'Open search'),
+    })
+    await shell.get('[data-test="open-search"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-test="results"]')).not.toBeNull()
+    const escape = async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await flushPromises()
+    }
+    await escape()
+    await vi.waitFor(() => expect(document.querySelector('[data-test="results"]')).toBeNull())
+    expect(shell.find('[data-test="search"]').exists()).toBe(true)
+    await escape()
     expect(shell.find('[data-test="search"]').exists()).toBe(false)
   })
 

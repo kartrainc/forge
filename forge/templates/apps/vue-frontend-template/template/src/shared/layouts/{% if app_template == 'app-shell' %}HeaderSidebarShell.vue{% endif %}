@@ -133,8 +133,12 @@ watch(headerWide, (wide) => {
 watch(sidebarWide, (wide) => {
   if (wide) menuOpen.value = false
 })
+// Escape belongs to an open layer first (a search's results, a menu, a slide-over): Reka UI
+// dismisses the topmost one without preventDefault, and marks each one open with
+// `data-dismissable-layer`. The header closes on an Escape no layer takes.
 onKeyStroke('Escape', (event) => {
-  if (narrow.value && headerExpanded.value && !event.defaultPrevented) headerExpanded.value = false
+  if (event.defaultPrevented || document.querySelector('[data-dismissable-layer]')) return
+  if (narrow.value && headerExpanded.value) headerExpanded.value = false
 })
 
 function toggleSidebar() {

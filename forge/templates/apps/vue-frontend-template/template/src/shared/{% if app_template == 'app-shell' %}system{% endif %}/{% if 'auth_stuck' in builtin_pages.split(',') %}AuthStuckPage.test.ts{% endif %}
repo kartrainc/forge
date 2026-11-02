@@ -39,7 +39,7 @@ it('moves on to that address once the sign-in answers', async () => {
   expect(router.currentRoute.value.fullPath).toBe('/somewhere')
 })
 
-it.each(['//elsewhere.example/x', '/\\elsewhere.example', '/\t/elsewhere.example', 'https://elsewhere.example'])(
+it.each(['//elsewhere.example/x', '/\\elsewhere.example', '/\t/elsewhere.example', 'https://elsewhere.example', '/.//elsewhere.example'])(
   'retries the app\'s start instead of %j',
   async (next) => {
     const { page, router, assign } = await stuckAt(next)

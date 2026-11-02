@@ -419,7 +419,8 @@ Each safeguard below is an option, so a project can choose another strategy.
   screen's edge); the narrow screen's sidebar menu keeps its close button (the
   shell hid the menu's header and dropped Nuxt UI's toggle); a collapsed
   sidebar's links and sub-menu buttons keep their names for assistive
-  technology; Escape closes the header expanded on a narrow screen; a sidebar or
+  technology; Escape closes the header expanded on a narrow screen, once no open
+  layer in it (a search's results, a menu) takes the key first; a sidebar or
   right panel the user cannot resize takes its configured size, not one Nuxt UI
   stored under an earlier default (Nuxt UI stores a collapsible sidebar's size,
   and a stored size wins; only a resizable one's is stored now); Nuxt UI's
@@ -431,8 +432,9 @@ Each safeguard below is an option, so a project can choose another strategy.
   address in its `next` once the sign-in answers, and "Try again" opens that
   address afresh (it reloaded the stuck page itself, which the guard lets through,
   so the page never left); the built-in sign-in and auth-stuck pages follow a
-  `redirect` or `next` query only to an address of the app (`//host`, `/\host` and
-  a tabbed `/<tab>/host` passed the check); a route with `meta.requiresRole` needs a
+  `redirect` or `next` query only to an address of the app, the normalised one
+  included (`//host`, `/\host`, a tabbed `/<tab>/host` and dot segments such as
+  `/.//host` reached another site); a route with `meta.requiresRole` needs a
   sign-in unless a deeper route says it needs none (a public route with a role let
   a signed-out visit through); a `routing.forbidden` that is the sign-in route is
   refused (a signed-in visit without the role looped between it and the landing

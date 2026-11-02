@@ -383,6 +383,11 @@ def test_zod_and_its_jitless_setting_load_as_one_chunk(shell_app: Path) -> None:
     assert not test.search("/app/apps/frontend/src/app/providers/head.ts")
     csp = (shell_app / "src/app/providers/csp.ts").read_text(encoding="utf-8")
     assert "z.config({ jitless: true })" in csp
+    # In a vendor chunk, csp.ts may import zod and nothing else: an import of app code
+    # would make vendor-zod import the entry's chunks, a cycle that undoes the order.
+    imports = re.findall(r"^\s*import\b.*?from\s+['\"]([^'\"]+)['\"]", csp, flags=re.MULTILINE)
+    assert imports == ["zod"], imports
+    assert not re.search(r"\bimport\s*\(", csp)
 
 
 # --- reserved names -----------------------------------------------------------

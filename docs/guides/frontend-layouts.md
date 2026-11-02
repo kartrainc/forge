@@ -236,7 +236,7 @@ optional, and without them the shell renders as described here.
 | Slot | Slot props | What it fills |
 |---|---|---|
 | `logo` | `collapsed`, `narrow`, `sidebarNarrow` | the header's start; the app's title, linking to `landing` |
-| `header` | `narrow`, `expanded`, `collapse`, `sidebarNarrow` | the header's centre; on a narrow header only once `expandHeader` runs, covering the header with a Close button (Escape closes it too) |
+| `header` | `narrow`, `expanded`, `collapse`, `sidebarNarrow` | the header's centre; on a narrow header only once `expandHeader` runs, covering the header with a Close button (Escape closes it too, once no open layer in it, such as a search's results, takes the key) |
 | `actions` | `narrow`, `expandHeader`, `account`, `sidebarNarrow`, `aside` | the header's end; the `account` menu |
 | default | | the page; `<RouterView />` |
 | `footer` | `items` | under the page; the `footer` menu |

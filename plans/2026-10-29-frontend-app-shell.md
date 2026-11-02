@@ -472,6 +472,16 @@ below has a test that fails on #18's head (`7850a617`) and passes with it.
     fragments (`withheld_fragments`); Svelte and Flutter keep theirs together,
     the fragment's `frontend_skip_reason` says why. `crud-app` output keeps its
     bytes; its provenance names the new fragment.
+46. **The review bots' first round** (on `1255c8d4`). `returnPath()` checks the
+    normalised path too: dot segments normalise `/.//host` and `/a/..//host` to
+    `//host`, which the stalled sign-in page's "Try again" opened as another site.
+    The shell's Escape leaves the key to an open Reka UI layer
+    (`data-dismissable-layer`), which dismisses without `preventDefault`, so one
+    Escape no longer closes both a search's results and the expanded header. Two
+    tests pin assumptions the reviewers questioned: the Dockerfile has one Node
+    stage, which installs corepack, the others built from it; and `csp.ts`, in the
+    `vendor-zod` chunk, imports only zod (in a test, not a comment in the scaffold
+    `vite.config.ts`, which would reach every consumer as a merge proposal).
 
 ## Open points
 

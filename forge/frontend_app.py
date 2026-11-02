@@ -355,9 +355,9 @@ def _check_routing(fc: FrontendConfig) -> None:
             )
     # So does a forbidden destination that is the sign-in route: a signed-in visit
     # without the role goes there, and a signed-in visit of the sign-in route goes back.
-    if "sign_in" in names and names["forbidden"] == names["sign_in"]:
+    if "sign_in" in names and names.get("forbidden") == names["sign_in"]:
         raise ValueError(
-            f"routing.forbidden {names['forbidden']!r} is also the sign_in destination; "
+            f"routing.forbidden {names['sign_in']!r} is also the sign_in destination; "
             "the guards would send a signed-in visit without the role back and forth "
             "between it and the landing route. Name another route."
         )
