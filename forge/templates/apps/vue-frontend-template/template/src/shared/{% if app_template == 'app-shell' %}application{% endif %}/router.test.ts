@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
+import { useApplicationRouting } from './context'
 import { resolveActiveItem } from './menus'
 import { extraPages, systemPages } from './pages'
 import { createApplicationRouter } from './router'
@@ -135,6 +136,36 @@ describe('createApplicationRouter', () => {
     }, config)
     await r.push('/no/such/page')
     expect(r.currentRoute.value.name).toBe('oops')
+  })
+
+  it('starts a layout mounted alone at / on its own landing route, for the guards and the pages too', async () => {
+    const config = testApplication()
+    config.layouts.staff!.landing = 'staff-audit'
+    const { auth } = testAuth(true)
+    const r = router({ auth, activeLayouts: ['staff'], routes: { staff: [{ path: 'audit', name: 'staff-audit', component: Page }] } }, config)
+    await r.push('/')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+    expect(useApplicationRouting().landing).toBe('staff-audit')
+    await r.push('/login')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+  })
+
+  it('names the fix when the layouts mounted hold no landing route', () => {
+    expect(() => router({ activeLayouts: ['staff'] })).toThrow(/routing\.landing names route 'start'.*layouts\.staff\.landing/)
+    const config = testApplication()
+    config.layouts.staff!.landing = 'nowhere'
+    expect(() => router({ activeLayouts: ['staff'] }, config)).toThrow(/layouts\.staff\.landing names route 'nowhere'/)
+  })
+
+  it('opens a further layout\'s own landing route at /<layout>, the first layout keeping /', async () => {
+    const config = testApplication()
+    config.layouts.staff!.landing = 'staff-audit'
+    const r = router({ routes: { ...projectRoutes, staff: [{ path: 'audit', name: 'staff-audit', component: Page }] } }, config)
+    await r.push('/staff')
+    expect(r.currentRoute.value.name).toBe('staff-audit')
+    await r.push('/')
+    expect(r.currentRoute.value.name).toBe('start')
+    expect(useApplicationRouting().landing).toBe('start')
   })
 
   it('marks the menu item that opens a page extra, whatever its id', () => {

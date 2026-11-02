@@ -120,7 +120,7 @@ _KEBAB = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _ROUTE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 _ICON = re.compile(r"^i-[a-z0-9]+(?:-[a-z0-9]+)+$")
 _BADGE = re.compile(r"^[a-z][a-z0-9_-]*$")
-_LAYOUT_KEYS = frozenset({"shell", "placeholder", "menus"})
+_LAYOUT_KEYS = frozenset({"shell", "placeholder", "landing", "menus"})
 _SECTION_KEYS = frozenset({"label", "items"})
 _ITEM_KEYS = frozenset({"id", "label", "icon", "to", "action", "children", "badge"})
 _DESTINATIONS = ("to", "action", "children")
@@ -249,6 +249,12 @@ def _check_layouts(fc: FrontendConfig) -> None:
         placeholder = layout.get("placeholder")
         if placeholder is not None and not _is_route_name(placeholder):
             raise ValueError(f"{where}.placeholder must be a route name, got {placeholder!r}.")
+        landing = layout.get("landing")
+        if landing is not None and (not _is_route_name(landing) or landing == BUILTIN):
+            raise ValueError(
+                f"{where}.landing must name the route '/' opens while this layout is mounted "
+                f"there, got {landing!r}."
+            )
         raw_menus = layout.get("menus")
         menus = _require_mapping({} if raw_menus is None else raw_menus, f"{where}.menus")
         _unknown(menus.keys(), frozenset(MENUS), f"{where}.menus")
@@ -350,6 +356,17 @@ def _check_routing(fc: FrontendConfig) -> None:
             "the guards would send a signed-in visit without the role back and forth "
             "between it and the landing route. Name another route."
         )
+    # A layout's own landing stands in for routing.landing while that layout is mounted
+    # at '/', so it loops the same way.
+    for layout_name, layout in layout_entries(fc):
+        own = layout.get("landing") if isinstance(layout, Mapping) else None
+        for key, name in names.items():
+            if own is not None and own == name:
+                raise ValueError(
+                    f"layouts.{layout_name}.landing {own!r} is also the {key} destination; "
+                    "the guards would send a visit back and forth between them. Name "
+                    "another route."
+                )
 
 
 def _check_auth(fc: FrontendConfig) -> None:
@@ -452,6 +469,8 @@ def application_config(fc: FrontendConfig) -> dict[str, Any]:
         layouts[name] = {
             "shell": layout.get("shell", DEFAULT_SHELL),
             "placeholder": layout.get("placeholder"),
+            # Only when set, so a configuration without one renders as before.
+            **({"landing": layout["landing"]} if layout.get("landing") else {}),
             "menus": {menu: [_section(s) for s in menus.get(menu, [])] for menu in MENUS},
         }
     return {

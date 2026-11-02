@@ -3,7 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { application } from '@/shared/application/config'
-import { useApplicationAuth } from '@/shared/application/context'
+import { useApplicationAuth, useApplicationRouting } from '@/shared/application/context'
 import { returnPath } from '@/shared/application/guards'
 
 const router = useRouter()
@@ -13,7 +13,7 @@ const authDisabled = import.meta.env.VITE_AUTH_DISABLED === 'true'
 const busy = ref(false)
 
 function target(): string {
-  return returnPath(route.query.redirect) ?? router.resolve({ name: application.routing.landing ?? 'not-found' }).fullPath
+  return returnPath(route.query.redirect) ?? router.resolve({ name: useApplicationRouting().landing ?? 'not-found' }).fullPath
 }
 
 onMounted(() => {

@@ -183,6 +183,34 @@ def test_the_rendered_application_keeps_one_key_order_whatever_the_input() -> No
     assert list(first["layouts"]) == ["console", "staff"]
 
 
+def test_a_layout_names_a_landing_route_of_its_own() -> None:
+    layouts = copy.deepcopy(LAYOUTS)
+    layouts["staff"]["landing"] = "staff-home"
+    fc = _frontend(layouts=layouts)
+    fc.validate()
+    rendered = application_config(fc)["layouts"]
+    assert rendered["staff"]["landing"] == "staff-home"
+    # A layout without one renders as before: no key at all.
+    assert "landing" not in rendered["console"]
+
+
+@pytest.mark.parametrize(
+    ("landing", "message"),
+    [
+        ("Staff Home", "layouts.staff.landing must name the route"),
+        ("builtin", "layouts.staff.landing must name the route"),
+        # It stands in for routing.landing, so it loops the same way.
+        ("login", "layouts.staff.landing 'login' is also the sign_in destination"),
+        ("forbidden", "layouts.staff.landing 'forbidden' is also the forbidden destination"),
+    ],
+)
+def test_a_layout_landing_is_refused_where_routing_landing_would_be(landing: str, message: str) -> None:
+    layouts = copy.deepcopy(LAYOUTS)
+    layouts["staff"]["landing"] = landing
+    with pytest.raises(ValueError, match=message):
+        _frontend(layouts=layouts).validate()
+
+
 def test_template_answers_for_crud_app_select_every_extra() -> None:
     answers = template_answers(FrontendConfig(project_name="f", framework=FrontendFramework.VUE), session_timeout=True)
     assert answers["app_template"] == "crud-app"

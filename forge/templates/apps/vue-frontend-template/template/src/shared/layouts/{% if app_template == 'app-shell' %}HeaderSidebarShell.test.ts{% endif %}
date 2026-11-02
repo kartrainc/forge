@@ -162,6 +162,21 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(typeof menu.props('modelValue')).toBe('string')
   })
 
+  it('links the logo to its layout\'s own landing route', async () => {
+    // A route of this app's configuration other than its landing route, standing in for the layout's own.
+    const own = application.layouts[layout]!.menus.primary.flatMap(section => section.items)
+      .flatMap(item => [item, ...(item.children ?? [])])
+      .find(item => item.to && item.to !== application.routing.landing)?.to
+    if (!own) return
+    application.layouts[layout]!.landing = own
+    try {
+      const shell = await render()
+      expect(shell.get('[data-shell="header"] a').attributes('href')).toBe(`/${own}`)
+    } finally {
+      delete application.layouts[layout]!.landing
+    }
+  })
+
   it('lets a project\'s ui function have the last word over the shell\'s classes', async () => {
     const shell = await render({ aside: chat }, { aside: { ui: { root: (defaults: string) => `${defaults} border-s-0` } } })
     const aside = rootOf(shell.get('[data-shell="aside"]').element)

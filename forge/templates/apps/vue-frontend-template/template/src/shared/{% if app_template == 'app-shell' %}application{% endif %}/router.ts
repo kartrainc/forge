@@ -100,13 +100,24 @@ function menuActions(items: MenuItemConfig[]): string[] {
 
 function check(router: Router, config: ApplicationConfig, layouts: string[], actions: Record<string, unknown>): void {
   const missing = (name: string) => !router.hasRoute(name)
+  const first = layouts[0]!
   for (const [key, name] of Object.entries(config.routing)) {
-    if (name && missing(name)) throw new Error(`routing.${key} names route '${name}', which no route has.`)
+    // The layout mounted at `/` may start on a landing route of its own, checked with the layout.
+    if (key === 'landing' && config.layouts[first]!.landing) continue
+    if (name && missing(name)) {
+      const hint = key === 'landing' && layouts.length < Object.keys(config.layouts).length
+        ? `; a layout mounted without it at '/' names a landing route of its own (layouts.${first}.landing)`
+        : ''
+      throw new Error(`routing.${key} names route '${name}', which no route has${hint}.`)
+    }
   }
   for (const layout of layouts) {
-    const { menus, placeholder } = config.layouts[layout]!
+    const { menus, placeholder, landing } = config.layouts[layout]!
     if (placeholder && missing(placeholder)) {
       throw new Error(`layouts.${layout}.placeholder names route '${placeholder}', which no route has.`)
+    }
+    if (landing && missing(landing)) {
+      throw new Error(`layouts.${layout}.landing names route '${landing}', which no route has.`)
     }
     for (const [menu, sections] of Object.entries(menus)) {
       const items = sections.flatMap(section => section.items)
@@ -124,6 +135,9 @@ export function createApplicationRouter(options: ApplicationOptions, config: App
   const layouts = options.activeLayouts ?? Object.keys(config.layouts)
   const unknown = layouts.filter(layout => !config.layouts[layout])
   if (unknown.length) throw new Error(`Unknown layouts ${unknown.join(', ')}; the configuration has ${Object.keys(config.layouts).join(', ')}.`)
+  // The layout mounted at `/` decides where `/` goes: its own landing route, or the configuration's.
+  const ownLanding = config.layouts[layouts[0]!]?.landing
+  const routing = ownLanding ? { ...config.routing, landing: ownLanding } : config.routing
 
   const records: RouteRecordRaw[] = layouts.map((layout, index) => {
     const children: RouteRecordRaw[] = [...(options.routes?.[layout] ?? [])]
@@ -134,10 +148,11 @@ export function createApplicationRouter(options: ApplicationOptions, config: App
         // No meta.menu: the item whose `to` opens the page is the active one, whatever its id.
         if (page && route) children.push({ path: route.path, name: extra, component: page, meta: { title: route.title } })
       }
-      // `/` opens the landing route unless a page already sits there.
-      if (config.routing.landing && !children.some(child => child.path === '')) {
-        children.push({ path: '', redirect: { name: config.routing.landing } })
-      }
+    }
+    // `/` opens the landing route, and `/<layout>` a further layout's own, unless a page already sits there.
+    const start = index === 0 ? routing.landing : config.layouts[layout]!.landing
+    if (start && !children.some(child => child.path === '')) {
+      children.push({ path: '', redirect: { name: start } })
     }
     return {
       path: index === 0 ? '/' : `/${layout}`,
@@ -166,7 +181,7 @@ export function createApplicationRouter(options: ApplicationOptions, config: App
 
   const router = createRouter({ history: options.history ?? createWebHistory(), routes: records })
   check(router, config, layouts, options.actions ?? {})
-  setApplicationContext({ auth: options.auth, actions: options.actions ?? {} })
-  installGuards(router, { auth: options.auth, routing: config.routing, enabled: config.auth })
+  setApplicationContext({ auth: options.auth, actions: options.actions ?? {}, routing })
+  installGuards(router, { auth: options.auth, routing, enabled: config.auth })
   return router
 }

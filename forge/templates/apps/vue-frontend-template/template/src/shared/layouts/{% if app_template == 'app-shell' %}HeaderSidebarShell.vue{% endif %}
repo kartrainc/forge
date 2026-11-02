@@ -13,6 +13,7 @@ import { onKeyStroke, useLocalStorage, useMediaQuery } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import type { DashboardSidebarProps, NavigationMenuProps, SlideoverProps } from '@nuxt/ui'
 import { application } from '@/shared/application/config'
+import { useApplicationRouting } from '@/shared/application/context'
 import { useApplicationDropdown, useApplicationMenu, useOpenMenuItems } from '@/shared/application/menus'
 
 /** From which width a region is wide: a number of pixels, or a media query that matches when it is. */
@@ -114,7 +115,9 @@ const asideCollapsed = useLocalStorage(`${storageKey}-aside-collapsed`, false)
 const asideOpen = ref(false)
 const menuOpen = ref(false)
 const headerExpanded = ref(false)
-const landing = computed(() => (application.routing.landing ? { name: application.routing.landing } : '/'))
+// The logo opens the layout's own start: its landing route, or the one in force.
+const start = application.layouts[props.layout]?.landing ?? useApplicationRouting().landing
+const landing = start ? { name: start } : '/'
 
 // A narrow screen's overlays close when the page changes, and when their region turns wide.
 watch(() => route.fullPath, () => {

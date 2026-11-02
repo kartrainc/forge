@@ -33,6 +33,11 @@ export interface LayoutConfig {
   shell: string
   /** The route a placeholder item opens, with `{ item: <id> }`; none renders them disabled. */
   placeholder: string | null
+  /**
+   * The route this layout starts on, in place of `routing.landing` while it is the layout
+   * mounted at `/` (a host that mounts it alone, for example); `/<layout>` opens it otherwise.
+   */
+  landing?: string
   menus: Record<MenuName, MenuSectionConfig[]>
 }
 
