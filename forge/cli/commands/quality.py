@@ -36,6 +36,10 @@ def run_quality(args: argparse.Namespace) -> int:
         elif args.quality == "test":
             from forge.quality.runner import run_suites
 
+            if args.subject and "," in args.subject:
+                raise ValueError(
+                    "--quality test takes one --subject; a list is for --quality coverage"
+                )
             result = run_suites(root, suite=args.suite, subject=args.subject)
         elif args.quality in {"lock", "install"}:
             from forge.quality.dependencies import dependencies
@@ -49,8 +53,18 @@ def run_quality(args: argparse.Namespace) -> int:
                 json.loads(path.read_text(encoding="utf-8"))
                 for path in sorted((root / ".forge/coverage").glob("*/*.json"))
             ]
+            # --subject a,b: gate the subjects a CI run tested (a subset); absent, every subject
+            only = (
+                {name for name in args.subject.replace(" ", ",").split(",") if name}
+                if args.subject is not None
+                else None
+            )
             result = evaluate(
-                root, reports, subjects(read_recipe(root), root), base_ref=args.base_ref
+                root,
+                reports,
+                subjects(read_recipe(root), root),
+                base_ref=args.base_ref,
+                only=only,
             )
         print(json.dumps(result, indent=2))
         return 0 if result.get("passed", True) else 12

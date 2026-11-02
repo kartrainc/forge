@@ -160,6 +160,23 @@ passing is not evidence of native test coverage. Validate the adapter, device,
 and full suite inventory for a Flutter deployment before claiming this gate
 passes. See [capability limits](../reference/limitations.md).
 
+### Subset runs
+
+A CI that tests only the subjects a change touches cannot hand the gate every
+subject's reports. `--quality coverage --subject api,web` gates the named
+subjects alone, each in full (all three suites, every source file, strictly
+greater than 80% on changed lines):
+
+- a backend or frontend not named needs no report and is listed under `skipped`;
+- a shared package is gated when a named subject's reports exercise it, and
+  skipped otherwise;
+- reports of subjects not named are ignored; an unknown name or an empty list
+  fails.
+
+Without `--subject` every subject is gated, as above. Run the full gate where a
+change merges (for instance on every push to the integration branch): a
+subset run proves only the subjects it names.
+
 ## Enforcing checks on GitHub
 
 The generated `quality.yml` emits the stable `generated-quality` job and

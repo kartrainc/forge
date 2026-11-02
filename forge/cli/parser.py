@@ -58,7 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--suite", choices=["unit", "integration", "e2e", "all"], default="all")
     p.add_argument(
-        "--subject", help="Run tests for one service or frontend from --quality inventory."
+        "--subject",
+        help=(
+            "Run tests for one service or frontend from --quality inventory; with --quality coverage, "
+            "a comma-separated list gates only those subjects (a CI that tested a subset)."
+        ),
     )
     p.add_argument(
         "--base-ref", help="Git base for changed-line coverage; absent means all source is new."

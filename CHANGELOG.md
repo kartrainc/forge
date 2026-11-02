@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Coverage gate for a subset of subjects
+
+- `forge --quality coverage --subject a,b` gates only the named subjects, for a CI that tests only the subjects a
+  change touches. Each named subject is gated in full. Backends and frontends not named are skipped and listed in the
+  result's new `skipped` list; a shared package is gated only when a named subject's reports exercise it; reports of
+  unnamed subjects are ignored; an unknown name or an empty list fails. Without `--subject` the gate is unchanged.
+  `--quality test --subject` still takes one subject and refuses a list.
+
 ### Per-service Helm charts
 
 - `deploy.helm_layout` (`umbrella` by default, `per_service`): with `deploy.target=kubernetes`, `per_service` emits

@@ -466,6 +466,86 @@ def test_shared_runtime_has_its_own_gate(sources):
     assert any("core: new-code coverage" in p for p in result["violations"])
 
 
+def _second_service(root):
+    """A second backend, ``web``, with fully covered reports of its own."""
+    source = root / "services/web/src/page.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("\n".join(f"line{i} = {i}" for i in range(10)) + "\n", encoding="utf-8")
+    reports = reports_for(root, source, 10)
+    for report in reports:
+        report["subject"] = "web"
+    return reports, TARGETS + [{"name": "web", "path": "services/web", "language": "python"}]
+
+
+def test_only_gates_the_named_subjects(sources):
+    root, source = sources
+    _, targets = _second_service(root)
+    reports = reports_for(root, source)  # api tested; web never ran
+    assert not evaluate(root, reports, targets)["passed"]  # the full gate still needs web
+    result = evaluate(root, reports, targets, only={"api"})
+    assert result["passed"], result["violations"]
+    assert [s["subject"] for s in result["subjects"]] == ["api"]
+    assert result["skipped"] == ["web"]
+
+
+def test_a_named_subject_is_gated_in_full(sources):
+    root, source = sources
+    _, targets = _second_service(root)
+    reports = reports_for(root, source)
+    assert not evaluate(root, reports[:-1], targets, only={"api"})["passed"]  # a missing suite
+    assert not evaluate(root, reports_for(root, source, 8), targets, only={"api"})["passed"]  # 80%
+    (source.parent / "untested.py").write_text("value = 1\n", encoding="utf-8")
+    result = evaluate(root, reports, targets, only={"api"})
+    assert any("source omitted" in v for v in result["violations"])
+
+
+def test_only_ignores_the_reports_of_unnamed_subjects(sources):
+    root, source = sources
+    web_reports, targets = _second_service(root)
+    for report in web_reports:
+        report["tests"] = 0  # malformed: would fail if web were gated
+    result = evaluate(root, [*reports_for(root, source), *web_reports], targets, only={"api"})
+    assert result["passed"], result["violations"]
+
+
+def test_only_gates_a_shared_package_a_named_subject_exercised(sources):
+    root, source = sources
+    web_reports, targets = _second_service(root)
+    shared = root / "sdks/core/src/lib.py"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("first = 1\nsecond = 2\n", encoding="utf-8")
+    targets = targets + [{"name": "core", "path": "sdks/core", "shared": True}]
+    api_reports = reports_for(root, source, 10)
+    for report in api_reports:
+        report["files"][shared.relative_to(root).as_posix()] = {
+            "sha256": digest(shared),
+            "lines": {1: 1, 2: 0},
+        }
+    # api exercises core: core is gated (and fails its own bar)
+    result = evaluate(root, api_reports, targets, only={"api"})
+    assert any("core: new-code coverage" in v for v in result["violations"])
+    # only web runs, and web never touches core: core is skipped, not failed
+    result = evaluate(root, web_reports, targets, only={"web"})
+    assert result["passed"], result["violations"]
+    assert sorted(result["skipped"]) == ["api", "core"]
+
+
+def test_only_refuses_unknown_and_empty_selections(sources):
+    root, source = sources
+    reports = reports_for(root, source)
+    result = evaluate(root, reports, TARGETS, only={"api", "apii"})
+    assert "Unknown subject: apii" in result["violations"]
+    assert (
+        "No coverage subjects selected"
+        in evaluate(root, reports, TARGETS, only=set())["violations"]
+    )
+    stray = {**reports[0], "subject": "ghost"}
+    assert (
+        "Unknown report subject: ghost"
+        in evaluate(root, [*reports, stray], TARGETS, only={"api"})["violations"]
+    )
+
+
 def test_migration_never_adopts_modified_source(project):
     source = next((project / "services/api/sdks/forge-core/src").rglob("*.py"))
     source.write_text("# customized\n", encoding="utf-8")

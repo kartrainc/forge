@@ -190,17 +190,32 @@ def evaluate(
     *,
     base_ref: str | None = None,
     required_suites: tuple[str, ...] = ("unit", "integration", "e2e"),
+    only: set[str] | None = None,
 ) -> dict:
     """Merge hits by file/line; enforce >80% separately for each subject.
 
     A fresh project has no base, so all executable lines are new. Existing
     projects gate changed lines and still report total coverage. Reports must
     describe the exact source currently on disk and every declared source.
+
+    ``only`` gates the named subjects alone, for a CI that tested a subset: the
+    others need no report and are listed as skipped, their reports are ignored,
+    and a shared package is gated when a named subject's reports exercise it.
+    ``None`` gates every subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
     metrics: list[dict[str, Any]] = []
+    skipped: list[str] = []
     known = {subject["name"] for subject in subjects}
+    if only is not None:
+        if not only:
+            failures.append("No coverage subjects selected")
+        failures.extend(f"Unknown subject: {name}" for name in sorted(only - known))
+        for report in reports:
+            if report.get("subject") not in known:
+                failures.append(f"Unknown report subject: {report.get('subject')}")
+        reports = [report for report in reports if report.get("subject") in only]
     # Shared runtime packages are independently gated from the actual tests
     # exercising them. Never let a well-tested service hide an untested SDK.
     expanded = list(reports)
@@ -239,11 +254,20 @@ def evaluate(
                         "files": files,
                     }
                 )
-    for report in reports:
-        if report.get("subject") not in known:
-            failures.append(f"Unknown report subject: {report.get('subject')}")
+    if only is None:
+        for report in reports:
+            if report.get("subject") not in known:
+                failures.append(f"Unknown report subject: {report.get('subject')}")
+    exercised = {report.get("subject") for report in expanded}
     for subject in subjects:
         name, subject_path = subject["name"], subject["path"]
+        if (
+            only is not None
+            and name not in only
+            and not (subject.get("shared") and name in exercised)
+        ):
+            skipped.append(name)
+            continue
         merged: dict[str, dict[int, int]] = {}
         seen: set[str] = set()
         stage_metrics: dict[str, dict] = {}
@@ -328,4 +352,4 @@ def evaluate(
         )
     if not subjects:
         failures.append("No coverage subjects declared")
-    return {"passed": not failures, "subjects": metrics, "violations": failures}
+    return {"passed": not failures, "subjects": metrics, "skipped": skipped, "violations": failures}
