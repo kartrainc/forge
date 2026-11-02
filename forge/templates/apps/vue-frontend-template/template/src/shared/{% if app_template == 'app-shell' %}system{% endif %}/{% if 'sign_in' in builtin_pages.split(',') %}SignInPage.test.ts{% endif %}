@@ -24,7 +24,7 @@ it('signs in through the contract and returns where the visit started', async ()
   expect(router.currentRoute.value.fullPath).toBe('/somewhere')
 })
 
-it.each(['//elsewhere.example/x', '/\\elsewhere.example', '/\t/elsewhere.example', '/.//elsewhere.example'])(
+it.each(['//elsewhere.example/x', '/\\elsewhere.example', '/\t/elsewhere.example', '/.//elsewhere.example', '//['])(
   'signs in towards the landing route instead of %j',
   async (redirect) => {
     const { auth, calls } = testAuth(false)

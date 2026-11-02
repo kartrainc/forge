@@ -482,6 +482,10 @@ below has a test that fails on #18's head (`7850a617`) and passes with it.
     stage, which installs corepack, the others built from it; and `csp.ts`, in the
     `vendor-zod` chunk, imports only zod (in a test, not a comment in the scaffold
     `vite.config.ts`, which would reach every consumer as a merge proposal).
+47. **The review on `9a825862`.** `returnPath()` returns null for an address the
+    URL parser refuses: `new URL()` threw on `//[`, `/\[x` and `//a b` (and on
+    `/.//[` once normalised), so a crafted `redirect` broke the sign-in page and a
+    crafted `next` kept the auth-stuck page from rendering.
 
 ## Open points
 

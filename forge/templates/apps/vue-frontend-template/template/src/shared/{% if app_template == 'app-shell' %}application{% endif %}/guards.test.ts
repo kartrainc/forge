@@ -18,6 +18,8 @@ describe('returnPath', () => {
     '//elsewhere.example', '/\\elsewhere.example', '/\t/elsewhere.example', 'https://elsewhere.example',
     // dot segments normalise these to `//elsewhere.example`
     '/.//elsewhere.example', '/%2e//elsewhere.example', '/a/..//elsewhere.example',
+    // the parser throws on these, before and after the dot segments
+    '//[', '/\\[x', '//a b', '/.//[',
     '', 'somewhere', 42, undefined,
   ])('refuses anything else: %j', (value) => {
     expect(returnPath(value)).toBeNull()

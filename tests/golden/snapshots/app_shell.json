@@ -385,12 +385,12 @@
       "sha256": "64735be39fef4cd4"
     },
     "apps/frontend/src/shared/application/guards.test.ts": {
-      "size": 6162,
-      "sha256": "c2cea4e1b7e77794"
+      "size": 6269,
+      "sha256": "c10828307537b4f5"
     },
     "apps/frontend/src/shared/application/guards.ts": {
-      "size": 4560,
-      "sha256": "e479ce1cb1081f75"
+      "size": 4717,
+      "sha256": "a45d4e9656c34656"
     },
     "apps/frontend/src/shared/application/menus.test.ts": {
       "size": 6524,
@@ -485,8 +485,8 @@
       "sha256": "441e723cdaf72bb9"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.test.ts": {
-      "size": 2082,
-      "sha256": "53be9cf774ab1ee5"
+      "size": 2091,
+      "sha256": "d16ea94134b49061"
     },
     "apps/frontend/src/shared/system/AuthStuckPage.vue": {
       "size": 1444,
@@ -509,8 +509,8 @@
       "sha256": "41d196d0d1730d79"
     },
     "apps/frontend/src/shared/system/SignInPage.test.ts": {
-      "size": 2138,
-      "sha256": "e9a3e0c4aa5f4cf8"
+      "size": 2145,
+      "sha256": "b13a62655727210a"
     },
     "apps/frontend/src/shared/system/SignInPage.vue": {
       "size": 1865,

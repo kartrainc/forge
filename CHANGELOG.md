@@ -434,15 +434,17 @@ Each safeguard below is an option, so a project can choose another strategy.
   so the page never left); the built-in sign-in and auth-stuck pages follow a
   `redirect` or `next` query only to an address of the app, the normalised one
   included (`//host`, `/\host`, a tabbed `/<tab>/host` and dot segments such as
-  `/.//host` reached another site); a route with `meta.requiresRole` needs a
-  sign-in unless a deeper route says it needs none (a public route with a role let
-  a signed-out visit through); a `routing.forbidden` that is the sign-in route is
-  refused (a signed-in visit without the role looped between it and the landing
-  route); a project `not_found` route that redirects answers unknown addresses with
-  its redirect (the catch-all copied no view); a page extra no longer marks a menu
-  item named after it, so the item whose `to` opens it is active; the router factory
-  throws when a menu item names an action the project did not pass, as it does for
-  a missing route.
+  `/.//host` reached another site), and fall back as for any other address when
+  the URL parser refuses the query (`//[` or `//a b` threw, which broke the
+  sign-in page and kept the auth-stuck page from rendering); a route with
+  `meta.requiresRole` needs a sign-in unless a deeper route says it needs none (a
+  public route with a role let a signed-out visit through); a `routing.forbidden`
+  that is the sign-in route is refused (a signed-in visit without the role looped
+  between it and the landing route); a project `not_found` route that redirects
+  answers unknown addresses with its redirect (the catch-all copied no view); a
+  page extra no longer marks a menu item named after it, so the item whose `to`
+  opens it is active; the router factory throws when a menu item names an action
+  the project did not pass, as it does for a missing route.
 - `app-shell` layouts may name a `landing` route of their own: `/` opens it while
   that layout is the one mounted at `/` (`activeLayouts` mounting a host's
   layouts), and so do the guards, the built-in pages' "Back to start" and the
