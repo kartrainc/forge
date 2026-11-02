@@ -203,9 +203,10 @@ def evaluate(
     only toward shared packages. A shared package is gated when it is named or
     a named subject's reports exercise it, from every report present; unnamed,
     it requires coverage only of its files the change touched, since the rest
-    may be exercised by consumers the run did not test; a shared package the
-    change touched is gated even when no named subject exercises it. A subset
-    needs ``base_ref``. ``None`` gates every subject.
+    may be exercised by consumers the run did not test; a shared package whose
+    gated sources the change touched is gated even when no named subject
+    exercises it, and fails when no report reaches it. A subset needs
+    ``base_ref``. ``None`` gates every subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
@@ -274,13 +275,28 @@ def evaluate(
                 failures.append(f"Unknown report subject: {report.get('subject')}")
     for subject in subjects:
         name, subject_path = subject["name"], subject["path"]
-        touched = delta is not None and any(rel.startswith(subject_path + "/") for rel in delta)
+        touched = (
+            sorted(source_inventory(root, subject_path) & set(delta))
+            if only is not None and delta is not None and subject.get("shared")
+            else []
+        )
         if (
             only is not None
             and name not in only
             and not (subject.get("shared") and (name in exercised or touched))
         ):
             skipped.append(name)
+            continue
+        if (
+            only is not None
+            and name not in only
+            and name not in exercised
+            and not any(report.get("subject") == name for report in expanded)
+        ):
+            failures.append(
+                f"{name}: the change touched {', '.join(touched)}, which no report of this run "
+                "exercises; name a subject whose tests reach it"
+            )
             continue
         merged: dict[str, dict[int, int]] = {}
         seen: set[str] = set()

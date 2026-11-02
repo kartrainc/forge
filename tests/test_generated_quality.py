@@ -606,7 +606,35 @@ def test_a_changed_shared_package_is_gated_even_when_unexercised(sources, subset
     result = subset(root, web_reports, targets, {"web"}, {"sdks/core/src/lib.py": {2}})
     assert not result["passed"]
     assert "core" not in result["skipped"]
-    assert any(v.startswith("core:") for v in result["violations"])
+    assert result["violations"] == [
+        "core: the change touched sdks/core/src/lib.py, which no report of this run exercises; "
+        "name a subject whose tests reach it"
+    ]
+
+
+def test_a_shared_package_whose_tests_alone_changed_is_not_forced(sources, subset):
+    root, source = sources
+    web_reports, targets = _second_service(root)
+    (root / "sdks/core/src").mkdir(parents=True)
+    (root / "sdks/core/src/lib.py").write_text("first = 1\n", encoding="utf-8")
+    (root / "sdks/core/tests").mkdir()
+    (root / "sdks/core/tests/test_lib.py").write_text("def test_it(): pass\n", encoding="utf-8")
+    targets = targets + [{"name": "core", "path": "sdks/core", "shared": True}]
+    # only core's tests changed: no gated source of core did, so web's run stays green
+    result = subset(root, web_reports, targets, {"web"}, {"sdks/core/tests/test_lib.py": {1}})
+    assert result["passed"], result["violations"]
+    assert "core" in result["skipped"]
+
+
+def test_a_changed_shared_package_is_gated_from_reports_present(sources, subset):
+    root, source = sources
+    api_reports, web_reports, targets = _two_consumers_of_core(root, source)
+    # the change edits core's b.py; web's reports (present, not named) cover it
+    result = subset(
+        root, [*api_reports, *web_reports], targets, {"api"}, {"sdks/core/src/b.py": {1}}
+    )
+    assert result["passed"], result["violations"]
+    assert "core" in [s["subject"] for s in result["subjects"]]
 
 
 def test_a_subset_needs_a_base(sources):

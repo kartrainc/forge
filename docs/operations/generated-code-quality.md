@@ -169,7 +169,9 @@ greater than 80% on changed lines):
 
 - a backend or frontend not named needs no report and is listed under `skipped`;
 - a shared package is gated when it is named, when a named subject's reports
-  exercise it, or when the change touched it, from every report present;
+  exercise it, or when the change touched its gated sources (not its tests),
+  from every report present; touched but reached by no report of the run, it
+  fails with a message to name a subject whose tests reach it;
   unnamed, it requires coverage only of the files the change touched, since its
   other files may be exercised by consumers the run did not test. Once gated, it
   needs every required suite like any subject: a package the named subjects reach
