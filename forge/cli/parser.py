@@ -60,6 +60,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--subject", help="Run tests for one service or frontend from --quality inventory."
     )
+    # not --subjects: that would make every abbreviation of --subject (--subj, ...) ambiguous
+    p.add_argument(
+        "--coverage-subjects",
+        help=(
+            "With --quality coverage: a comma-separated list of subjects to gate (a CI that tested a "
+            "subset); absent, every subject is gated."
+        ),
+    )
     p.add_argument(
         "--base-ref", help="Git base for changed-line coverage; absent means all source is new."
     )
@@ -858,6 +866,7 @@ _SUBFLAG_PARENTS: dict[str, frozenset[str]] = {
     "resolution": frozenset({"quality"}),
     "suite": frozenset({"quality"}),
     "subject": frozenset({"quality"}),
+    "coverage_subjects": frozenset({"quality"}),
     "base_ref": frozenset({"quality"}),
     # --update family
     "update_mode": frozenset({"update"}),

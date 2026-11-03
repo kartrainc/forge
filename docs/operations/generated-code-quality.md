@@ -160,6 +160,35 @@ passing is not evidence of native test coverage. Validate the adapter, device,
 and full suite inventory for a Flutter deployment before claiming this gate
 passes. See [capability limits](../reference/limitations.md).
 
+### Subset runs
+
+A CI that tests only the subjects a change touches cannot hand the gate every
+subject's reports. `--quality coverage --coverage-subjects api,web` gates the named
+subjects alone, each in full (all three suites, every source file, strictly
+greater than 80% on changed lines):
+
+- a backend or frontend not named needs no report and is listed under `skipped`,
+  unless the change touched its sources: then the gate fails and asks for it to
+  be named;
+- a shared package is gated when it is named, when a named subject's reports
+  exercise it, or when the change touched its gated sources (not its tests),
+  from every report present. Unnamed, it requires coverage only of the files the
+  change touched, and every required suite only when the change touched it: a
+  package the named subjects merely load is checked for fresh, consistent
+  reports, not for an e2e run they did not do. Touched but reached by no report
+  of the run, it fails with a message to name a subject whose tests reach it;
+- reports of subjects not named count only toward shared packages; an unknown
+  name or an empty list fails.
+
+A subset needs `--base-ref`, since it gates what the change touched; without it
+the gate fails. The list is comma-separated, and `--coverage-subjects` is refused
+outside `--quality coverage`.
+
+Without `--coverage-subjects` every subject is gated, as above, and `--subject` keeps its
+meaning for `--quality test`. Run the full gate where a
+change merges (for instance on every push to the integration branch): a
+subset run proves only the subjects it names.
+
 ## Enforcing checks on GitHub
 
 The generated `quality.yml` emits the stable `generated-quality` job and

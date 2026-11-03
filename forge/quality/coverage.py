@@ -190,28 +190,60 @@ def evaluate(
     *,
     base_ref: str | None = None,
     required_suites: tuple[str, ...] = ("unit", "integration", "e2e"),
+    only: set[str] | None = None,
 ) -> dict:
     """Merge hits by file/line; enforce >80% separately for each subject.
 
     A fresh project has no base, so all executable lines are new. Existing
     projects gate changed lines and still report total coverage. Reports must
     describe the exact source currently on disk and every declared source.
+
+    ``only`` gates the named subjects alone, for a CI that tested a subset: the
+    others need no report and are listed as skipped, and their reports count
+    only toward shared packages. A shared package is gated when it is named or
+    a named subject's reports exercise it, from every report present; unnamed,
+    it requires coverage only of its files the change touched, since the rest
+    may be exercised by consumers the run did not test, and needs every suite
+    and executable coverage only when the change touched its sources; a shared
+    package whose gated sources the change touched is gated even when no named
+    subject exercises it, and fails when no report reaches it. A backend or
+    frontend left off the list whose sources the change touched fails. A subset
+    needs ``base_ref``. ``None`` gates every subject.
     """
     delta = changed_lines(root, base_ref) if base_ref else None
     failures: list[str] = []
     metrics: list[dict[str, Any]] = []
+    skipped: list[str] = []
     known = {subject["name"] for subject in subjects}
+    if only is not None:
+        if not only:
+            failures.append("No coverage subjects selected")
+        failures.extend(f"Unknown subject: {name}" for name in sorted(only - known))
+        if delta is None:
+            failures.append(
+                "--coverage-subjects needs --base-ref: a subset gates what the change touched"
+            )
+        for report in reports:
+            if report.get("subject") not in known:
+                failures.append(f"Unknown report subject: {report.get('subject')}")
+    gated, shared_sources = reports, reports
+    if only is not None:
+        gated = [report for report in reports if report.get("subject") in only]
+        shared_sources = [report for report in reports if report.get("subject") in known]
     # Shared runtime packages are independently gated from the actual tests
     # exercising them. Never let a well-tested service hide an untested SDK.
-    expanded = list(reports)
+    expanded = list(gated)
+    exercised: set[str] = set()
     for subject in subjects:
         if not subject.get("shared"):
             continue
         prefix = subject["path"] + "/"
+        if any(p.startswith(prefix) for report in gated for p in report.get("files", {})):
+            exercised.add(subject["name"])
         for suite in required_suites:
             files: dict = {}
             tests = 0
-            for report in reports:
+            for report in shared_sources:
                 if report.get("suite") != suite:
                     continue
                 matching = {
@@ -239,11 +271,40 @@ def evaluate(
                         "files": files,
                     }
                 )
-    for report in reports:
-        if report.get("subject") not in known:
-            failures.append(f"Unknown report subject: {report.get('subject')}")
+    if only is None:
+        for report in reports:
+            if report.get("subject") not in known:
+                failures.append(f"Unknown report subject: {report.get('subject')}")
     for subject in subjects:
         name, subject_path = subject["name"], subject["path"]
+        touched = (
+            sorted(source_inventory(root, subject_path) & set(delta))
+            if only is not None and delta is not None
+            else []
+        )
+        if only is not None and name not in only and touched and not subject.get("shared"):
+            failures.append(
+                f"{name}: the change touched {', '.join(touched)}; name {name} in --coverage-subjects"
+            )
+            continue
+        if (
+            only is not None
+            and name not in only
+            and not (subject.get("shared") and (name in exercised or touched))
+        ):
+            skipped.append(name)
+            continue
+        if (
+            only is not None
+            and name not in only
+            and name not in exercised
+            and not any(report.get("subject") == name for report in expanded)
+        ):
+            failures.append(
+                f"{name}: the change touched {', '.join(touched)}, which no report of this run "
+                "exercises; name a subject whose tests reach it"
+            )
+            continue
         merged: dict[str, dict[int, int]] = {}
         seen: set[str] = set()
         stage_metrics: dict[str, dict] = {}
@@ -271,14 +332,10 @@ def evaluate(
                     failures.append(f"{name}/{suite}: stale or missing source {rel}")
                     continue
                 lines = merged.setdefault(rel, {})
+                line_count = len(path.read_text(encoding="utf-8").splitlines())
                 for raw_number, hits in entry.get("lines", {}).items():
                     number = int(raw_number)
-                    if (
-                        number < 1
-                        or number > len(path.read_text(encoding="utf-8").splitlines())
-                        or type(hits) is not int
-                        or hits < 0
-                    ):
+                    if number < 1 or number > line_count or type(hits) is not int or hits < 0:
                         raise ValueError(f"Invalid coverage counter: {rel}:{raw_number}")
                     lines[number] = max(lines.get(number, 0), hits)
                     stage_total += 1
@@ -288,10 +345,13 @@ def evaluate(
                 "covered": stage_covered,
                 "total": stage_total,
             }
+        exercised_only = only is not None and name not in only and not touched
         for suite in required_suites:
-            if suite not in seen:
+            if suite not in seen and not exercised_only:
                 failures.append(f"{name}: missing required {suite} report")
         inventory = source_inventory(root, subject_path)
+        if only is not None and name not in only and delta is not None:
+            inventory &= set(delta)
         for missing in sorted(inventory - merged.keys()):
             failures.append(f"{name}: source omitted from coverage: {missing}")
         total = covered = changed = changed_covered = 0
@@ -309,7 +369,7 @@ def evaluate(
                 if delta is None or number in delta.get(rel, set()):
                     changed += 1
                     changed_covered += hits > 0
-        if not total:
+        if not total and not exercised_only:
             failures.append(f"{name}: no executable source coverage")
         # Integer arithmetic makes exactly 80% fail without rounding ambiguity.
         if changed and changed_covered * 100 <= changed * 80:
@@ -328,4 +388,7 @@ def evaluate(
         )
     if not subjects:
         failures.append("No coverage subjects declared")
-    return {"passed": not failures, "subjects": metrics, "violations": failures}
+    result = {"passed": not failures, "subjects": metrics, "violations": failures}
+    if only is not None:
+        result["skipped"] = skipped
+    return result

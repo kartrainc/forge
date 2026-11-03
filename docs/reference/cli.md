@@ -67,7 +67,11 @@ forge --quality coverage --project-path . --base-ref origin/main
 
 Use `--subject` and `--suite unit|integration|e2e` to focus a test run while
 iterating. The final coverage gate still requires all three suites for the
-inventory, with fresh source-hashed reports. Omitting `--base-ref` makes all
+inventory, with fresh source-hashed reports. A CI that tests only the subjects a
+change touches passes them as a comma-separated list with the base,
+`--quality coverage --coverage-subjects api,web --base-ref origin/main`:
+those are gated in full and the others are skipped (see
+[subset runs](../operations/generated-code-quality.md#subset-runs)). Omitting `--base-ref` makes all
 executable source new; an invalid supplied base is an error. See
 [coverage semantics](../operations/generated-code-quality.md#coverage-gate).
 
