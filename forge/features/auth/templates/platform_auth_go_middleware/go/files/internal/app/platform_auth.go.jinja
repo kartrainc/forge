@@ -27,6 +27,7 @@ var platformAuthPublicPaths []string
 // security.auth.enabled the issuer and audience are required; otherwise a
 // missing issuer leaves only the dev identity for unauthenticated requests.
 func InitPlatformAuth(cfg *config.Config) error {
+	platformAuthPublicPaths = nil
 	auth := cfg.Security.Auth
 	issuer := strings.TrimRight(cmp.Or(os.Getenv("GATEKEEPER_ISSUER"), auth.ServerURL), "/")
 	audience := cmp.Or(os.Getenv("SERVICE_AUDIENCE"), auth.Audience)

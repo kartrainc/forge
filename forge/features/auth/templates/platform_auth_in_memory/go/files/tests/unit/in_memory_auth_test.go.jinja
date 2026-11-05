@@ -80,6 +80,12 @@ func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
 		t.Fatalf("jwks: %d %v", status, jwks)
 	}
 
+	_, custom := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "",
+		map[string]any{"sub": "dev-user", "tenant_id": "33333333-3333-4333-8333-333333333333"})
+	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", custom["access_token"].(string), nil); status != http.StatusNotFound {
+		t.Fatalf("a token for another tenant reaches the router: %d %v", status, body)
+	}
+
 	_, defaults := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "", map[string]any{"sub": "dev-user"})
 	if defaults["expires_in"] != float64(3600) {
 		t.Fatalf("default lifetime: %v", defaults)

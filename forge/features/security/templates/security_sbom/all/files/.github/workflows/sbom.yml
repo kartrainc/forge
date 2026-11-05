@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 # One CycloneDX SBOM and one vulnerability report per Python and Go service
-# under services/. The reports are uploaded, never gating: CI's own audit
-# steps gate the build.
+# under services/. Every failure is a warning annotation, never a failed run:
+# CI's own audit steps gate the build.
 jobs:
   sbom:
     runs-on: ubuntu-latest
@@ -33,11 +33,16 @@ jobs:
           for manifest in services/*/pyproject.toml; do
             service="$(dirname "$manifest")"
             name="$(basename "$service")"
-            (cd "$service" && uv sync --locked --no-dev)
+            if ! (cd "$service" && uv sync --locked --no-dev); then
+              echo "::warning::$name: uv sync --locked failed, no SBOM or audit report"
+              continue
+            fi
             uvx --from cyclonedx-bom cyclonedx-py environment "$service/.venv" \
-              -o "$RUNNER_TEMP/sbom/$name.cdx.json"
+              -o "$RUNNER_TEMP/sbom/$name.cdx.json" \
+              || echo "::warning::$name: cyclonedx-py failed"
             uvx pip-audit --path "$service"/.venv/lib/python3*/site-packages --skip-editable \
-              --format json --output "$RUNNER_TEMP/sbom/$name.pip-audit.json" || true
+              --format json --output "$RUNNER_TEMP/sbom/$name.pip-audit.json" \
+              || echo "::warning::$name: pip-audit reported vulnerabilities or failed"
           done
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -54,9 +59,11 @@ jobs:
             service="$(dirname "$manifest")"
             name="$(basename "$service")"
             (cd "$service" && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
-              mod -json -output "$RUNNER_TEMP/sbom/$name.cdx.json")
+              mod -json -output "$RUNNER_TEMP/sbom/$name.cdx.json") \
+              || echo "::warning::$name: cyclonedx-gomod failed"
             (cd "$service" && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
-              > "$RUNNER_TEMP/sbom/$name.govulncheck.json") || true
+              > "$RUNNER_TEMP/sbom/$name.govulncheck.json") \
+              || echo "::warning::$name: govulncheck failed"
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -64,4 +71,4 @@ jobs:
         with:
           name: sbom
           path: ${{ runner.temp }}/sbom/
-          if-no-files-found: error
+          if-no-files-found: warn
