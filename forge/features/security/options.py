@@ -41,14 +41,18 @@ CUSTOMISE: add the origins your frontend calls, WebSocket ones included, to
             path="security.sbom",
             type=OptionType.BOOL,
             default=False,
-            summary="GitHub Actions workflow emitting a CycloneDX SBOM + pip-audit report.",
+            summary="GitHub Actions workflow emitting a CycloneDX SBOM + vulnerability report per service.",
             description="""\
-Adds ``.github/workflows/sbom.yml`` that generates a CycloneDX SBOM on
-every push and runs pip-audit weekly. Artifacts are uploaded so SBOM
-attestation and vulnerability disclosure happens as part of normal CI.
+Adds ``.github/workflows/sbom.yml`` at the repository root. On every push,
+pull request and weekly, it writes a CycloneDX SBOM and a vulnerability
+report for each Python service (cyclonedx-py + pip-audit over the locked
+environment) and each Go service (cyclonedx-gomod + govulncheck), and
+uploads them as the ``sbom`` artifact. The reports never fail the run; the
+generated CI's own audit steps gate the build.
 
-BACKENDS: python
-DEPENDENCY: none runtime; CI installs cyclonedx-bom + pip-audit.""",
+BACKENDS: python, go
+DEPENDENCY: none runtime; CI runs cyclonedx-bom, pip-audit, cyclonedx-gomod
+and govulncheck.""",
             category=FeatureCategory.OBSERVABILITY,
             enables={True: ("security_sbom",)},
         )

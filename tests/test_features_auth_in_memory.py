@@ -6,8 +6,8 @@ route) so a developer can drive the authenticated surface of a generated
 service without standing up Keycloak / Gatekeeper / Redis.
 
 This file gates:
-  - the fragment's registration + shape (Python-only, backend-scoped, depends
-    on the issuer-agnostic Python middleware);
+  - the fragment's registration + shape (Python and Go, backend-scoped,
+    depends on the issuer-agnostic middleware of each language);
   - the ``auth.provider`` enables wiring;
   - the provider-aware keycloak coercion (``in_memory`` must remain usable
     *without* ``include_keycloak`` — the coercion that forces
@@ -61,8 +61,8 @@ def _fragment_root() -> Path:
 def test_in_memory_fragment_registered() -> None:
     assert FRAGMENT_NAME in FRAGMENT_REGISTRY
     frag = FRAGMENT_REGISTRY[FRAGMENT_NAME]
-    # Python-only — the in-process issuer is a FastAPI/Python construct.
     assert BackendLanguage.PYTHON in frag.implementations
+    assert BackendLanguage.GO in frag.implementations
     assert BackendLanguage.NODE not in frag.implementations
     assert BackendLanguage.RUST not in frag.implementations
     # Backend-scoped — files land per Python backend.
@@ -342,3 +342,72 @@ def test_shipped_files_are_python_or_init(rel: str) -> None:
     path = _fragment_root() / rel
     assert path.suffix == ".py"
     assert path.read_text(encoding="utf-8").strip(), f"{rel} is empty"
+
+
+# --------------------------------------------------------------------------- #
+# Go
+# --------------------------------------------------------------------------- #
+
+
+def _go_render(tmp_path: Path, provider: str) -> Path:
+    cfg = ProjectConfig(
+        project_name="gim",
+        output_dir=str(tmp_path),
+        backends=[
+            BackendConfig(
+                name="api",
+                project_name="gim",
+                language=BackendLanguage.GO,
+                features=["items"],
+            )
+        ],
+        frontends=[],
+        include_keycloak=provider == "gatekeeper",
+        options={"auth.mode": "generate", "auth.provider": provider},
+    )
+    return Path(generate(cfg, quiet=True, dry_run=True))
+
+
+def test_go_in_memory_registered() -> None:
+    frag = FRAGMENT_REGISTRY[FRAGMENT_NAME]
+    impl = frag.implementations[BackendLanguage.GO]
+    assert impl.scope == "backend"
+    assert "github.com/golang-jwt/jwt/v5@v5.3.1" in impl.dependencies
+    assert "platform_auth_go_middleware" in frag.depends_on
+    middleware = FRAGMENT_REGISTRY["platform_auth_go_middleware"]
+    assert "auth.provider" in middleware.implementations[BackendLanguage.GO].reads_options
+
+
+def test_go_in_memory_render_replaces_the_gatekeeper_guard(tmp_path: Path) -> None:
+    root = _go_render(tmp_path, "in_memory")
+    backend = root / "services" / "api"
+    for relative in (
+        "internal/devauth/issuer.go",
+        "internal/app/in_memory_auth.go",
+        "internal/routes/dev_auth.go",
+        "tests/unit/in_memory_auth_test.go",
+        "tests/e2e/in_memory_auth_test.go",
+    ):
+        assert (backend / relative).is_file(), relative
+    main_go = (backend / "cmd/server/main.go").read_text(encoding="utf-8")
+    assert "app.InitInMemoryAuth(cfg)" in main_go
+    assert "app.InitPlatformAuth(cfg)" not in main_go
+    routes_go = (backend / "internal/routes/routes.go").read_text(encoding="utf-8")
+    assert 'api.Route("/dev/auth", registerDevAuth)' in routes_go
+    platform_auth = (backend / "internal/app/platform_auth.go").read_text(encoding="utf-8")
+    assert "PublicPaths: platformAuthPublicPaths" in platform_auth
+    gatekeeper_e2e = (backend / "tests/e2e/platform_auth_test.go").read_text(encoding="utf-8")
+    assert "TestServiceBinaryVerifiesPlatformTokens" not in gatekeeper_e2e
+    assert gatekeeper_e2e.startswith("package e2e_test\n")
+    assert "github.com/golang-jwt/jwt/v5 v5.3.1" in (backend / "go.mod").read_text(encoding="utf-8")
+    assert not (root / "deploy" / "infra" / "gatekeeper").exists()
+
+
+def test_go_gatekeeper_render_keeps_the_platform_guard(tmp_path: Path) -> None:
+    backend = _go_render(tmp_path, "gatekeeper") / "services" / "api"
+    main_go = (backend / "cmd/server/main.go").read_text(encoding="utf-8")
+    assert "app.InitPlatformAuth(cfg)" in main_go
+    assert "InitInMemoryAuth" not in main_go
+    assert not (backend / "internal/devauth").exists()
+    gatekeeper_e2e = (backend / "tests/e2e/platform_auth_test.go").read_text(encoding="utf-8")
+    assert "func TestServiceBinaryVerifiesPlatformTokens" in gatekeeper_e2e

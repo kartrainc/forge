@@ -443,16 +443,20 @@ REQUIRES: OTEL_EXPORTER_OTLP_ENDPOINT (or LOGFIRE_TOKEN on Python).
 
 ### `security.sbom`
 
-**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** python
+**Type:** `bool` · **Default:** `false` · **Stability:** `stable` · **Backends:** go, python
 
-_GitHub Actions workflow emitting a CycloneDX SBOM + pip-audit report._
+_GitHub Actions workflow emitting a CycloneDX SBOM + vulnerability report per service._
 
-Adds ``.github/workflows/sbom.yml`` that generates a CycloneDX SBOM on
-every push and runs pip-audit weekly. Artifacts are uploaded so SBOM
-attestation and vulnerability disclosure happens as part of normal CI.
+Adds ``.github/workflows/sbom.yml`` at the repository root. On every push,
+pull request and weekly, it writes a CycloneDX SBOM and a vulnerability
+report for each Python service (cyclonedx-py + pip-audit over the locked
+environment) and each Go service (cyclonedx-gomod + govulncheck), and
+uploads them as the ``sbom`` artifact. The reports never fail the run; the
+generated CI's own audit steps gate the build.
 
-BACKENDS: python
-DEPENDENCY: none runtime; CI installs cyclonedx-bom + pip-audit.
+BACKENDS: python, go
+DEPENDENCY: none runtime; CI runs cyclonedx-bom, pip-audit, cyclonedx-gomod
+and govulncheck.
 
 **Enables fragments:**
 - on `true` → `security_sbom`

@@ -16,6 +16,10 @@ import (
 
 var platformAuthGuard atomic.Pointer[platformauth.AuthGuard]
 
+// platformAuthPublicPaths are served without a token (auth.provider=in_memory
+// adds its token routes).
+var platformAuthPublicPaths []string
+
 // InitPlatformAuth builds the process-wide guard. The issuer and audience
 // come from GATEKEEPER_ISSUER / SERVICE_AUDIENCE, falling back to
 // security.auth.server_url / audience; the JWKS URI is security.auth.jwks_uri
@@ -58,7 +62,8 @@ func InitPlatformAuth(cfg *config.Config) error {
 
 func platformAuth(cfg *config.Config) middleware.Middleware {
 	return middleware.PlatformAuth(middleware.PlatformAuthOptions{
-		Guard:   platformAuthGuard.Load(),
-		DevMode: !cfg.Security.Auth.Enabled,
+		Guard:       platformAuthGuard.Load(),
+		DevMode:     !cfg.Security.Auth.Enabled,
+		PublicPaths: platformAuthPublicPaths,
 	})
 }

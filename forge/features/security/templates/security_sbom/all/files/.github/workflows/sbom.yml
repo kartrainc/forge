@@ -1,0 +1,67 @@
+name: SBOM + dependency audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly sweep for new CVEs affecting pinned deps.
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+# One CycloneDX SBOM and one vulnerability report per Python and Go service
+# under services/. The reports are uploaded, never gating: CI's own audit
+# steps gate the build.
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: hashFiles('services/*/pyproject.toml') != ''
+        with:
+          prune-cache: true
+
+      - name: Python services
+        if: hashFiles('services/*/pyproject.toml') != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          for manifest in services/*/pyproject.toml; do
+            service="$(dirname "$manifest")"
+            name="$(basename "$service")"
+            (cd "$service" && uv sync --locked --no-dev)
+            uvx --from cyclonedx-bom cyclonedx-py environment "$service/.venv" \
+              -o "$RUNNER_TEMP/sbom/$name.cdx.json"
+            uvx pip-audit --path "$service"/.venv/lib/python3*/site-packages --skip-editable \
+              --format json --output "$RUNNER_TEMP/sbom/$name.pip-audit.json" || true
+          done
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: hashFiles('services/*/go.mod') != ''
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Go services
+        if: hashFiles('services/*/go.mod') != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          for manifest in services/*/go.mod; do
+            service="$(dirname "$manifest")"
+            name="$(basename "$service")"
+            (cd "$service" && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
+              mod -json -output "$RUNNER_TEMP/sbom/$name.cdx.json")
+            (cd "$service" && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
+              > "$RUNNER_TEMP/sbom/$name.govulncheck.json") || true
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error

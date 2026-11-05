@@ -23,13 +23,12 @@ def _impl(name: str, lang: str) -> str:
 
 
 def register_all(api: ForgeAPI) -> None:
+    # One workflow at the repository root, the only place GitHub reads
+    # workflows from; it covers every Python and Go service.
+    sbom = FragmentImplSpec(fragment_dir=_impl("security_sbom", "all"), scope="project")
     api.add_fragment(
         Fragment(
             name="security_sbom",
-            implementations={
-                BackendLanguage.PYTHON: FragmentImplSpec(
-                    fragment_dir=_impl("security_sbom", "python"),
-                ),
-            },
+            implementations={BackendLanguage.PYTHON: sbom, BackendLanguage.GO: sbom},
         )
     )
