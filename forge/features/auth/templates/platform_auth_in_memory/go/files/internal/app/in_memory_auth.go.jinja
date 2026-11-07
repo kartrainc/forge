@@ -1,0 +1,52 @@
+package app
+
+import (
+	"cmp"
+	"log/slog"
+	"os"
+
+	platformauth "forge.local/platform-auth-go"
+
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/devauth"
+)
+
+// InitInMemoryAuth replaces InitPlatformAuth for auth.provider=in_memory: the
+// guard verifies the tokens of an in-process issuer instead of Gatekeeper's.
+// SERVICE_AUDIENCE (or security.auth.audience) is the audience and
+// TENANT_ID_CLAIM the tenant claim, as for Gatekeeper. It fails unless ENV
+// (or APP_ENV) is a development posture; unset is production.
+func InitInMemoryAuth(cfg *config.Config) error {
+	if err := devauth.RefuseProduction(cmp.Or(os.Getenv("ENV"), os.Getenv("APP_ENV"), "production")); err != nil {
+		return err
+	}
+	audience := cmp.Or(os.Getenv("SERVICE_AUDIENCE"), cfg.Security.Auth.Audience, "in-memory-dev")
+	tenantIDClaim := cmp.Or(os.Getenv("TENANT_ID_CLAIM"), platformauth.DefaultTenantIDClaim)
+	issuer, err := devauth.New(audience, tenantIDClaim)
+	if err != nil {
+		return err
+	}
+	jwks, err := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: issuer.HTTPClient()})
+	if err == nil {
+		err = jwks.RegisterIssuer(devauth.IssuerURN, devauth.JWKSURI)
+	}
+	if err != nil {
+		return err
+	}
+	guardConfig := platformauth.NewAuthGuardConfig(audience, jwks)
+	guardConfig.TenantIDClaim = tenantIDClaim
+	guardConfig.TrustMap = platformauth.NewInMemoryIssuerTrustMap(map[string]platformauth.TenantTrust{
+		devauth.DevTenantID: {ExpectedIssuer: devauth.IssuerURN},
+	})
+	guardConfig.MayAct = platformauth.AllowAllMayActPolicy{}
+	guard, err := platformauth.NewAuthGuard(guardConfig)
+	if err != nil {
+		return err
+	}
+	platformAuthGuard.Store(guard)
+	platformAuthPublicPaths = devauth.PublicPaths
+	devauth.Install(issuer)
+	slog.Warn("auth.provider=in_memory: tokens come from POST /api/v1/dev/auth/token, never use this in production",
+		"audience", audience, "dev_mode", !cfg.Security.Auth.Enabled)
+	return nil
+}

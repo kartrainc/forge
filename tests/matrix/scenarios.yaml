@@ -531,6 +531,30 @@ scenarios:
         reliability.cache: memory
         platform.webhooks: true
 
+  - name: go_in_memory
+    description: >-
+      Go-only headless service with auth.provider=in_memory: the in-process
+      dev issuer, its /api/v1/dev/auth routes and the guard that verifies
+      their tokens (verify runs the Go unit suite).
+    lanes: [generate, verify]
+    port_base: 8240
+    expected_files:
+      - services/api/go.mod
+      - services/api/internal/devauth/issuer.go
+      - forge.toml
+    config:
+      project_name: "Go In Memory"
+      include_keycloak: false
+      backends:
+        - name: api
+          language: go
+          features: ["items"]
+          server_port: 8240
+          go_version: "1.27"
+      options:
+        auth.mode: "generate"
+        auth.provider: "in_memory"
+
   - name: py_vue_svelte_frontends
     description: >-
       Python + three apps: the shadcn Vue primary, a Nuxt UI app and a Svelte

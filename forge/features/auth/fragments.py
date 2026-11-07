@@ -441,6 +441,8 @@ def register_all(api: ForgeAPI) -> None:
             implementations={
                 BackendLanguage.GO: FragmentImplSpec(
                     fragment_dir=_impl("platform_auth_go_middleware", "go"),
+                    # in_memory swaps the startup guard and the binary's e2e test.
+                    reads_options=("auth.provider",),
                 ),
             },
             depends_on=("platform_auth_sdk_go",),
@@ -512,7 +514,7 @@ def register_all(api: ForgeAPI) -> None:
 
     # ``auth.provider=in_memory`` — zero-dependency dev token issuer.
     #
-    # Backend-scoped, Python-only (parity tier auto-derives to 3). Selected by
+    # Backend-scoped, Python and Go (parity tier auto-derives to 2). Selected by
     # the ``auth.provider`` sub-discriminator as an alternative to the
     # Gatekeeper container: instead of an external token authority, the service
     # mints + verifies ES256 dev tokens *in-process* (no Keycloak / Gatekeeper
@@ -531,6 +533,11 @@ def register_all(api: ForgeAPI) -> None:
     # ``platform_auth`` import), so the full chain resolves. For local-dev
     # convenience the issuer needs no infra capabilities at all — that is the
     # whole point of the provider.
+    #
+    # Go ships ``internal/devauth`` (issuer + JWKS over an in-process
+    # http.Client), ``app.InitInMemoryAuth`` and the ``/api/v1/dev/auth``
+    # routes; ``platform_auth_go_middleware`` calls InitInMemoryAuth in place
+    # of InitPlatformAuth and serves the token routes without a token.
     api.add_fragment(
         Fragment(
             name="platform_auth_in_memory_provider",
@@ -539,8 +546,12 @@ def register_all(api: ForgeAPI) -> None:
                     fragment_dir=_impl("platform_auth_in_memory", "python"),
                     # Backend-scoped (default) — files land per Python backend.
                 ),
+                BackendLanguage.GO: FragmentImplSpec(
+                    fragment_dir=_impl("platform_auth_in_memory", "go"),
+                    dependencies=("github.com/golang-jwt/jwt/v5@v5.3.1",),
+                ),
             },
-            depends_on=("platform_auth_python_middleware",),
+            depends_on=("platform_auth_python_middleware", "platform_auth_go_middleware"),
         )
     )
 

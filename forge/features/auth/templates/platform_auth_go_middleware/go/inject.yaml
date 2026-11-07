@@ -2,11 +2,18 @@
 # verifier after CORS in the middleware chain. Snippets call package-level
 # helpers from internal/app/platform_auth.go, so they need no new imports.
 
+# auth.provider=in_memory builds the guard from the in-process dev issuer
+# (platform_auth_in_memory) instead of Gatekeeper's JWKS.
 - target: cmd/server/main.go
   marker: FORGE:STARTUP_INIT
   position: before
+  render: true
   snippet: |-
+    {% if options['auth.provider'] == 'in_memory' -%}
+    if err := app.InitInMemoryAuth(cfg); err != nil {
+    {%- else -%}
     if err := app.InitPlatformAuth(cfg); err != nil {
+    {%- endif %}
     	slog.Error("platform auth configuration error", "error", err)
     	return 1
     }

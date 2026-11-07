@@ -16,6 +16,9 @@ type PlatformAuthOptions struct {
 	// DevMode (security.auth.enabled=false) binds identity.Dev() to requests
 	// that carry no Authorization header. Presented tokens are still verified.
 	DevMode bool
+	// PublicPaths skip verification in addition to
+	// platformauth.DefaultExcludedPaths.
+	PublicPaths []string
 }
 
 // PlatformAuth verifies the Gatekeeper-issued bearer token of every request
@@ -25,7 +28,7 @@ type PlatformAuthOptions struct {
 func PlatformAuth(options PlatformAuthOptions) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if slices.Contains(platformauth.DefaultExcludedPaths, r.URL.Path) {
+			if slices.Contains(platformauth.DefaultExcludedPaths, r.URL.Path) || slices.Contains(options.PublicPaths, r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}

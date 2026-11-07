@@ -1,0 +1,8 @@
+# platform_auth_in_memory/go: mount the unauthenticated /api/v1/dev/auth
+# routes. platform_auth_go_middleware calls app.InitInMemoryAuth at startup in
+# place of app.InitPlatformAuth when auth.provider=in_memory.
+
+- target: internal/routes/routes.go
+  marker: FORGE:ROUTES_REGISTRATION
+  position: before
+  snippet: 'api.Route("/dev/auth", registerDevAuth)'

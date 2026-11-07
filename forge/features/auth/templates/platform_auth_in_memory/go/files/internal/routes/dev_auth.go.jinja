@@ -1,0 +1,43 @@
+package routes
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"{{ project_name }}/internal/apperrors"
+	"{{ project_name }}/internal/devauth"
+)
+
+// registerDevAuth mounts the in_memory provider's unauthenticated token and
+// JWKS routes under /api/v1/dev/auth.
+func registerDevAuth(router chi.Router) {
+	router.Post("/token", handle(func(w http.ResponseWriter, r *http.Request) error {
+		issuer := devauth.Current()
+		if issuer == nil {
+			return apperrors.NewDependencyUnavailable("in-memory issuer")
+		}
+		var body devauth.TokenRequest
+		if err := decode(r, &body); err != nil {
+			return err
+		}
+		token, err := issuer.Mint(body)
+		if err != nil {
+			return apperrors.NewValidation(err.Error())
+		}
+		expiresIn := body.ExpiresIn
+		if expiresIn == 0 {
+			expiresIn = 3600
+		}
+		return writeJSON(w, http.StatusOK, map[string]any{
+			"access_token": token, "token_type": "Bearer", "expires_in": expiresIn,
+		})
+	}))
+	router.Get("/jwks", handle(func(w http.ResponseWriter, _ *http.Request) error {
+		issuer := devauth.Current()
+		if issuer == nil {
+			return apperrors.NewDependencyUnavailable("in-memory issuer")
+		}
+		return writeJSON(w, http.StatusOK, issuer.JWKS())
+	}))
+}

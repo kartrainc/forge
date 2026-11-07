@@ -1,5 +1,8 @@
 package e2e_test
 
+{% if options['auth.provider'] == 'in_memory' -%}
+// auth.provider=in_memory: in_memory_auth_test.go covers the binary's tokens.
+{%- else -%}
 import (
 	"encoding/json"
 	"net/http"
@@ -65,3 +68,4 @@ func TestServiceBinaryVerifiesPlatformTokens(t *testing.T) {
 		t.Fatal("enabled auth without an issuer must stop boot")
 	}
 }
+{%- endif %}
