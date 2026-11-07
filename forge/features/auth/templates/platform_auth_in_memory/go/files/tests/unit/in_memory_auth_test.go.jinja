@@ -143,6 +143,7 @@ func TestInMemoryAuthRefusesProduction(t *testing.T) {
 	t.Cleanup(func() {
 		cfg := config.Defaults()
 		_ = app.InitPlatformAuth(&cfg)
+		devauth.Install(nil)
 	})
 	cfg := config.Defaults()
 	for _, env := range []string{"", "production", "staging", "ci"} {
