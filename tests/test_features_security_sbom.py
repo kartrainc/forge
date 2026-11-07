@@ -59,11 +59,28 @@ def test_sbom_lands_at_the_repository_root(tmp_path: Path, language: BackendLang
 
 
 def test_one_workflow_covers_python_and_go(tmp_path: Path) -> None:
-    workflow = _workflow(_render(tmp_path, BackendLanguage.PYTHON, BackendLanguage.GO))
-    steps = yaml.safe_load(workflow)["jobs"]["sbom"]["steps"]
-    names = [step.get("name") for step in steps]
-    assert "Python services" in names
-    assert "Go services" in names
+    jobs = yaml.safe_load(_workflow(_render(tmp_path, BackendLanguage.PYTHON, BackendLanguage.GO)))[
+        "jobs"
+    ]
+    assert "Python services" in [step.get("name") for step in jobs["python"]["steps"]]
+    assert jobs["go"]["needs"] == "go-services"
+    assert (
+        jobs["go"]["strategy"]["matrix"]["include"]
+        == "${{ fromJSON(needs.go-services.outputs.matrix) }}"
+    )
+
+
+def test_go_reports_with_each_service_toolchain(tmp_path: Path) -> None:
+    jobs = yaml.safe_load(_workflow(_render(tmp_path, BackendLanguage.GO)))["jobs"]
+    listing = jobs["go-services"]["steps"][-1]["run"]
+    assert 'awk \'$1 == "go"' in listing
+    setup = next(step for step in jobs["go"]["steps"] if "setup-go" in step.get("uses", ""))
+    assert setup["with"]["go-version"] == "${{ matrix.go }}"
+    assert setup["with"]["check-latest"] is True
+    report = next(
+        step for step in jobs["go"]["steps"] if step.get("name") == "SBOM and vulnerability report"
+    )
+    assert report["env"]["GOTOOLCHAIN"] == "local"
 
 
 def test_workflow_reports_without_gating(tmp_path: Path) -> None:
@@ -72,9 +89,9 @@ def test_workflow_reports_without_gating(tmp_path: Path) -> None:
     assert re.search(r"pip-audit --path .*/\.venv/lib/python3\*/site-packages", workflow)
     for tool in ("cyclonedx-py", "pip-audit --path", "cyclonedx-gomod@", "govulncheck@"):
         command = workflow[workflow.index(tool) :]
-        assert "|| echo \"::warning::" in command[: command.index("done")], tool
+        assert '|| echo "::warning::' in command[: command.index("::warning::") + 11], tool
     assert "continue" in workflow[workflow.index("uv sync --locked") :]
-    assert "if-no-files-found: warn" in workflow
+    assert "if-no-files-found: error" not in workflow
     for line in workflow.splitlines():
         if "uses:" in line:
             assert re.search(r"@[0-9a-f]{40} # v", line), line

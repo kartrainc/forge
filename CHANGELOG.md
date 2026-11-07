@@ -15,8 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `security.sbom` writes `.github/workflows/sbom.yml` at the repository root. The Python workflow was written under
   `services/<name>/.github/workflows/`, where GitHub never runs it, and its pip-audit audited the runner's own
   environment instead of the service's. The workflow now syncs each Python service's locked environment and runs
-  cyclonedx-py and pip-audit against it, runs cyclonedx-gomod and govulncheck for each Go service, and uploads the
-  reports as the `sbom` artifact. The reports never fail the run.
+  cyclonedx-py and pip-audit against it, runs cyclonedx-gomod and govulncheck for each Go service on the Go release its
+  `go.mod` names (the latest patch, as its Dockerfile builds), and uploads the reports as `sbom-*` artifacts. The
+  reports never fail the run.
 
 ### Coverage gate for a subset of subjects
 

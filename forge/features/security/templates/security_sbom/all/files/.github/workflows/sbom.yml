@@ -16,7 +16,7 @@ permissions:
 # under services/. Every failure is a warning annotation, never a failed run:
 # CI's own audit steps gate the build.
 jobs:
-  sbom:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,30 +45,69 @@ jobs:
               || echo "::warning::$name: pip-audit reported vulnerabilities or failed"
           done
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: hashFiles('services/*/go.mod') != ''
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
-          go-version: stable
+          name: sbom-python
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: ignore
+
+  go-services:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Each Go service with the major.minor of its go directive, the version
+      # its Dockerfile builds with (golang:<major.minor>, the latest patch).
+      - id: list
+        run: |
+          for manifest in services/*/go.mod; do
+            [ -f "$manifest" ] || continue
+            service="$(dirname "$manifest")"
+            go="$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2]; exit }' "$manifest")"
+            jq -nc --arg path "$service" --arg name "$(basename "$service")" --arg go "$go" \
+              '{path: $path, name: $name, go: $go}'
+          done | jq -sc . > "$RUNNER_TEMP/services.json"
+          echo "matrix=$(cat "$RUNNER_TEMP/services.json")" >> "$GITHUB_OUTPUT"
+
+  go:
+    needs: go-services
+    if: needs.go-services.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.go-services.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # govulncheck reports the standard library of the toolchain that runs it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
           cache: false
 
-      - name: Go services
-        if: hashFiles('services/*/go.mod') != ''
+      - name: SBOM and vulnerability report
+        env:
+          GOTOOLCHAIN: local
         run: |
           mkdir -p "$RUNNER_TEMP/sbom"
-          for manifest in services/*/go.mod; do
-            service="$(dirname "$manifest")"
-            name="$(basename "$service")"
-            (cd "$service" && go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
-              mod -json -output "$RUNNER_TEMP/sbom/$name.cdx.json") \
-              || echo "::warning::$name: cyclonedx-gomod failed"
-            (cd "$service" && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
-              > "$RUNNER_TEMP/sbom/$name.govulncheck.json") \
-              || echo "::warning::$name: govulncheck failed"
-          done
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
+            mod -json -output "$RUNNER_TEMP/sbom/${{ matrix.name }}.cdx.json" \
+            || echo "::warning::${{ matrix.name }}: cyclonedx-gomod failed"
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
+            > "$RUNNER_TEMP/sbom/${{ matrix.name }}.govulncheck.json" \
+            || echo "::warning::${{ matrix.name }}: govulncheck failed"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: sbom
+          name: sbom-go-${{ matrix.name }}
           path: ${{ runner.temp }}/sbom/
           if-no-files-found: warn

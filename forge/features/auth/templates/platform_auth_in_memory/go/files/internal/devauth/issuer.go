@@ -80,13 +80,15 @@ func (i *Issuer) Mint(request TokenRequest) (string, error) {
 	if _, err := uuid.Parse(tenant); err != nil {
 		return "", errors.New("'tenant_id' must be a UUID")
 	}
-	lifetime := time.Duration(request.ExpiresIn) * time.Second
-	if request.ExpiresIn == 0 {
-		lifetime = time.Hour
+	seconds := request.ExpiresIn
+	if seconds == 0 {
+		seconds = int(time.Hour / time.Second)
 	}
-	if lifetime <= 0 || lifetime > MaxLifetime {
-		return "", fmt.Errorf("'expires_in' must be between 1 and %d seconds", int(MaxLifetime.Seconds()))
+	// Bounded before the conversion, so the Duration product cannot overflow.
+	if seconds < 1 || seconds > int(MaxLifetime/time.Second) {
+		return "", fmt.Errorf("'expires_in' must be between 1 and %d seconds", int(MaxLifetime/time.Second))
 	}
+	lifetime := time.Duration(seconds) * time.Second
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss":           IssuerURN,
@@ -144,8 +146,9 @@ func Install(issuer *Issuer) { current.Store(issuer) }
 // Current is the installed issuer, or nil.
 func Current() *Issuer { return current.Load() }
 
-// DevEnvironments are the ENV values the issuer starts in.
-var DevEnvironments = []string{"development", "dev", "local", "test", "testing", "ci"}
+// DevEnvironments are the ENV values the issuer starts in: those config.Validate
+// treats as development. Any other, ci included, is a production posture.
+var DevEnvironments = []string{"development", "dev", "local", "test", "testing"}
 
 // RefuseProduction fails outside DevEnvironments: POST /dev/auth/token mints
 // any identity without authentication.

@@ -61,9 +61,11 @@ func TestServiceBinaryIssuesInMemoryTokens(t *testing.T) {
 		t.Fatalf("graceful shutdown must exit 0: %v", err)
 	}
 
-	refused := command(t, "server", "ENV=production", "PORT="+strconv.Itoa(freePort(t)), "APP__SECURITY__AUTH__ENABLED=false")
-	output, err := refused.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "refuses to start") {
-		t.Fatalf("a production env must stop boot: %v\n%s", err, output)
+	for _, env := range []string{"production", "ci"} {
+		refused := command(t, "server", "ENV="+env, "PORT="+strconv.Itoa(freePort(t)), "APP__SECURITY__AUTH__ENABLED=false")
+		output, err := refused.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "refuses to start") {
+			t.Fatalf("ENV=%s must stop boot: %v\n%s", env, err, output)
+		}
 	}
 }

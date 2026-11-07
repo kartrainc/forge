@@ -111,10 +111,12 @@ func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
 func TestInMemoryAuthRejectsInvalidTokenRequests(t *testing.T) {
 	handler, _ := inMemoryApp(t, false)
 	for name, payload := range map[string]map[string]any{
-		"missing subject": {"sub": " "},
-		"tenant not uuid": {"sub": "u", "tenant_id": "acme"},
-		"negative expiry": {"sub": "u", "expires_in": -1},
-		"expiry too long": {"sub": "u", "expires_in": 86401},
+		"missing subject":             {"sub": " "},
+		"tenant not uuid":             {"sub": "u", "tenant_id": "acme"},
+		"negative expiry":             {"sub": "u", "expires_in": -1},
+		"expiry too long":             {"sub": "u", "expires_in": 86401},
+		"overflowing expiry":          {"sub": "u", "expires_in": 18446744134},
+		"overflowing negative expiry": {"sub": "u", "expires_in": -18446740474},
 	} {
 		if status, body := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "", payload); status != http.StatusUnprocessableEntity || testutil.ErrorCode(body) != "VALIDATION_FAILED" {
 			t.Fatalf("%s: %d %v", name, status, body)
@@ -143,7 +145,7 @@ func TestInMemoryAuthRefusesProduction(t *testing.T) {
 		_ = app.InitPlatformAuth(&cfg)
 	})
 	cfg := config.Defaults()
-	for _, env := range []string{"", "production", "staging"} {
+	for _, env := range []string{"", "production", "staging", "ci"} {
 		t.Setenv("ENV", env)
 		t.Setenv("APP_ENV", "")
 		if err := app.InitInMemoryAuth(&cfg); err == nil || !strings.Contains(err.Error(), "refuses to start") {
