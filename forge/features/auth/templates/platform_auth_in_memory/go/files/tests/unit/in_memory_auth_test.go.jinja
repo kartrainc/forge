@@ -82,9 +82,13 @@ func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
 		t.Fatalf("jwks: %d %v", status, jwks)
 	}
 
-	_, custom := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "",
+	status, custom := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "",
 		map[string]any{"sub": "dev-user", "tenant_id": "33333333-3333-4333-8333-333333333333"})
-	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", custom["access_token"].(string), nil); status != http.StatusNotFound {
+	customToken, ok := custom["access_token"].(string)
+	if status != http.StatusOK || !ok {
+		t.Fatalf("mint for another tenant: %d %v", status, custom)
+	}
+	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", customToken, nil); status != http.StatusNotFound {
 		t.Fatalf("a token for another tenant reaches the router: %d %v", status, body)
 	}
 
@@ -160,7 +164,7 @@ func TestInMemoryAuthRefusesProduction(t *testing.T) {
 			t.Fatalf("ENV=%q: %v", env, err)
 		}
 	}
-	for _, env := range devauth.DevEnvironments {
+	for _, env := range devauth.DevEnvironments() {
 		if err := devauth.RefuseProduction(" " + strings.ToUpper(env) + " "); err != nil {
 			t.Fatalf("%s: %v", env, err)
 		}

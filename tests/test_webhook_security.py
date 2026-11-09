@@ -105,6 +105,13 @@ class TestSsrfGuard:
             lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))],
         )
 
+    def test_http_rejected_in_ci(self, monkeypatch):
+        monkeypatch.setenv("ENV", "ci")
+        svc = _load_service()
+        self._stub_public_dns(monkeypatch, svc)
+        with pytest.raises(svc.WebhookUrlError):
+            svc.validate_outbound_url("http://example.com/hook")
+
     def test_http_allowed_in_dev(self, monkeypatch):
         monkeypatch.setenv("ENV", "development")
         svc = _load_service()

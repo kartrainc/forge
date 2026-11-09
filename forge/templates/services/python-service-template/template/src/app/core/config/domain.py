@@ -58,7 +58,7 @@ class CorsConfig(BaseModel):
         if not self.enabled:
             return self
         env = os.getenv("ENV", os.getenv("ENVIRONMENT", "production")).lower()
-        if env in ("development", "dev", "local", "test", "testing", "ci"):
+        if env in ("development", "dev", "local", "test", "testing"):
             return self
         if self.allow_credentials and "*" in self.allow_origins:
             raise ValueError(

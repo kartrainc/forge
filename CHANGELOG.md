@@ -13,8 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   platform-auth middleware takes `PublicPaths`.
 - `auth.provider=in_memory` starts only when `ENV` is `development`, `dev`, `local`, `test` or `testing`, in both
   languages; unset, `ENV` falls back to the variable the service's own config reads (`ENVIRONMENT` on Python,
-  `APP_ENV` on Go). **Breaking for Python:** `ENV=ci` is now refused, as every backend's production guard already
-  treats `ci`; run CI with `ENV=testing`.
+  `APP_ENV` on Go). **Breaking for Python:** `ENV=ci` is now a production posture for the in_memory provider (it
+  refuses to start), for CORS (`allow_origins=["*"]` with credentials is refused) and for webhooks (an `http://`
+  target is refused), as it already was for every backend's auth guard; run CI with `ENV=testing`.
 - `security.sbom` writes `.github/workflows/sbom.yml` at the repository root. The Python workflow was written under
   `services/<name>/.github/workflows/`, where GitHub never runs it, and its pip-audit audited the runner's own
   environment instead of the service's. The workflow now syncs each Python service's locked environment and runs

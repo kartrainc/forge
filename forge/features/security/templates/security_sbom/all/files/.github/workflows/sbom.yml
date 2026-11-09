@@ -63,14 +63,18 @@ jobs:
       # its Dockerfile builds with (golang:<major.minor>, the latest patch).
       - id: list
         run: |
+          : > "$RUNNER_TEMP/services.jsonl"
           for manifest in services/*/go.mod; do
             [ -f "$manifest" ] || continue
             service="$(dirname "$manifest")"
             go="$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2]; exit }' "$manifest")"
+            if [ -z "$go" ]; then
+              echo "::warning::$(basename "$service"): go.mod has no go directive, report uses the runner's Go"
+            fi
             jq -nc --arg path "$service" --arg name "$(basename "$service")" --arg go "$go" \
-              '{path: $path, name: $name, go: $go}'
-          done | jq -sc . > "$RUNNER_TEMP/services.json"
-          echo "matrix=$(cat "$RUNNER_TEMP/services.json")" >> "$GITHUB_OUTPUT"
+              '{path: $path, name: $name, go: $go}' >> "$RUNNER_TEMP/services.jsonl"
+          done
+          echo "matrix=$(jq -sc . "$RUNNER_TEMP/services.jsonl")" >> "$GITHUB_OUTPUT"
 
   go:
     needs: go-services
@@ -107,6 +111,10 @@ jobs:
           go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
             > "$RUNNER_TEMP/sbom/$SERVICE.govulncheck.json" \
             || echo "::warning::$SERVICE: govulncheck failed"
+          # -format json exits 0 on findings; warn as pip-audit does.
+          if grep -q '"finding":' "$RUNNER_TEMP/sbom/$SERVICE.govulncheck.json"; then
+            echo "::warning::$SERVICE: govulncheck reported vulnerabilities"
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

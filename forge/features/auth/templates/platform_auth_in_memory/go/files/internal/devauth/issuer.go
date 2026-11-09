@@ -149,14 +149,17 @@ func Install(issuer *Issuer) { current.Store(issuer) }
 // Current is the installed issuer, or nil.
 func Current() *Issuer { return current.Load() }
 
-// DevEnvironments are the ENV values the issuer starts in: those config.Validate
+// devEnvironments are the ENV values the issuer starts in: those config.Validate
 // treats as development. Any other, ci included, is a production posture.
-var DevEnvironments = []string{"development", "dev", "local", "test", "testing"}
+var devEnvironments = []string{"development", "dev", "local", "test", "testing"}
+
+// DevEnvironments returns a copy of the ENV values the issuer starts in.
+func DevEnvironments() []string { return slices.Clone(devEnvironments) }
 
 // RefuseProduction fails outside DevEnvironments: POST /dev/auth/token mints
 // any identity without authentication.
 func RefuseProduction(env string) error {
-	if slices.Contains(DevEnvironments, strings.ToLower(strings.TrimSpace(env))) {
+	if slices.Contains(devEnvironments, strings.ToLower(strings.TrimSpace(env))) {
 		return nil
 	}
 	return fmt.Errorf("auth.provider=in_memory refuses to start in env=%q: /api/v1/dev/auth/token mints "+
@@ -164,8 +167,11 @@ func RefuseProduction(env string) error {
 		"or set ENV to a development posture", env)
 }
 
-// PublicPaths skip token verification: they are how a client gets a token.
-var PublicPaths = []string{"/api/v1/dev/auth/token", "/api/v1/dev/auth/jwks"}
+// publicPaths skip token verification: they are how a client gets a token.
+var publicPaths = []string{"/api/v1/dev/auth/token", "/api/v1/dev/auth/jwks"}
+
+// PublicPaths returns a copy of the paths served without a token.
+func PublicPaths() []string { return slices.Clone(publicPaths) }
 
 func nonNil(values []string) []string {
 	if values == nil {

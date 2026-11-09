@@ -397,7 +397,7 @@ def test_go_in_memory_render_replaces_the_gatekeeper_guard(tmp_path: Path) -> No
     platform_auth = (backend / "internal/app/platform_auth.go").read_text(encoding="utf-8")
     assert "PublicPaths: state.publicPaths" in platform_auth
     in_memory_auth = (backend / "internal/app/in_memory_auth.go").read_text(encoding="utf-8")
-    assert "publicPaths: devauth.PublicPaths" in in_memory_auth
+    assert "publicPaths: devauth.PublicPaths()" in in_memory_auth
     gatekeeper_e2e = (backend / "tests/e2e/platform_auth_test.go").read_text(encoding="utf-8")
     assert "TestServiceBinaryVerifiesPlatformTokens" not in gatekeeper_e2e
     assert gatekeeper_e2e.startswith("package e2e_test\n")
