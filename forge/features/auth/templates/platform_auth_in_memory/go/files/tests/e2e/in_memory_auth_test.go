@@ -19,12 +19,19 @@ func TestServiceBinaryIssuesInMemoryTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "http://127.0.0.1:" + strconv.Itoa(port) + "/api/v1"
+	ready := false
 	for range 200 {
 		if response, err := http.Get(base + "/health/live"); err == nil {
 			response.Body.Close()
+			ready = true
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+	if !ready {
+		_ = server.Process.Kill()
+		_ = server.Wait()
+		t.Fatal("server did not become live within 5s")
 	}
 	call := func(method, path, token string, payload any) (int, map[string]any) {
 		var body bytes.Buffer

@@ -9,15 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - `auth.provider=in_memory` now generates Go services too: `internal/devauth` mints ES256 tokens in the process and
   serves their JWKS through an in-process `http.Client`, `app.InitInMemoryAuth` replaces `app.InitPlatformAuth` at
-  startup, and `POST /api/v1/dev/auth/token` and `GET /api/v1/dev/auth/jwks` are served without a token. The service
-  refuses to start unless `ENV` (or `APP_ENV`) is a development posture. The Go platform-auth middleware takes
-  `PublicPaths`.
+  startup, and `POST /api/v1/dev/auth/token` and `GET /api/v1/dev/auth/jwks` are served without a token. The Go
+  platform-auth middleware takes `PublicPaths`.
+- `auth.provider=in_memory` starts only when `ENV` is `development`, `dev`, `local`, `test` or `testing`, in both
+  languages; unset, `ENV` falls back to the variable the service's own config reads (`ENVIRONMENT` on Python,
+  `APP_ENV` on Go). **Breaking for Python:** `ENV=ci` is now refused, as every backend's production guard already
+  treats `ci`; run CI with `ENV=testing`.
 - `security.sbom` writes `.github/workflows/sbom.yml` at the repository root. The Python workflow was written under
   `services/<name>/.github/workflows/`, where GitHub never runs it, and its pip-audit audited the runner's own
   environment instead of the service's. The workflow now syncs each Python service's locked environment and runs
   cyclonedx-py and pip-audit against it, runs cyclonedx-gomod and govulncheck for each Go service on the Go release its
-  `go.mod` names (the latest patch, as its Dockerfile builds), and uploads the reports as `sbom-*` artifacts. The
-  reports never fail the run.
+  `go.mod` names (the latest patch, as its Dockerfile builds), and uploads the reports as `sbom-*` artifacts. A failed
+  sync, SBOM or audit is a warning annotation, never a failed run. `forge --update` deletes the old per-service
+  workflow and writes the root one.
 
 ### Coverage gate for a subset of subjects
 

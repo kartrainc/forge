@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 # One CycloneDX SBOM and one vulnerability report per Python and Go service
-# under services/. Every failure is a warning annotation, never a failed run:
-# CI's own audit steps gate the build.
+# under services/. A failed sync, SBOM or audit of a service is a warning
+# annotation, never a failed run: CI's own audit steps gate the build.
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -46,11 +46,11 @@ jobs:
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: always() && hashFiles('services/*/pyproject.toml') != ''
         with:
           name: sbom-python
           path: ${{ runner.temp }}/sbom/
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   go-services:
     runs-on: ubuntu-latest
@@ -93,17 +93,20 @@ jobs:
           check-latest: true
           cache: false
 
+      # The service name is a directory name the change controls: it reaches
+      # the script through the environment, never as an interpolated expression.
       - name: SBOM and vulnerability report
         env:
           GOTOOLCHAIN: local
+          SERVICE: ${{ matrix.name }}
         run: |
           mkdir -p "$RUNNER_TEMP/sbom"
           go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
-            mod -json -output "$RUNNER_TEMP/sbom/${{ matrix.name }}.cdx.json" \
-            || echo "::warning::${{ matrix.name }}: cyclonedx-gomod failed"
+            mod -json -output "$RUNNER_TEMP/sbom/$SERVICE.cdx.json" \
+            || echo "::warning::$SERVICE: cyclonedx-gomod failed"
           go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
-            > "$RUNNER_TEMP/sbom/${{ matrix.name }}.govulncheck.json" \
-            || echo "::warning::${{ matrix.name }}: govulncheck failed"
+            > "$RUNNER_TEMP/sbom/$SERVICE.govulncheck.json" \
+            || echo "::warning::$SERVICE: govulncheck failed"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

@@ -43,8 +43,7 @@ func InitInMemoryAuth(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	platformAuthGuard.Store(guard)
-	platformAuthPublicPaths = devauth.PublicPaths
+	platformAuthCurrent.Store(&platformAuthState{guard: guard, publicPaths: devauth.PublicPaths})
 	devauth.Install(issuer)
 	slog.Warn("auth.provider=in_memory: tokens come from POST /api/v1/dev/auth/token, never use this in production",
 		"audience", audience, "dev_mode", !cfg.Security.Auth.Enabled)

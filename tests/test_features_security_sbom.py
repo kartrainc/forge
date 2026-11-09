@@ -87,14 +87,24 @@ def test_workflow_reports_without_gating(tmp_path: Path) -> None:
     workflow = _workflow(_render(tmp_path, BackendLanguage.PYTHON))
     assert "uv sync --locked --no-dev" in workflow
     assert re.search(r"pip-audit --path .*/\.venv/lib/python3\*/site-packages", workflow)
+    commands = workflow.replace("\\\n", " ").splitlines()
     for tool in ("cyclonedx-py", "pip-audit --path", "cyclonedx-gomod@", "govulncheck@"):
-        command = workflow[workflow.index(tool) :]
-        assert '|| echo "::warning::' in command[: command.index("::warning::") + 11], tool
+        (command,) = [line for line in commands if tool in line]
+        assert re.search(r'\|\| echo "::warning::', command), command
     assert "continue" in workflow[workflow.index("uv sync --locked") :]
     assert "if-no-files-found: error" not in workflow
     for line in workflow.splitlines():
         if "uses:" in line:
             assert re.search(r"@[0-9a-f]{40} # v", line), line
+
+
+def test_no_expression_is_interpolated_into_a_script(tmp_path: Path) -> None:
+    jobs = yaml.safe_load(_workflow(_render(tmp_path, BackendLanguage.PYTHON, BackendLanguage.GO)))[
+        "jobs"
+    ]
+    for name, job in jobs.items():
+        for step in job["steps"]:
+            assert "${{" not in step.get("run", ""), (name, step.get("name"))
 
 
 def test_sbom_refuses_a_project_without_python_or_go(tmp_path: Path) -> None:

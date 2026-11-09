@@ -187,7 +187,7 @@ class TestProductionRefusal:
         spec.loader.exec_module(mod)
         return mod
 
-    @pytest.mark.parametrize("env", ["production", "prod", "staging", "PRODUCTION", ""])
+    @pytest.mark.parametrize("env", ["production", "prod", "staging", "PRODUCTION", "", "ci"])
     def test_refuses_under_production_posture(self, env, monkeypatch):
         mod = self._load_install_module()
         monkeypatch.setenv("ENV", env)
@@ -201,7 +201,7 @@ class TestProductionRefusal:
         with pytest.raises(mod.InMemoryAuthInProductionError):
             mod._refuse_in_production()
 
-    @pytest.mark.parametrize("env", ["development", "dev", "test", "testing", "local", "ci"])
+    @pytest.mark.parametrize("env", ["development", "dev", "test", "testing", "local"])
     def test_allows_dev_postures(self, env, monkeypatch):
         mod = self._load_install_module()
         monkeypatch.setenv("ENV", env)
@@ -395,7 +395,9 @@ def test_go_in_memory_render_replaces_the_gatekeeper_guard(tmp_path: Path) -> No
     routes_go = (backend / "internal/routes/routes.go").read_text(encoding="utf-8")
     assert 'api.Route("/dev/auth", registerDevAuth)' in routes_go
     platform_auth = (backend / "internal/app/platform_auth.go").read_text(encoding="utf-8")
-    assert "PublicPaths: platformAuthPublicPaths" in platform_auth
+    assert "PublicPaths: state.publicPaths" in platform_auth
+    in_memory_auth = (backend / "internal/app/in_memory_auth.go").read_text(encoding="utf-8")
+    assert "publicPaths: devauth.PublicPaths" in in_memory_auth
     gatekeeper_e2e = (backend / "tests/e2e/platform_auth_test.go").read_text(encoding="utf-8")
     assert "TestServiceBinaryVerifiesPlatformTokens" not in gatekeeper_e2e
     assert gatekeeper_e2e.startswith("package e2e_test\n")

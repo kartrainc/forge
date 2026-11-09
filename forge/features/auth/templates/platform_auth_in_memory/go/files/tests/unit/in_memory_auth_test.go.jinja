@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	platformauth "forge.local/platform-auth-go"
 
 	"{{ project_name }}/internal/app"
@@ -87,7 +89,7 @@ func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
 	}
 
 	_, defaults := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "", map[string]any{"sub": "dev-user"})
-	if defaults["expires_in"] != float64(3600) {
+	if defaults["expires_in"] != devauth.DefaultLifetime.Seconds() {
 		t.Fatalf("default lifetime: %v", defaults)
 	}
 	guardFor := func(audience string) *platformauth.AuthGuard {
@@ -102,6 +104,11 @@ func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
 	verified, err := guardFor("svc-in-memory").Verify(context.Background(), defaults["access_token"].(string))
 	if err != nil || verified.TenantID.String() != devauth.DevTenantID || verified.Subject != "dev-user" {
 		t.Fatalf("default tenant: %+v %v", verified, err)
+	}
+	exp, _ := jwt.MapClaims(verified.RawClaims).GetExpirationTime()
+	iat, _ := jwt.MapClaims(verified.RawClaims).GetIssuedAt()
+	if exp == nil || iat == nil || exp.Sub(iat.Time).Seconds() != defaults["expires_in"] {
+		t.Fatalf("expires_in %v must be the token's lifetime: exp %v iat %v", defaults["expires_in"], exp, iat)
 	}
 	if _, err := guardFor("svc-other").Verify(context.Background(), token); err == nil {
 		t.Fatal("tokens carry the service audience only")
@@ -188,9 +195,9 @@ func TestDevAuthIssuerContract(t *testing.T) {
 	config.TenantIDClaim = "https://example.test/tenant"
 	guard, _ := platformauth.NewAuthGuard(config)
 	tenant := "22222222-2222-4222-8222-222222222222"
-	token, err := issuer.Mint(devauth.TokenRequest{Subject: "s", TenantID: tenant, Scopes: []string{"a:read", "b:write"}})
-	if err != nil {
-		t.Fatal(err)
+	token, lifetime, err := issuer.Mint(devauth.TokenRequest{Subject: "s", TenantID: tenant, Scopes: []string{"a:read", "b:write"}})
+	if err != nil || lifetime != devauth.DefaultLifetime {
+		t.Fatalf("mint: %v %v", lifetime, err)
 	}
 	verified, err := guard.Verify(context.Background(), token)
 	if err != nil || verified.TenantID.String() != tenant || len(verified.Scopes) != 2 {

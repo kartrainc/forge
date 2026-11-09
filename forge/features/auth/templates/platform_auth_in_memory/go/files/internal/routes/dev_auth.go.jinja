@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,16 +22,12 @@ func registerDevAuth(router chi.Router) {
 		if err := decode(r, &body); err != nil {
 			return err
 		}
-		token, err := issuer.Mint(body)
+		token, lifetime, err := issuer.Mint(body)
 		if err != nil {
 			return apperrors.NewValidation(err.Error())
 		}
-		expiresIn := body.ExpiresIn
-		if expiresIn == 0 {
-			expiresIn = 3600
-		}
 		return writeJSON(w, http.StatusOK, map[string]any{
-			"access_token": token, "token_type": "Bearer", "expires_in": expiresIn,
+			"access_token": token, "token_type": "Bearer", "expires_in": int(lifetime / time.Second),
 		})
 	}))
 	router.Get("/jwks", handle(func(w http.ResponseWriter, _ *http.Request) error {

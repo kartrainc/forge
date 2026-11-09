@@ -14,11 +14,15 @@ import (
 	"{{ project_name }}/internal/middleware"
 )
 
-var platformAuthGuard atomic.Pointer[platformauth.AuthGuard]
+// platformAuthState is the guard and the paths it serves without a token
+// (auth.provider=in_memory adds its token routes), stored as one value by
+// InitPlatformAuth or InitInMemoryAuth before app.New reads it.
+type platformAuthState struct {
+	guard       *platformauth.AuthGuard
+	publicPaths []string
+}
 
-// platformAuthPublicPaths are served without a token (auth.provider=in_memory
-// adds its token routes).
-var platformAuthPublicPaths []string
+var platformAuthCurrent atomic.Pointer[platformAuthState]
 
 // InitPlatformAuth builds the process-wide guard. The issuer and audience
 // come from GATEKEEPER_ISSUER / SERVICE_AUDIENCE, falling back to
@@ -27,12 +31,11 @@ var platformAuthPublicPaths []string
 // security.auth.enabled the issuer and audience are required; otherwise a
 // missing issuer leaves only the dev identity for unauthenticated requests.
 func InitPlatformAuth(cfg *config.Config) error {
-	platformAuthPublicPaths = nil
 	auth := cfg.Security.Auth
 	issuer := strings.TrimRight(cmp.Or(os.Getenv("GATEKEEPER_ISSUER"), auth.ServerURL), "/")
 	audience := cmp.Or(os.Getenv("SERVICE_AUDIENCE"), auth.Audience)
 	if issuer == "" || audience == "" {
-		platformAuthGuard.Store(nil)
+		platformAuthCurrent.Store(&platformAuthState{})
 		if auth.Enabled {
 			return errors.New("GATEKEEPER_ISSUER and SERVICE_AUDIENCE are required when security.auth.enabled is true")
 		}
@@ -56,15 +59,19 @@ func InitPlatformAuth(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	platformAuthGuard.Store(guard)
+	platformAuthCurrent.Store(&platformAuthState{guard: guard})
 	slog.Info("platform auth initialized", "issuer", issuer, "audience", audience, "dev_mode", !auth.Enabled)
 	return nil
 }
 
 func platformAuth(cfg *config.Config) middleware.Middleware {
+	state := platformAuthCurrent.Load()
+	if state == nil {
+		state = &platformAuthState{}
+	}
 	return middleware.PlatformAuth(middleware.PlatformAuthOptions{
-		Guard:       platformAuthGuard.Load(),
+		Guard:       state.guard,
 		DevMode:     !cfg.Security.Auth.Enabled,
-		PublicPaths: platformAuthPublicPaths,
+		PublicPaths: state.publicPaths,
 	})
 }

@@ -537,7 +537,9 @@ def register_all(api: ForgeAPI) -> None:
     # Go ships ``internal/devauth`` (issuer + JWKS over an in-process
     # http.Client), ``app.InitInMemoryAuth`` and the ``/api/v1/dev/auth``
     # routes; ``platform_auth_go_middleware`` calls InitInMemoryAuth in place
-    # of InitPlatformAuth and serves the token routes without a token.
+    # of InitPlatformAuth and serves the token routes without a token. The Go
+    # implementation depends on that fragment: InitInMemoryAuth stores the
+    # ``platformAuthState`` its ``internal/app/platform_auth.go`` declares.
     api.add_fragment(
         Fragment(
             name="platform_auth_in_memory_provider",

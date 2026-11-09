@@ -31,6 +31,8 @@ const (
 	// DevTenantID is the tenant of tokens minted without one, the same as the
 	// Python in_memory provider.
 	DevTenantID = "11111111-1111-1111-1111-111111111111"
+	// DefaultLifetime is the lifetime of a token requested without expires_in.
+	DefaultLifetime = time.Hour
 	// MaxLifetime caps a minted token's lifetime.
 	MaxLifetime = 24 * time.Hour
 )
@@ -67,26 +69,26 @@ func New(audience, tenantIDClaim string) (*Issuer, error) {
 // Audience is the aud claim of minted tokens.
 func (i *Issuer) Audience() string { return i.audience }
 
-// Mint signs a token for request. An empty tenant is DevTenantID, a zero
-// lifetime one hour.
-func (i *Issuer) Mint(request TokenRequest) (string, error) {
+// Mint signs a token for request and returns the lifetime it applied. An empty
+// tenant is DevTenantID, a zero lifetime DefaultLifetime.
+func (i *Issuer) Mint(request TokenRequest) (string, time.Duration, error) {
 	if strings.TrimSpace(request.Subject) == "" {
-		return "", errors.New("'sub' is required")
+		return "", 0, errors.New("'sub' is required")
 	}
 	tenant := request.TenantID
 	if tenant == "" {
 		tenant = DevTenantID
 	}
 	if _, err := uuid.Parse(tenant); err != nil {
-		return "", errors.New("'tenant_id' must be a UUID")
+		return "", 0, errors.New("'tenant_id' must be a UUID")
 	}
 	seconds := request.ExpiresIn
 	if seconds == 0 {
-		seconds = int(time.Hour / time.Second)
+		seconds = int(DefaultLifetime / time.Second)
 	}
 	// Bounded before the conversion, so the Duration product cannot overflow.
 	if seconds < 1 || seconds > int(MaxLifetime/time.Second) {
-		return "", fmt.Errorf("'expires_in' must be between 1 and %d seconds", int(MaxLifetime/time.Second))
+		return "", 0, fmt.Errorf("'expires_in' must be between 1 and %d seconds", int(MaxLifetime/time.Second))
 	}
 	lifetime := time.Duration(seconds) * time.Second
 	now := time.Now()
@@ -104,7 +106,8 @@ func (i *Issuer) Mint(request TokenRequest) (string, error) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["kid"] = i.kid
-	return token.SignedString(i.key)
+	signed, err := token.SignedString(i.key)
+	return signed, lifetime, err
 }
 
 // JWKS is the public half of the key as a JWKS document.
@@ -157,7 +160,7 @@ func RefuseProduction(env string) error {
 		return nil
 	}
 	return fmt.Errorf("auth.provider=in_memory refuses to start in env=%q: /api/v1/dev/auth/token mints "+
-		"identity tokens without authentication; use auth.provider=gatekeeper or oidc_generic in production, "+
+		"identity tokens without authentication; use auth.provider=gatekeeper in production, "+
 		"or set ENV to a development posture", env)
 }
 

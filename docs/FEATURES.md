@@ -450,9 +450,11 @@ _GitHub Actions workflow emitting a CycloneDX SBOM + vulnerability report per se
 Adds ``.github/workflows/sbom.yml`` at the repository root. On every push,
 pull request and weekly, it writes a CycloneDX SBOM and a vulnerability
 report for each Python service (cyclonedx-py + pip-audit over the locked
-environment) and each Go service (cyclonedx-gomod + govulncheck), and
-uploads them as the ``sbom`` artifact. The reports never fail the run; the
-generated CI's own audit steps gate the build.
+environment) and each Go service (cyclonedx-gomod + govulncheck, on the Go
+release its go.mod names), and uploads them as the ``sbom-python`` and
+``sbom-go-<service>`` artifacts. A failed sync, SBOM or audit is a warning
+annotation, never a failed run; the generated CI's own audit steps gate the
+build.
 
 BACKENDS: python, go
 DEPENDENCY: none runtime; CI runs cyclonedx-bom, pip-audit, cyclonedx-gomod
@@ -1200,8 +1202,10 @@ selects *which* issuer the stack is wired to:
   container (token authority + BFF session manager, RFC 8693 token-exchange).
   Batteries-included; this reproduces today's behaviour exactly.
 - ``in_memory``: a zero-dependency dev issuer that mints test JWTs in-process
-  (no Keycloak / Gatekeeper / Redis). For local dev + tests only; refused on
-  a production posture.
+  (no Keycloak / Gatekeeper / Redis). For local dev + tests only: the service
+  starts only when ``ENV`` (else ``ENVIRONMENT`` on Python, ``APP_ENV`` on Go,
+  as each service's own config reads it) is development, dev, local, test or
+  testing; anything else, ``ci`` and unset included, is refused.
 - ``oidc_generic``: point the SDK at any external OIDC issuer (Keycloak
   direct, Auth0, Cognito, Okta) via OIDC discovery + JWKS — no Gatekeeper
   container generated. Issuer is env-driven (``AUTH_PROVIDER_*``).
