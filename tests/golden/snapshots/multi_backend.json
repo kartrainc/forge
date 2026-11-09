@@ -669,8 +669,8 @@
       "sha256": "d9795309dc89bd45"
     },
     "services/api-py/src/app/core/config/domain.py": {
-      "size": 7175,
-      "sha256": "c88844f8d280bd92"
+      "size": 7181,
+      "sha256": "0ad8006e87e54a4a"
     },
     "services/api-py/src/app/core/config/loader.py": {
       "size": 3530,
@@ -869,8 +869,8 @@
       "sha256": "1b1774d8770720db"
     },
     "services/api-py/tests/unit/test_config.py": {
-      "size": 2130,
-      "sha256": "bccd7814eefb7bea"
+      "size": 1494,
+      "sha256": "7698911ed45d1d0d"
     },
     "services/api-py/tests/unit/test_config_sources.py": {
       "size": 3338,

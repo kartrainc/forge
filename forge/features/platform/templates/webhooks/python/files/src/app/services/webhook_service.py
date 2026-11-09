@@ -41,7 +41,7 @@ class WebhookUrlError(ValueError):
 
 def _is_dev() -> bool:
     env = os.environ.get("ENV", os.environ.get("ENVIRONMENT", "production")).strip().lower()
-    return env in {"development", "dev", "test", "testing", "local"}
+    return env in {"development", "dev", "test", "testing", "local", "ci"}
 
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:

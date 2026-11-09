@@ -2189,8 +2189,8 @@
       "sha256": "d9795309dc89bd45"
     },
     "services/api/src/app/core/config/domain.py": {
-      "size": 7175,
-      "sha256": "c88844f8d280bd92"
+      "size": 7181,
+      "sha256": "0ad8006e87e54a4a"
     },
     "services/api/src/app/core/config/loader.py": {
       "size": 3530,
@@ -2445,8 +2445,8 @@
       "sha256": "0d3ce8ef78eeab73"
     },
     "services/api/src/app/services/webhook_service.py": {
-      "size": 9968,
-      "sha256": "6e023964dccd1494"
+      "size": 9974,
+      "sha256": "502c2a85b656f905"
     },
     "services/api/src/service/client/auth.py": {
       "size": 2305,
@@ -2509,8 +2509,8 @@
       "sha256": "1b1774d8770720db"
     },
     "services/api/tests/unit/test_config.py": {
-      "size": 2130,
-      "sha256": "bccd7814eefb7bea"
+      "size": 1494,
+      "sha256": "7698911ed45d1d0d"
     },
     "services/api/tests/unit/test_config_sources.py": {
       "size": 3338,

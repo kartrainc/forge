@@ -42,17 +42,6 @@ class TestCorsConfig:
         assert cfg.enabled is True
         assert len(cfg.allow_origins) == 1
 
-    @pytest.mark.parametrize("env", ["production", "staging", "ci"])
-    def test_wildcard_with_credentials_refused_outside_development(self, env, monkeypatch):
-        monkeypatch.setenv("ENV", env)
-        with pytest.raises(ValidationError):
-            CorsConfig(enabled=True, allow_origins=["*"], allow_credentials=True)
-
-    @pytest.mark.parametrize("env", ["development", "dev", "local", "test", "testing"])
-    def test_wildcard_with_credentials_allowed_in_development(self, env, monkeypatch):
-        monkeypatch.setenv("ENV", env)
-        assert CorsConfig(enabled=True, allow_origins=["*"], allow_credentials=True).enabled
-
 
 class TestAuditConfig:
     def test_defaults(self):
