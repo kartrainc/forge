@@ -1,0 +1,210 @@
+package unit_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+
+	platformauth "forge.local/platform-auth-go"
+
+	"{{ project_name }}/internal/app"
+	"{{ project_name }}/internal/config"
+	"{{ project_name }}/internal/db"
+	"{{ project_name }}/internal/devauth"
+	"{{ project_name }}/tests/testutil"
+)
+
+const inMemoryNoDB = "postgresql://postgres:postgres@127.0.0.1:1/unused?connect_timeout=1"
+
+func inMemoryCall(t *testing.T, handler http.Handler, method, path, token string, payload any) (int, map[string]any) {
+	t.Helper()
+	var body bytes.Buffer
+	if payload != nil {
+		_ = json.NewEncoder(&body).Encode(payload)
+	}
+	request := httptest.NewRequest(method, path, &body)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	decoded := map[string]any{}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+	return recorder.Code, decoded
+}
+
+func inMemoryApp(t *testing.T, enabled bool) (http.Handler, *config.Config) {
+	t.Helper()
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+		devauth.Install(nil)
+	})
+	t.Setenv("ENV", "testing")
+	t.Setenv("SERVICE_AUDIENCE", "svc-in-memory")
+	t.Setenv("TENANT_ID_CLAIM", "")
+	cfg := config.Defaults()
+	cfg.Security.Auth.Enabled = enabled
+	if err := app.InitInMemoryAuth(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.NewPool(context.Background(), inMemoryNoDB, 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return app.New(&cfg, pool), &cfg
+}
+
+func TestInMemoryAuthIssuesTokensTheGuardAccepts(t *testing.T) {
+	handler, _ := inMemoryApp(t, true)
+	status, minted := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "",
+		map[string]any{"sub": "dev-user", "scopes": []string{"items:read"}, "roles": []string{"admin"}, "expires_in": 60})
+	if status != http.StatusOK || minted["token_type"] != "Bearer" || minted["expires_in"] != float64(60) {
+		t.Fatalf("mint: %d %v", status, minted)
+	}
+	token, _ := minted["access_token"].(string)
+	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", token, nil); status != http.StatusNotFound || testutil.ErrorCode(body) != "NOT_FOUND" {
+		t.Fatalf("a minted token reaches the router: %d %v", status, body)
+	}
+	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", "", nil); status != http.StatusUnauthorized || body["title"] != "invalid_token" {
+		t.Fatalf("enabled auth still rejects anonymous requests: %d %v", status, body)
+	}
+	status, jwks := inMemoryCall(t, handler, http.MethodGet, "/api/v1/dev/auth/jwks", "", nil)
+	if keys, _ := jwks["keys"].([]any); status != http.StatusOK || len(keys) != 1 {
+		t.Fatalf("jwks: %d %v", status, jwks)
+	}
+
+	status, custom := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "",
+		map[string]any{"sub": "dev-user", "tenant_id": "33333333-3333-4333-8333-333333333333"})
+	customToken, ok := custom["access_token"].(string)
+	if status != http.StatusOK || !ok {
+		t.Fatalf("mint for another tenant: %d %v", status, custom)
+	}
+	if status, body := inMemoryCall(t, handler, http.MethodGet, "/api/v1/missing", customToken, nil); status != http.StatusNotFound {
+		t.Fatalf("a token for another tenant reaches the router: %d %v", status, body)
+	}
+
+	_, defaults := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "", map[string]any{"sub": "dev-user"})
+	if defaults["expires_in"] != devauth.DefaultLifetime.Seconds() {
+		t.Fatalf("default lifetime: %v", defaults)
+	}
+	guardFor := func(audience string) *platformauth.AuthGuard {
+		jwks, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: devauth.Current().HTTPClient()})
+		_ = jwks.RegisterIssuer(devauth.IssuerURN, devauth.JWKSURI)
+		guard, err := platformauth.NewAuthGuard(platformauth.NewAuthGuardConfig(audience, jwks))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return guard
+	}
+	verified, err := guardFor("svc-in-memory").Verify(context.Background(), defaults["access_token"].(string))
+	if err != nil || verified.TenantID.String() != devauth.DevTenantID || verified.Subject != "dev-user" {
+		t.Fatalf("default tenant: %+v %v", verified, err)
+	}
+	exp, _ := jwt.MapClaims(verified.RawClaims).GetExpirationTime()
+	iat, _ := jwt.MapClaims(verified.RawClaims).GetIssuedAt()
+	if exp == nil || iat == nil || exp.Sub(iat.Time).Seconds() != defaults["expires_in"] {
+		t.Fatalf("expires_in %v must be the token's lifetime: exp %v iat %v", defaults["expires_in"], exp, iat)
+	}
+	if _, err := guardFor("svc-other").Verify(context.Background(), token); err == nil {
+		t.Fatal("tokens carry the service audience only")
+	}
+}
+
+func TestInMemoryAuthRejectsInvalidTokenRequests(t *testing.T) {
+	handler, _ := inMemoryApp(t, false)
+	for name, payload := range map[string]map[string]any{
+		"missing subject":             {"sub": " "},
+		"tenant not uuid":             {"sub": "u", "tenant_id": "acme"},
+		"negative expiry":             {"sub": "u", "expires_in": -1},
+		"expiry too long":             {"sub": "u", "expires_in": 86401},
+		"overflowing expiry":          {"sub": "u", "expires_in": 18446744134},
+		"overflowing negative expiry": {"sub": "u", "expires_in": -18446740474},
+	} {
+		if status, body := inMemoryCall(t, handler, http.MethodPost, "/api/v1/dev/auth/token", "", payload); status != http.StatusUnprocessableEntity || testutil.ErrorCode(body) != "VALIDATION_FAILED" {
+			t.Fatalf("%s: %d %v", name, status, body)
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/dev/auth/token", strings.NewReader("{"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malformed body: %d", recorder.Code)
+	}
+
+	devauth.Install(nil)
+	for _, call := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/dev/auth/token"}, {http.MethodGet, "/api/v1/dev/auth/jwks"},
+	} {
+		if status, _ := inMemoryCall(t, handler, call.method, call.path, "", map[string]any{"sub": "u"}); status != http.StatusServiceUnavailable {
+			t.Fatalf("%s %s without an issuer: %d", call.method, call.path, status)
+		}
+	}
+}
+
+func TestInMemoryAuthRefusesProduction(t *testing.T) {
+	t.Cleanup(func() {
+		cfg := config.Defaults()
+		_ = app.InitPlatformAuth(&cfg)
+		devauth.Install(nil)
+	})
+	cfg := config.Defaults()
+	for _, env := range []string{"", "production", "staging", "ci"} {
+		t.Setenv("ENV", env)
+		t.Setenv("APP_ENV", "")
+		if err := app.InitInMemoryAuth(&cfg); err == nil || !strings.Contains(err.Error(), "refuses to start") {
+			t.Fatalf("ENV=%q: %v", env, err)
+		}
+	}
+	for _, env := range devauth.DevEnvironments() {
+		if err := devauth.RefuseProduction(" " + strings.ToUpper(env) + " "); err != nil {
+			t.Fatalf("%s: %v", env, err)
+		}
+	}
+	t.Setenv("ENV", "testing")
+	t.Setenv("SERVICE_AUDIENCE", "")
+	cfg.Security.Auth.Audience = ""
+	if err := app.InitInMemoryAuth(&cfg); err != nil || devauth.Current().Audience() != "in-memory-dev" {
+		t.Fatalf("default audience: %v", err)
+	}
+}
+
+func TestDevAuthIssuerContract(t *testing.T) {
+	if _, err := devauth.New("", platformauth.DefaultTenantIDClaim); err == nil {
+		t.Fatal("an empty audience is refused")
+	}
+	if _, err := devauth.New("aud", ""); err == nil {
+		t.Fatal("an empty tenant claim is refused")
+	}
+	issuer, err := devauth.New("aud", "https://example.test/tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := issuer.HTTPClient().Get(devauth.JWKSURI)
+	if err != nil || response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("in-process JWKS: %v %v", response, err)
+	}
+	response.Body.Close()
+	jwks, _ := platformauth.NewJWKSCache(platformauth.JWKSCacheOptions{HTTPClient: issuer.HTTPClient()})
+	_ = jwks.RegisterIssuer(devauth.IssuerURN, devauth.JWKSURI)
+	config := platformauth.NewAuthGuardConfig("aud", jwks)
+	config.TenantIDClaim = "https://example.test/tenant"
+	guard, _ := platformauth.NewAuthGuard(config)
+	tenant := "22222222-2222-4222-8222-222222222222"
+	token, lifetime, err := issuer.Mint(devauth.TokenRequest{Subject: "s", TenantID: tenant, Scopes: []string{"a:read", "b:write"}})
+	if err != nil || lifetime != devauth.DefaultLifetime {
+		t.Fatalf("mint: %v %v", lifetime, err)
+	}
+	verified, err := guard.Verify(context.Background(), token)
+	if err != nil || verified.TenantID.String() != tenant || len(verified.Scopes) != 2 {
+		t.Fatalf("custom tenant claim: %+v %v", verified, err)
+	}
+}

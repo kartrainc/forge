@@ -34,9 +34,11 @@ from app.security.in_memory_issuer import (
 # ``/dev/auth/*`` route module can mint tokens + serve JWKS.
 ISSUER_STATE_KEY = "in_memory_issuer"
 
-# Environments where the unauthenticated dev issuer is acceptable. Anything
-# else (notably an unset ENV, which defaults to "production") is refused.
-_DEV_ENVS = frozenset({"development", "dev", "test", "testing", "local", "ci"})
+# Environments where the unauthenticated dev issuer is acceptable: those the
+# service's own production guards (SecurityConfig) exempt, as the Go provider.
+# Anything else, ci and an unset ENV (which defaults to "production")
+# included, is refused.
+_DEV_ENVS = frozenset({"development", "dev", "test", "testing", "local"})
 
 
 class InMemoryAuthInProductionError(RuntimeError):

@@ -1,0 +1,124 @@
+name: SBOM + dependency audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly sweep for new CVEs affecting pinned deps.
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+# One CycloneDX SBOM and one vulnerability report per Python and Go service
+# under services/. A failed sync, SBOM or audit of a service is a warning
+# annotation, never a failed run: CI's own audit steps gate the build.
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: hashFiles('services/*/pyproject.toml') != ''
+        with:
+          prune-cache: true
+
+      - name: Python services
+        if: hashFiles('services/*/pyproject.toml') != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          for manifest in services/*/pyproject.toml; do
+            service="$(dirname "$manifest")"
+            name="$(basename "$service")"
+            if ! (cd "$service" && uv sync --locked --no-dev); then
+              echo "::warning::$name: uv sync --locked failed, no SBOM or audit report"
+              continue
+            fi
+            uvx --from cyclonedx-bom cyclonedx-py environment "$service/.venv" \
+              -o "$RUNNER_TEMP/sbom/$name.cdx.json" \
+              || echo "::warning::$name: cyclonedx-py failed"
+            uvx pip-audit --path "$service"/.venv/lib/python3*/site-packages --skip-editable \
+              --format json --output "$RUNNER_TEMP/sbom/$name.pip-audit.json" \
+              || echo "::warning::$name: pip-audit reported vulnerabilities or failed"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && hashFiles('services/*/pyproject.toml') != ''
+        with:
+          name: sbom-python
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: warn
+
+  go-services:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Each Go service with the major.minor of its go directive, the version
+      # its Dockerfile builds with (golang:<major.minor>, the latest patch).
+      - id: list
+        run: |
+          : > "$RUNNER_TEMP/services.jsonl"
+          for manifest in services/*/go.mod; do
+            [ -f "$manifest" ] || continue
+            service="$(dirname "$manifest")"
+            go="$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2]; exit }' "$manifest")"
+            if [ -z "$go" ]; then
+              echo "::warning::$(basename "$service"): go.mod has no go directive, report uses the runner's Go"
+            fi
+            jq -nc --arg path "$service" --arg name "$(basename "$service")" --arg go "$go" \
+              '{path: $path, name: $name, go: $go}' >> "$RUNNER_TEMP/services.jsonl"
+          done
+          echo "matrix=$(jq -sc . "$RUNNER_TEMP/services.jsonl")" >> "$GITHUB_OUTPUT"
+
+  go:
+    needs: go-services
+    if: needs.go-services.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.go-services.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # govulncheck reports the standard library of the toolchain that runs it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+          cache: false
+
+      # The service name is a directory name the change controls: it reaches
+      # the script through the environment, never as an interpolated expression.
+      - name: SBOM and vulnerability report
+        env:
+          GOTOOLCHAIN: local
+          SERVICE: ${{ matrix.name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sbom"
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0 \
+            mod -json -output "$RUNNER_TEMP/sbom/$SERVICE.cdx.json" \
+            || echo "::warning::$SERVICE: cyclonedx-gomod failed"
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format json ./... \
+            > "$RUNNER_TEMP/sbom/$SERVICE.govulncheck.json" \
+            || echo "::warning::$SERVICE: govulncheck failed"
+          # -format json exits 0 on findings; warn as pip-audit does.
+          if grep -q '"finding":' "$RUNNER_TEMP/sbom/$SERVICE.govulncheck.json"; then
+            echo "::warning::$SERVICE: govulncheck reported vulnerabilities"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sbom-go-${{ matrix.name }}
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: warn
