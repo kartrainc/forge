@@ -10,6 +10,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from forge.quality import github
 from forge.quality.coverage import SUITES, make_report
 from forge.quality.go_coverage import go_modules, go_profiles_to_lcov
 from forge.quality.model import read_recipe, subjects
@@ -40,7 +41,12 @@ def run_suites(root: Path, *, suite: str = "all", subject: str | None = None) ->
     completed = []
     for item in selected:
         for stage in suites:
-            completed.append(run_native(root, item, stage))
+            try:
+                completed.append(run_native(root, item, stage))
+            except subprocess.CalledProcessError:
+                if item["language"] == "python":
+                    github.junit_failures(root / ".forge/coverage" / item["name"] / f"{stage}.xml")
+                raise
     return {"passed": True, "reports": completed}
 
 
@@ -121,7 +127,8 @@ def run_native(root: Path, item: dict, suite: str) -> str:
                 "--coverage.reporter=json",
                 f"--coverage.reportsDirectory={reports}",
                 "--reporter=junit",
-                f"--outputFile={junit}",
+                f"--outputFile.junit={junit}",
+                *(["--reporter=github-actions"] if github.enabled() else []),
                 "--passWithNoTests=false",
             ],
             service,
@@ -314,22 +321,25 @@ def run_browser(root: Path, item: dict, output: Path, env: dict[str, str]) -> st
     report.unlink(missing_ok=True)
     env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(report)
     execution = output / "e2e.execution"
-    with execution.open("w", encoding="utf-8") as stream:
-        subprocess.run(
-            [
-                "npx",
-                "--no-install",
-                "playwright",
-                "test",
-                "--config",
-                "playwright.quality.config.ts",
-            ],
-            cwd=service,
-            env=env,
-            check=True,
-            stdout=stream,
-            stderr=sys.stderr,
-        )
+    try:
+        with execution.open("w", encoding="utf-8") as stream:
+            subprocess.run(
+                [
+                    "npx",
+                    "--no-install",
+                    "playwright",
+                    "test",
+                    "--config",
+                    "playwright.quality.config.ts",
+                ],
+                cwd=service,
+                env=env,
+                check=True,
+                stdout=stream,
+                stderr=sys.stderr,
+            )
+    finally:
+        github.forward(execution)
     statistics = json.loads(report.read_text(encoding="utf-8"))["stats"]
     if (
         statistics.get("unexpected", 0)

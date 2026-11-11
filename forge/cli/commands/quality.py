@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from forge.errors import ForgeError
+from forge.quality import github
 
 
 def run_quality(args: argparse.Namespace) -> int:
@@ -65,9 +66,12 @@ def run_quality(args: argparse.Namespace) -> int:
                 only=only,
             )
         print(json.dumps(result, indent=2))
+        github.gate(args.quality, result)
         return 0 if result.get("passed", True) else 12
     except (ValueError, OSError, KeyError, ForgeError, subprocess.CalledProcessError) as exc:
-        print(json.dumps({"passed": False, "error": str(exc)}))
+        result = {"passed": False, "error": str(exc)}
+        print(json.dumps(result))
+        github.gate(args.quality, result)
         return 12
 
 

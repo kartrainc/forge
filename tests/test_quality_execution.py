@@ -97,7 +97,9 @@ def test_native_collection_binds_report_to_executed_source(service, monkeypatch,
             native.write_text(json.dumps(coverage_json(source)), encoding="utf-8")
             assert "--locked" in argv and "--cov=src" in argv
         else:
-            junit(Path(next(a.split("=", 1)[1] for a in argv if a.startswith("--outputFile="))))
+            junit(
+                Path(next(a.split("=", 1)[1] for a in argv if a.startswith("--outputFile.junit=")))
+            )
             target = Path(
                 next(
                     a.split("=", 1)[1] for a in argv if a.startswith("--coverage.reportsDirectory=")

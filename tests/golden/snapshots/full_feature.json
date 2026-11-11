@@ -113,8 +113,8 @@
       "sha256": "66c59ce65fd2fdc0"
     },
     "apps/frontend/playwright.quality.config.ts": {
-      "size": 385,
-      "sha256": "c0eb8437ca2d3671"
+      "size": 452,
+      "sha256": "e754422695a8b503"
     },
     "apps/frontend/public/canvas.manifest.json": {
       "size": 7130,
