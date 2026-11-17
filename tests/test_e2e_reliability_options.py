@@ -5,13 +5,14 @@ injections + codegen pipeline — with the new 1.0.0a1 options enabled.
 Verifies the emitted project contains the expected files and that
 main.py carries the auto-injected imports/calls.
 
-Not marked ``e2e`` because it doesn't run the generated scaffold's own
-test suite (no npm/cargo/flutter dependency). It just verifies forge
-itself produces the expected tree.
+Tree assertions run in the regular suite. The type-check regression is
+marked ``e2e`` because it installs and checks a rendered service's dependencies.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,30 @@ class TestFullGeneration:
         assert (backend / "src" / "app" / "core" / "db_pool.py").is_file()
         assert (backend / "src" / "app" / "core" / "circuit_breaker.py").is_file()
         assert (backend / "src" / "app" / "core" / "otel.py").is_file()
+
+    @pytest.mark.e2e
+    def test_circuit_breaker_typechecks(self, config_with_reliability: ProjectConfig) -> None:
+        """Resolve annotations against the generated service's real dependencies."""
+        project_root = generate(config_with_reliability, quiet=True, dry_run=True)
+        backend = project_root / "services" / "api"
+        try:
+            result = subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "--directory",
+                    str(backend),
+                    "ty",
+                    "check",
+                    "src/app/core/circuit_breaker.py",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+        finally:
+            shutil.rmtree(project_root.parent)
 
     def test_main_py_has_auto_injections(self, config_with_reliability: ProjectConfig) -> None:
         project_root = generate(config_with_reliability, quiet=True, dry_run=True)
