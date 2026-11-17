@@ -226,6 +226,9 @@ externalSecret:
   refreshInterval: 1h
   data: []
   dataFrom: []
+  # target.template of the ExternalSecret and of the migration's copy, e.g. a database URL built from a password
+  # key, so a value lives in one key of the store
+  template: {}
 
 # The migration: a pre-install/pre-upgrade hook Job (templates/migration-job.yaml), so the schema is current
 # before the Deployment rolls.

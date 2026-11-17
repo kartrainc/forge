@@ -11,6 +11,7 @@ CI installs helm + kubeconform so the gate always runs there.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import replace
@@ -561,6 +562,7 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
     release = docs[("ExternalSecret", "user-api-secret")]
     assert _hook(release) is None
     assert release["spec"]["target"] == {"name": "user-api-secret", "creationPolicy": "Owner"}
+    assert "template" not in docs[("ExternalSecret", "user-api-migrate-secret")]["spec"]["target"]
     assert release["spec"]["secretStoreRef"] == {"kind": "ClusterSecretStore", "name": "vault"}
     copy = docs[("ExternalSecret", "user-api-migrate-secret")]
     assert copy["metadata"]["annotations"]["helm.sh/hook-weight"] == "-10"
@@ -576,6 +578,32 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
     # the service itself reads the release's, and waits for it
     (service,) = docs[("Deployment", "user-api")]["spec"]["template"]["spec"]["containers"]
     assert _env_refs(service) == [("user-api-config", None), ("user-api-secret", False)]
+
+
+def test_the_external_secret_template_reaches_the_migration_copy(user_api: Path) -> None:
+    template = {
+        "engineVersion": "v2",
+        "data": {"APP__DB__URL": "postgresql://app:{{ .db_password }}@postgres-rw:5432/app"},
+    }
+    docs = _render_named(
+        user_api,
+        "user-api",
+        "--set",
+        "secret.enabled=false",
+        "--set",
+        "externalSecret.enabled=true",
+        "--set",
+        "externalSecret.secretStoreRef.name=vault",
+        "--set-json",
+        'externalSecret.data=[{"secretKey":"db_password",'
+        '"remoteRef":{"key":"shop/db","property":"password"}}]',
+        "--set-json",
+        f"externalSecret.template={json.dumps(template)}",
+    )
+    # the store's template syntax passes through Helm verbatim, into the release's and the copy's target
+    for name in ("user-api-secret", "user-api-migrate-secret"):
+        target = docs[("ExternalSecret", name)]["spec"]["target"]
+        assert target == {"name": name, "creationPolicy": "Owner", "template": template}
 
 
 # Stand-ins for the wait container's tools: getent resolves (or not), sleep returns at once, and psql answers each

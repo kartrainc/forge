@@ -134,6 +134,10 @@ refreshInterval: {{ $es.refreshInterval }}
 target:
   name: {{ include "svc.child" (dict "root" .root "suffix" .target) }}
   creationPolicy: Owner
+  {{- with $es.template }}
+  template:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- with $es.data }}
 data:
   {{- toYaml . | nindent 2 }}
