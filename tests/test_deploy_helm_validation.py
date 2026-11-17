@@ -562,11 +562,10 @@ def test_the_migration_waits_for_postgres_and_reads_an_external_secret(user_api:
     release = docs[("ExternalSecret", "user-api-secret")]
     assert _hook(release) is None
     assert release["spec"]["target"] == {"name": "user-api-secret", "creationPolicy": "Owner"}
-    assert "template" not in docs[("ExternalSecret", "user-api-migrate-secret")]["spec"]["target"]
     assert release["spec"]["secretStoreRef"] == {"kind": "ClusterSecretStore", "name": "vault"}
     copy = docs[("ExternalSecret", "user-api-migrate-secret")]
     assert copy["metadata"]["annotations"]["helm.sh/hook-weight"] == "-10"
-    assert copy["spec"]["target"]["name"] == "user-api-migrate-secret"
+    assert copy["spec"]["target"] == {"name": "user-api-migrate-secret", "creationPolicy": "Owner"}
     assert copy["spec"]["dataFrom"] == release["spec"]["dataFrom"]
     pod = docs[("Job", "user-api-migrate")]["spec"]["template"]["spec"]
     (migrate,) = pod["containers"]

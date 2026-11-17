@@ -151,7 +151,8 @@ externalSecret:
     name: ""
   data: []
   dataFrom: []
-  # the ExternalSecret's target.template, e.g. REDIS_URL built from a password key
+  # the ExternalSecret's target.template, e.g. REDIS_URL built from a password key. External Secrets' default
+  # mergePolicy, Replace, keeps only the templated keys: set mergePolicy: Merge to keep the fetched ones beside them.
   template: {}
 
 # The ES256 keys internal tokens are signed with, mounted at SIGNING_KEY_DIR by every replica: the Secret

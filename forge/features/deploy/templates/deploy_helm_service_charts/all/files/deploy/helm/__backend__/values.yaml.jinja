@@ -227,7 +227,8 @@ externalSecret:
   data: []
   dataFrom: []
   # target.template of the ExternalSecret and of the migration's copy, e.g. a database URL built from a password
-  # key, so a value lives in one key of the store
+  # key, so a value lives in one key of the store. External Secrets' default mergePolicy, Replace, keeps only the
+  # templated keys: set mergePolicy: Merge to keep the keys data and dataFrom fetch beside them.
   template: {}
 
 # The migration: a pre-install/pre-upgrade hook Job (templates/migration-job.yaml), so the schema is current
