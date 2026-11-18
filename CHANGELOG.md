@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Vitest: quiet CI output, a router for Nuxt UI tests
+
+- The Vue and Svelte frontends and the Node services (unit, integration and e2e configs) set Vitest's `silent` to
+  `passed-only` when `CI` is `1` or `true`, so CI prints the console of failing tests only. The GitHub Actions runner
+  processes each log line before it uploads it, and a long line costs over a minute: a frontend's 13 Vue warnings of
+  200 KB each added twelve minutes after its tests had passed. Locally the console is printed as before.
+- The Vue frontend's test setup on Nuxt UI (`app-shell`, and `crud-app` with `ui_kit=nuxt-ui`) gives a mounted
+  component without a router an empty memory router, so Nuxt UI's links no longer warn
+  `injection "Symbol(route location)" not found` (with every prop of the component tree in the trace). A test that
+  installs its own router, or provides its own route under `routeLocationKey`, keeps it, without a warning.
+- The two setups are one template now: a `crud-app` on Nuxt UI generated without the `msw` extra no longer imports
+  `@/shared/mocks/node`, which only renders with that extra.
+
 ### Per-service charts: `externalSecret.template`
 
 - The backend and gatekeeper charts take `externalSecret.template` and render it as the ExternalSecret's

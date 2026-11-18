@@ -1,6 +1,7 @@
 import { {% if 'msw' in extras.split(',') %}afterAll, afterEach, beforeAll, {% endif %}vi } from 'vitest'
 import { config } from '@vue/test-utils'
 import ui from '@nuxt/ui/vue-plugin'
+import { createMemoryHistory, createRouter, routeLocationKey, routerKey } from 'vue-router'
 {%- if 'msw' in extras.split(',') %}
 import { server } from '@/shared/mocks/node'
 
@@ -12,6 +13,19 @@ afterAll(() => server.close())
 // Every mounted component gets Nuxt UI as the app does (main.ts): its bundled
 // icons, color mode and router integration.
 config.global.plugins.push(ui)
+
+// Nuxt UI's links read the router: a test that installs none gets an empty one; a test's own router or route stays.
+config.global.plugins.push({
+  install(app) {
+    app.mixin({
+      beforeCreate() {
+        const provides = this.$.appContext.provides
+        if (this.$.parent || routerKey in provides || routeLocationKey in provides) return
+        app.use(createRouter({ history: createMemoryHistory(), routes: [{ path: '/:path(.*)*', component: { render: () => null } }] }))
+      },
+    })
+  },
+})
 
 Object.defineProperty(window, 'matchMedia', { writable: true, value: vi.fn().mockImplementation((query: string) => ({ matches: false, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn() })) })
 

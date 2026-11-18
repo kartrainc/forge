@@ -8,6 +8,8 @@ export default defineConfig({
     env: { NODE_ENV: "testing" },
     setupFiles: ["tests/integration/setup-env.ts"],
     passWithNoTests: false,
+    // CI prints the console of failing tests only: a runner's log slows down on large output
+    silent: /^(1|true)$/i.test(process.env.CI ?? "") ? "passed-only" : false,
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts", "../../packages/*/src/**/*.ts", "packages/*/src/**/*.ts"],

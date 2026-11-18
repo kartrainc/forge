@@ -645,8 +645,8 @@
       "sha256": "54fdfd3610a6c3ab"
     },
     "apps/admin/src/test/setup.ts": {
-      "size": 1247,
-      "sha256": "f49fe0e3aff99dab"
+      "size": 1845,
+      "sha256": "dfeaa7c7dbdffb9b"
     },
     "apps/admin/tests/e2e/application.spec.ts": {
       "size": 2361,
@@ -697,8 +697,8 @@
       "sha256": "9611582f3c200d0c"
     },
     "apps/admin/vite.config.ts": {
-      "size": 2923,
-      "sha256": "f184a0b343341dba"
+      "size": 3095,
+      "sha256": "b4b52a1b812d8453"
     },
     "apps/admin/vitest.config.ts": {
       "size": 389,
@@ -1689,8 +1689,8 @@
       "sha256": "aba9539ccbfa500e"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2413,
-      "sha256": "aa7e0c489644f7ea"
+      "size": 2585,
+      "sha256": "46a7a07ece365598"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,
