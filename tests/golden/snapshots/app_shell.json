@@ -453,8 +453,8 @@
       "sha256": "d93d8731bb37d0ab"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.test.ts": {
-      "size": 35883,
-      "sha256": "a370d0e27df15b26"
+      "size": 35879,
+      "sha256": "99f8d7dc53555d48"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
       "size": 24797,
