@@ -9,8 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - `header-sidebar` shell, additions off by default: `header.close: false` drops the Close button beside a narrow
   screen's opened header; the page's scrolling column is `relative` and marked `data-shell="page"`;
-  `foldedSubmenu: { mode: 'popover' | 'inline', ui? }` opens the folded sidebar's sub-menus in place, their items listed
-  after their parent; `asideSlideover.dismissible: false` (a right panel kept open) no longer keeps Escape from closing
+  `foldedSubmenu: { mode: 'popover' | 'inline', ui?, markActiveParent? }` opens the folded sidebar's sub-menus in place, their items listed
+  after their parent (`markActiveParent`, off by default, marks a shut parent active over the current page's row); `asideSlideover.dismissible: false` (a right panel kept open) no longer keeps Escape from closing
   an opened narrow header, while an Escape another control consumed still keeps it open.
 - **Changed:** a project's `page.main` replaces the main's `flex-1` along with `p-4 sm:p-6` (the default keeps
   `flex-1`), so its footer can follow the content; a project that already passes `page.main` loses the growth: add
@@ -18,7 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Changed:** `collapsedSize` defaults to 3.5 rem (was 4) and the sidebar's root takes `min-w-14` (Nuxt UI's is
   `min-w-16`), so the default folded sidebar is 3.5 rem wide; pass `sidebar: { collapsedSize: 4 }` for the old width.
 - **Changed:** the `footer` slot receives `footerClass` and renders without a `footer` element around it (the shell's
-  default footer menu keeps its own); a project's slot draws `<footer :class="footerClass">`. The two edge toggles come
+  default footer menu keeps its own); a project's slot draws `<footer :class="footerClass">`. A project's own `footer`
+  slot that does not adopt it loses more than the border and padding: it loses the page's `contentinfo` landmark, and
+  silently, since nothing looks different. The two edge toggles come
   last in the DOM, in zero-width layers the row's `order` places beside the page, so the keyboard reaches them after
   the page and the right panel.
 

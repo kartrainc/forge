@@ -576,7 +576,7 @@ describe('the header-sidebar shell on a narrow screen', () => {
 
 describe('the header-sidebar shell\'s folded sub-menus', () => {
   const sections = () => application.layouts[layout]!.menus
-  const original = structuredClone(sections().primary)
+  const original = sections().primary
   const landing = () => application.routing.landing
 
   beforeEach(() => {
@@ -592,7 +592,6 @@ describe('the header-sidebar shell\'s folded sub-menus', () => {
     sections().primary = original
   })
 
-  const rows = (shell: VueWrapper) => shell.get('nav[aria-label="Main"]').findAll('a, button').map(row => row.text() || row.attributes('aria-label'))
   const parent = (shell: VueWrapper) => shell.get('nav[aria-label="Main"]').findAll('button').find(button => button.text().includes('Sales'))!
 
   it('opens a folded sidebar\'s sub-menu beside its parent by default', async () => {
@@ -622,11 +621,38 @@ describe('the header-sidebar shell\'s folded sub-menus', () => {
       .props('items') as { ui?: { item?: unknown[] }, class?: unknown[] }[][])[0]!
     expect(open[1]!.ui!.item).not.toContain('py-0 invisible')
     expect(open[1]!.class).not.toContain('h-0')
-    expect(rows(shell).length).toBeGreaterThan(0)
+    const listed = shell.get('nav[aria-label="Main"]').findAll('li')
+    for (const label of ['Orders', 'Invoices']) {
+      expect(listed.find(row => row.text() === label)!.classes()).not.toContain('invisible')
+    }
 
     await parent(shell).trigger('click')
     await flushPromises()
     expect(parent(shell).attributes('aria-expanded')).toBe('false')
+  })
+
+  it('marks a shut parent active over the current page\'s row only when markActiveParent says so', async () => {
+    screen(800)
+    const active = (shell: VueWrapper) => (shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+      .props('items') as { label?: string, active?: boolean }[][])[0]!.find(item => item.label === 'Sales')!.active
+    // On the landing route the current item is 'Orders', a child of 'Sales', and its sub-menu opens by itself.
+    const visit = async (shell: VueWrapper) => {
+      await (shell.vm.$router as { push: (to: unknown) => Promise<unknown> }).push({ name: landing() })
+      await flushPromises()
+    }
+    for (const markActiveParent of [undefined, true]) {
+      const shell = await render({}, { narrowSidebar: 'collapsed', foldedSubmenu: { mode: 'inline', markActiveParent }, menu: { type: 'single' } })
+      await visit(shell)
+      // open: the page's row is visible under the parent, which is not marked
+      expect(parent(shell).attributes('aria-expanded')).toBe('true')
+      expect(active(shell)).toBeUndefined()
+      // shut over the current page: marked only on request
+      await parent(shell).trigger('click')
+      await flushPromises()
+      expect(parent(shell).attributes('aria-expanded')).toBe('false')
+      expect(active(shell)).toBe(markActiveParent)
+      shell.unmount()
+    }
   })
 
   it('draws the inline rows with the project\'s classes, first and last apart', async () => {

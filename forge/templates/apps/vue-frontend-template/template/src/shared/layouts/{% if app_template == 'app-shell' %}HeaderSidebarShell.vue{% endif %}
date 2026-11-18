@@ -49,8 +49,11 @@ const props = withDefaults(defineProps<{
    * accordion does (the parent says `aria-expanded`). A shut sub-menu's rows stay in the list with no height and hidden
    * (`invisible`: out of the pointer's, the keyboard's and assistive technology's reach), so `ui` can slide them. `ui`
    * draws the rows over each item's own; `first` and `last` add classes to the first and last row's `item`.
+   * `markActiveParent` (inline only, off by default) marks a shut parent `active` while one of its children is the
+   * current page, so a folded sidebar shows the location when its sub-menu is shut: a shut sub-menu's rows are
+   * `invisible`, and the parent is otherwise never active. Off, a shut parent stays unmarked, as the open sidebar's does.
    */
-  foldedSubmenu?: { mode: 'popover' | 'inline', ui?: FoldedSubmenuUi }
+  foldedSubmenu?: { mode: 'popover' | 'inline', ui?: FoldedSubmenuUi, markActiveParent?: boolean }
   /** Where the sidebar, the right panel and the header turn narrow; 1024 px each by default. */
   breakpoints?: { sidebar?: Breakpoint, aside?: Breakpoint, header?: Breakpoint }
   /** The sidebar on narrow screens: behind a menu button (`menu`), or kept as icons (`collapsed`). */
@@ -158,6 +161,11 @@ watch(sidebarWide, (wide) => {
 // every Escape it receives so that it stays, and the header still closes under it. Its prevention is
 // told apart from a control's by the order: the aside's own handler (`asideContent`) sees the event
 // before Nuxt UI's does, and marks it only when nothing had prevented it by then.
+// The rule depends on that order: in Nuxt UI 4.12's `Slideover.vue`, `v-bind="contentProps"` (line 81, where
+// `onEscapeKeyDown` rides) comes before `v-on="contentEvents"` (line 86, whose handler calls `preventDefault`),
+// so the shell's handler runs first. The test "closes the header on Escape beside a right panel that stays open, and
+// leaves an Escape to its other layers" guards it: a Nuxt UI bump that flips the order fails that test. Reka UI's DismissableLayer listens on `window`
+// (VueUse `onKeyStroke`, bubble phase), after the focused control's own handlers.
 const keptEscapes = new WeakSet<Event>()
 const asideContent = computed(() => {
   const own = props.asideSlideover.content as { onEscapeKeyDown?: (event: Event) => void } | undefined
@@ -286,8 +294,9 @@ const foldedItems = computed((): NavigationMenuItem[][] => {
     const { children, ...parent } = item
     const value = itemValue(item, index, listIndex)
     const open = openItems.value.includes(value)
+    const marked = props.foldedSubmenu.markActiveParent && !open && children.some(child => child.active)
     return [
-      { ...parent, 'aria-expanded': open, 'onSelect': (event: Event) => { item.onSelect?.(event); toggleSubmenu(value) } },
+      { ...parent, ...(marked ? { active: true } : {}), 'aria-expanded': open, 'onSelect': (event: Event) => { item.onSelect?.(event); toggleSubmenu(value) } },
       ...children.map((child, at) => ({
         ...child,
         ui: {
@@ -426,6 +435,11 @@ const menuItems = (isCollapsed: boolean) => (isCollapsed ? foldedItems.value : p
         The edge toggles come last in the DOM, so the keyboard reaches them after the page and the right panel: the sidebar,
         the page, the footer, the panel, then the toggles. Each sits in a layer of no width that the row's `order` puts where
         the toggle belongs, at the page's start and at its end, so it is placed against its layer as it was against the page.
+        This is deliberate: the keyboard reaches the page and the right panel before the toggles, so a keyboard user
+        reaches the content first, which is the Tab order the app-shell design this template follows asks for.
+        The visual position (at the page's edges) and the focus order therefore differ on purpose: a keyboard user reaches
+        the page first. A project that wants the toggles earlier moves them with the `sidebar-toggle` and
+        `aside-toggle` slots or its own skip link; do not move the layers back before the page.
       -->
       <div v-if="sidebarMode === 'wide' && sidebarCollapsible" class="relative order-1 w-0 shrink-0">
         <slot name="sidebar-toggle" :collapsed="collapsed" :toggle="toggleSidebar">
