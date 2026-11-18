@@ -151,6 +151,11 @@ externalSecret:
     name: ""
   data: []
   dataFrom: []
+  # the ExternalSecret's target.template, e.g. REDIS_URL built from a password key. External Secrets' default
+  # mergePolicy, Replace, keeps only the templated keys: set mergePolicy: Merge to keep the fetched ones beside them.
+  # Values that pass through another template engine first (helmfile .gotmpl, tpl) must escape the braces:
+  # {% raw %}"{{ `{{ .redis_password }}` }}"{% endraw %}.
+  template: {}
 
 # The ES256 keys internal tokens are signed with, mounted at SIGNING_KEY_DIR by every replica: the Secret
 # {{ service.name }}-signing, its active.pem generated at install and kept across upgrades (like the Fernet keys, so set

@@ -824,6 +824,21 @@ def test_an_external_secret_replaces_the_secret(helm: Path) -> None:
     assert external["spec"]["target"]["name"] == "gatekeeper-secret"
     assert external["spec"]["secretStoreRef"] == {"kind": "ClusterSecretStore", "name": "vault"}
     assert {"secretRef": {"name": "gatekeeper-secret"}} in _container(docs, "gatekeeper")["envFrom"]
+    assert "template" not in external["spec"]["target"]
+    template = {
+        "engineVersion": "v2",
+        "data": {"REDIS_URL": "redis://:{{ .redis_password }}@redis:6379/0"},
+    }
+    templated = _render(
+        chart,
+        *args,
+        "--set",
+        "secret.enabled=false",
+        "--set-json",
+        f"externalSecret.template={json.dumps(template)}",
+    )
+    target = _get(templated, "ExternalSecret", "gatekeeper-secret")["spec"]["target"]
+    assert target["template"] == template
 
 
 @pytest.mark.parametrize("chart", ["keycloak", "gatekeeper"])
