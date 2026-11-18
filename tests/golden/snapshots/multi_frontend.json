@@ -645,8 +645,8 @@
       "sha256": "54fdfd3610a6c3ab"
     },
     "apps/admin/src/test/setup.ts": {
-      "size": 1752,
-      "sha256": "9b3634db38dd2150"
+      "size": 1845,
+      "sha256": "dfeaa7c7dbdffb9b"
     },
     "apps/admin/tests/e2e/application.spec.ts": {
       "size": 2361,

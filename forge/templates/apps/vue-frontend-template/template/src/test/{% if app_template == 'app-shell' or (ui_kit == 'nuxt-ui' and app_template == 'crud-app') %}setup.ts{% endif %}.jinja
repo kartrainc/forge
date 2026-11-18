@@ -1,7 +1,7 @@
 import { {% if 'msw' in extras.split(',') %}afterAll, afterEach, beforeAll, {% endif %}vi } from 'vitest'
 import { config } from '@vue/test-utils'
 import ui from '@nuxt/ui/vue-plugin'
-import { createMemoryHistory, createRouter, routerKey } from 'vue-router'
+import { createMemoryHistory, createRouter, routeLocationKey, routerKey } from 'vue-router'
 {%- if 'msw' in extras.split(',') %}
 import { server } from '@/shared/mocks/node'
 
@@ -14,12 +14,13 @@ afterAll(() => server.close())
 // icons, color mode and router integration.
 config.global.plugins.push(ui)
 
-// Nuxt UI's links read the router: a test that installs none gets an empty one, a test's own router stays.
+// Nuxt UI's links read the router: a test that installs none gets an empty one; a test's own router or route stays.
 config.global.plugins.push({
   install(app) {
     app.mixin({
       beforeCreate() {
-        if (this.$.parent || routerKey in this.$.appContext.provides) return
+        const provides = this.$.appContext.provides
+        if (this.$.parent || routerKey in provides || routeLocationKey in provides) return
         app.use(createRouter({ history: createMemoryHistory(), routes: [{ path: '/:path(.*)*', component: { render: () => null } }] }))
       },
     })

@@ -517,8 +517,8 @@
       "sha256": "b265dc185537cb11"
     },
     "apps/frontend/src/test/setup.ts": {
-      "size": 1540,
-      "sha256": "b53bede622808061"
+      "size": 1633,
+      "sha256": "5b7c00d5abdc1839"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
       "size": 6630,
