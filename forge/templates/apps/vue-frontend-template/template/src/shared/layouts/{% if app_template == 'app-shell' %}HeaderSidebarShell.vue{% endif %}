@@ -158,14 +158,14 @@ watch(sidebarWide, (wide) => {
 // `data-dismissable-layer`. The header closes on an Escape no layer takes and no control consumed
 // (`defaultPrevented`: a combobox, an editor, an input cancelling its own interaction). The aside over
 // the page that stays open (`asideSlideover.dismissible: false`) is no such layer: Nuxt UI prevents
-// every Escape it receives so that it stays, and the header still closes under it. Its prevention is
-// told apart from a control's by the order: the aside's own handler (`asideContent`) sees the event
-// before Nuxt UI's does, and marks it only when nothing had prevented it by then.
-// The rule depends on that order: in Nuxt UI 4.12's `Slideover.vue`, `v-bind="contentProps"` (line 81, where
-// `onEscapeKeyDown` rides) comes before `v-on="contentEvents"` (line 86, whose handler calls `preventDefault`),
-// so the shell's handler runs first. The test "closes the header on Escape beside a right panel that stays open, and
-// leaves an Escape to its other layers" guards it: a Nuxt UI bump that flips the order fails that test. Reka UI's DismissableLayer listens on `window`
-// (VueUse `onKeyStroke`, bubble phase), after the focused control's own handlers.
+// every Escape it receives so that it stays, and the header still closes under it.
+// Reka UI's DismissableLayer and the `onKeyStroke` below both listen on `window` in the bubble phase, so they run in
+// the order they were added: this listener at the shell's setup, a panel's layer listener when the panel opens, later.
+// The handler therefore sees the Escape first, and the only prevention it can find then comes from a control on the
+// event's path, which the rule respects. Should a layer's listener ever run first, the aside's prevention would look
+// like a control's: `asideContent` marks the Escape in the aside's own `onEscapeKeyDown`, when nothing had prevented
+// it by then, and the handler lets a marked Escape through. The marking is that fallback; a test moves this listener
+// behind the layer's to run it.
 const keptEscapes = new WeakSet<Event>()
 const asideContent = computed(() => {
   const own = props.asideSlideover.content as { onEscapeKeyDown?: (event: Event) => void } | undefined

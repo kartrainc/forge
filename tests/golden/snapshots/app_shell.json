@@ -453,12 +453,12 @@
       "sha256": "d93d8731bb37d0ab"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.test.ts": {
-      "size": 40653,
-      "sha256": "3c0f7447cd3b13d2"
+      "size": 42989,
+      "sha256": "1e364b026500a174"
     },
     "apps/frontend/src/shared/layouts/HeaderSidebarShell.vue": {
-      "size": 27449,
-      "sha256": "58d73cf9d8591afb"
+      "size": 27413,
+      "sha256": "62470c1064026672"
     },
     "apps/frontend/src/shared/observability/sentry.test.ts": {
       "size": 1155,

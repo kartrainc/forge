@@ -465,8 +465,9 @@ describe('the header-sidebar shell on a narrow screen', () => {
     await shell.get('[data-test="open-search"]').trigger('click')
     await flushPromises()
     expect(document.querySelector('[data-test="results"]')).not.toBeNull()
+    // cancelable, as a browser's Escape is: Nuxt UI's preventDefault on it holds the chat open
     const escape = async () => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
       await flushPromises()
     }
     // the results are a layer of their own: they take the first Escape, the chat stays
@@ -474,9 +475,46 @@ describe('the header-sidebar shell on a narrow screen', () => {
     await vi.waitFor(() => expect(document.querySelector('[data-test="results"]')).toBeNull())
     expect(shell.find('[data-test="search"]').exists()).toBe(true)
     expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull()
-    // the kept chat's layer is no layer to leave an Escape to: the next one closes the header
+    // the kept chat's layer is no layer to leave an Escape to: the next one closes the header, the chat stays
     await escape()
     expect(shell.find('[data-test="search"]').exists()).toBe(false)
+    expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull()
+  })
+
+  it('closes the header on Escape beside the right panel when the panel\'s layer hears the Escape first', async () => {
+    // The shell's `window` listener is added at its setup and the panel's layer listener when the panel opens, so
+    // the shell's runs first. Moving the shell's behind the layer's reproduces the reverse order: the layer then
+    // marks the Escape and Nuxt UI prevents it before the shell's handler sees it.
+    const added: [string, EventListenerOrEventListenerObject, unknown][] = []
+    const add = window.addEventListener.bind(window)
+    const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type: string, listener: never, options?: never) => {
+      if (type === 'keydown') added.push([type, listener, options])
+      add(type, listener, options)
+    })
+    const slots = {
+      actions: ({ expandHeader, aside }: { expandHeader: () => void, aside: { toggle: () => void } }) => [
+        h('button', { 'data-test': 'open-search', 'onClick': expandHeader }, 'Open search'),
+        h('button', { 'data-test': 'open-chat', 'onClick': aside.toggle }, 'Open chat'),
+      ],
+      header: () => h('input', { 'data-test': 'search' }),
+      aside: chat,
+    }
+    const shell = await render(slots, { asideButton: false, asideSlideover: { dismissible: false } })
+    spy.mockRestore()
+    await shell.get('[data-test="open-chat"]').trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull())
+    await shell.get('[data-test="open-search"]').trigger('click')
+    await flushPromises()
+    for (const [type, listener, options] of added) {
+      window.removeEventListener(type, listener, options as never)
+      window.addEventListener(type, listener, options as never)
+    }
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    document.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+    expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull()
   })
 
   it('keeps an Escape a header control consumed from closing the header while the right panel stays open', async () => {
