@@ -20,6 +20,8 @@ export default defineConfig({
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		globals: true,
 		environment: 'jsdom',
-		setupFiles: ['./src/test/setup.ts']
+		setupFiles: ['./src/test/setup.ts'],
+		// CI prints the console of failing tests only: a runner's log slows down on large output
+		silent: process.env.CI ? 'passed-only' : false
 	}
 });

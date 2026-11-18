@@ -1309,8 +1309,8 @@
       "sha256": "aba9539ccbfa500e"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2605,
-      "sha256": "b36b4f8a384f1d35"
+      "size": 2751,
+      "sha256": "759fadbc6e35e8d5"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,

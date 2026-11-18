@@ -345,8 +345,8 @@
       "sha256": "7aed9f41bf232c59"
     },
     "services/api-node/vitest.config.ts": {
-      "size": 982,
-      "sha256": "aba39920c3521b92"
+      "size": 1128,
+      "sha256": "ab84f9396b90999e"
     },
     "services/api-node/vitest.e2e.config.ts": {
       "size": 550,
