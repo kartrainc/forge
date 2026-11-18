@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### The app shell's page, footer, Escape and folded sub-menus
+
+- `header-sidebar` shell, each addition off by default: `header.close: false` drops the Close button beside a narrow
+  screen's opened header; a project's `page.main` replaces the main's `flex-1` along with `p-4 sm:p-6` (the default
+  keeps `flex-1`), so its footer can follow the content; the page's scrolling column is `relative` and marked
+  `data-shell="page"`; `foldedSubmenu: { mode: 'popover' | 'inline', ui? }` opens the folded sidebar's sub-menus in place,
+  their items listed after their parent; `asideSlideover.dismissible: false` (a right panel kept open) no longer keeps
+  Escape from closing an opened narrow header; `collapsedSize` defaults to 3.5 rem (was 4).
+- **Changed:** the `footer` slot receives `footerClass` and renders without a `footer` element around it (the shell's
+  default footer menu keeps its own); a project's slot draws `<footer :class="footerClass">`. The two edge toggles come
+  last in the DOM, in zero-width layers the row's `order` places beside the page, so the keyboard reaches them after
+  the page and the right panel.
+
 ### Go: `auth.provider=in_memory` and `security.sbom`
 
 - `auth.provider=in_memory` now generates Go services too: `internal/devauth` mints ES256 tokens in the process and

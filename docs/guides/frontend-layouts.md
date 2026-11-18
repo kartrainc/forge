@@ -236,14 +236,14 @@ optional, and without them the shell renders as described here.
 | Slot | Slot props | What it fills |
 |---|---|---|
 | `logo` | `collapsed`, `narrow`, `sidebarNarrow` | the header's start; the app's title, linking to `landing` |
-| `header` | `narrow`, `expanded`, `collapse`, `sidebarNarrow` | the header's centre; on a narrow header only once `expandHeader` runs, covering the header with a Close button (Escape closes it too, once no open layer in it, such as a search's results, takes the key) |
+| `header` | `narrow`, `expanded`, `collapse`, `sidebarNarrow` | the header's centre; on a narrow header only once `expandHeader` runs, covering the header with a Close button, unless `header.close` is `false` (Escape closes it too, once no open layer in it, such as a search's results, takes the key; a right panel kept open with `asideSlideover.dismissible: false` is no such layer) |
 | `actions` | `narrow`, `expandHeader`, `account`, `sidebarNarrow`, `aside` | the header's end; the `account` menu |
 | default | | the page; `<RouterView />` |
-| `footer` | `items` | under the page; the `footer` menu |
+| `footer` | `items`, `footerClass` | under the page; the `footer` menu. A slot's content is rendered without an element around it: the slot draws its own `<footer :class="footerClass">`; the default content is the shell's own `footer` element |
 | `aside` | `close`, `docked` | the right panel's content; no slot, no panel |
 | `aside-trigger` | `open`, `docked`, `toggle` | the shell's root, after the page, with an `aside`: a trigger of the project's own, which positions it (`fixed`, for example) |
-| `sidebar-toggle` | `collapsed`, `toggle` | the sidebar's edge toggle on wide screens, in the page's `relative` box |
-| `aside-toggle` | `collapsed`, `toggle` | the right panel's edge toggle while it docks, in the same box; the default shows `asideBadge` |
+| `sidebar-toggle` | `collapsed`, `toggle` | the sidebar's edge toggle on wide screens, at the page's start (a zero-width layer after the page in the DOM, so the keyboard reaches it last) |
+| `aside-toggle` | `collapsed`, `toggle` | the right panel's edge toggle while it docks, at the page's end, likewise; the default shows `asideBadge` |
 
 `narrow` is the header's state, `sidebarNarrow` the sidebar's; `aside` is
 `{ open, docked, toggle }`: docked or not, whether the panel is open, and the
@@ -253,15 +253,16 @@ toggle the edge toggle and the header's "Show panel" button use.
 |---|---|---|
 | `layout` | (required) | the layout whose menus the shell renders |
 | `asideBadge` | none | a badge on the right panel's default edge toggle while the panel is collapsed |
-| `sidebar` | `{}` | `UDashboardSidebar` props over the shell's own (`collapsible`, `collapsedSize: 4`, `defaultSize: 16`, `minSize: 12`, `maxSize: 22`, in rem): sizes, `resizable`, `collapsible: false` (no edge toggle, never collapsed on a wide screen), the narrow screen's `mode`, `menu` and `toggle`, `ui`. Nuxt UI keeps a sidebar at least 4 rem wide (`min-w-16`): a smaller `collapsedSize` needs a smaller `min-w-*` in `ui.root` |
+| `sidebar` | `{}` | `UDashboardSidebar` props over the shell's own (`collapsible`, `collapsedSize: 3.5`, `defaultSize: 16`, `minSize: 12`, `maxSize: 22`, in rem): sizes, `resizable`, `collapsible: false` (no edge toggle, never collapsed on a wide screen), the narrow screen's `mode`, `menu` and `toggle`, `ui`. Nuxt UI keeps a sidebar at least 4 rem wide (`min-w-16`): a smaller `collapsedSize` needs a smaller `min-w-*` in `ui.root` |
 | `aside` | `{}` | the docked panel's props over the shell's own (`defaultSize: 22`, `minSize: 16`, `maxSize: 32`, `resizable: true`): sizes, `resizable`, `class`, `ui` |
 | `menu` | `{}` | `UNavigationMenu` props of the primary menu over the shell's own (`tooltip`, `popover`): `type: 'single'` keeps one sub-menu open, `color`, `variant`, `highlight`, `ui` |
+| `foldedSubmenu` | `{ mode: 'popover' }` | a sub-menu of the folded sidebar (and of a narrow screen's icons): `popover` opens it beside its parent (Nuxt UI's); `inline` lists its items after their parent, which opens and shuts them (`aria-expanded`, the same open sub-menus as the open sidebar's); a shut sub-menu's rows keep their place at no height and `invisible`, so `ui` (Nuxt UI's item slots, with `first` and `last` for the first and last row's `item`) can slide them |
 | `breakpoints` | 1024 px each | `{ sidebar, aside, header }`: where each region turns narrow, as the pixels from which it is wide or a media query that matches while it is |
 | `narrowSidebar` | `'menu'` | the sidebar below its breakpoint: `'menu'` hides it behind the header's menu button and opens it over the page (Nuxt UI's menu, with its own close button); `'collapsed'` keeps it, collapsed to icons, with no menu button, and leaves the user's wide-screen choice as it was |
 | `asideButton` | `true` | the header's "Show panel" button while the panel slides over the page; off when the project renders its own trigger |
-| `asideSlideover` | `{}` | `USlideover` props for the panel on narrow screens over the shell's own (`title: 'Panel'`): `overlay: false` and `modal: false` slide it over a page that stays usable, `transition`, `title`, `ui` |
-| `page` | `{}` | `{ main, footer }`: classes for the page's `main` and its `footer` in place of the shell's own (`p-4 sm:p-6`; `border-t border-default px-4 py-3 sm:px-6`), so a project draws its own padding and the footer's line and spacing; `main` keeps `flex-1`, which holds the footer at the bottom of a short page |
-| `header` | `{}` | `{ spacing, actions }`: classes for the header's spacing and its actions' gap in place of the shell's own (`gap-3 px-4`; `gap-2`), so a project sets its own sides and the space between the logo, the centre and the actions; both keep their flex row |
+| `asideSlideover` | `{}` | `USlideover` props for the panel on narrow screens over the shell's own (`title: 'Panel'`): `overlay: false` and `modal: false` slide it over a page that stays usable, `dismissible: false` keeps it open on Escape and an outside click, `transition`, `title`, `portal`, `ui` |
+| `page` | `{}` | `{ main, footer }`: classes for the page's `main` and its `footer` in place of the shell's own (`flex-1 p-4 sm:p-6`; `border-t border-default px-4 py-3 sm:px-6`), so a project draws its own padding and the footer's line and spacing; a project's `main` classes replace the growth too (`flex-1` holds the footer at the bottom of a short page; leave it out for a footer that follows the content). The scrolling column is `data-shell="page"`, `relative` |
+| `header` | `{}` | `{ spacing, actions, close }`: `close: false` drops the Close button beside an opened narrow header, for content that draws its own; classes for the header's spacing and its actions' gap in place of the shell's own (`gap-3 px-4`; `gap-2`), so a project sets its own sides and the space between the logo, the centre and the actions; both keep their flex row |
 
 Folded, the docked panel keeps its place at no width (`data-folded="true"`, `w-0`
 on its root) instead of leaving the page: its content stays, out of reach

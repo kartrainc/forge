@@ -263,15 +263,50 @@ describe('the header-sidebar shell on a wide screen', () => {
   })
 
   it('pads the page and boxes the footer with the project\'s classes in place of its own', async () => {
-    const footer = () => h('p', 'Footer')
+    // The slot draws its own element with the classes the shell gives it.
+    const footer = ({ footerClass }: { footerClass: string }) => h('footer', { class: footerClass }, 'Footer')
     const own = await render({ footer })
     expect(own.get('main').classes()).toEqual(['flex-1', 'p-4', 'sm:p-6'])
     expect(own.get('footer').classes()).toEqual(['border-t', 'border-default', 'px-4', 'py-3', 'sm:px-6'])
     own.unmount()
     const shell = await render({ footer }, { page: { main: 'px-8 pt-10', footer: 'mx-8 mt-10 border-t pt-5' } })
-    // `flex-1` stays: it keeps the footer at the bottom of a short page
-    expect(shell.get('main').classes()).toEqual(['flex-1', 'px-8', 'pt-10'])
+    // the project's `main` classes replace the growth too: the footer follows the content on a short page
+    expect(shell.get('main').classes()).toEqual(['px-8', 'pt-10'])
     expect(shell.get('footer').classes()).toEqual(['mx-8', 'mt-10', 'border-t', 'pt-5'])
+    shell.unmount()
+    const kept = await render({ footer }, { page: { main: 'flex-1 px-8' } })
+    expect(kept.get('main').classes()).toEqual(['flex-1', 'px-8'])
+  })
+
+  it('renders the footer element itself only for its default content, and marks the page\'s scrolling column', async () => {
+    const slotted = await render({ footer: () => h('p', { 'data-test': 'footer' }, 'Footer') })
+    expect(slotted.find('footer').exists()).toBe(false)
+    expect(slotted.get('[data-test="footer"]').element.parentElement!.matches('[data-shell="page"]')).toBe(true)
+    slotted.unmount()
+    const shell = await render()
+    const page = shell.get('[data-shell="page"]')
+    expect(page.classes()).toEqual(expect.arrayContaining(['relative', 'overflow-y-auto']))
+    expect(page.get('main').exists()).toBe(true)
+    const menus = application.layouts[layout]!.menus
+    const hasFooter = (menus.footer ?? []).some(section => section.items.length > 0)
+    expect(page.find('footer').exists()).toBe(hasFooter)
+  })
+
+  it('puts the edge toggles last in the DOM, in layers the row\'s order places beside the page', async () => {
+    const shell = await render({ aside: chat })
+    const toggles = shell.findAll('[data-shell="sidebar-toggle"], [data-shell="aside-toggle"]')
+    const page = shell.get('[data-shell="page"]').element
+    const layer = (toggle: Element) => toggle.parentElement!.closest<HTMLElement>('.relative.w-0')!
+    const [left, right] = [shell.get('[data-shell="sidebar-toggle"]').element, shell.get('[data-shell="aside-toggle"]').element]
+    expect(toggles).toHaveLength(2)
+    expect(layer(left).classList.contains('order-1')).toBe(true)
+    expect(layer(right).classList.contains('order-3')).toBe(true)
+    expect(rootOf(page).classList.contains('order-2')).toBe(true)
+    expect(rootOf(shell.get('[data-shell="aside"]').element).classList.contains('order-4')).toBe(true)
+    for (const toggle of [left, right]) {
+      expect(page.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(shell.get('[data-shell="aside"]').element.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('spaces the header and its actions with the project\'s classes in place of its own', async () => {
@@ -381,6 +416,51 @@ describe('the header-sidebar shell on a narrow screen', () => {
     expect(shell.find('[data-test="search"]').exists()).toBe(false)
   })
 
+  it('leaves out the Close button of an opened header for a project whose header draws its own', async () => {
+    const slots = {
+      header: ({ collapse }: { collapse: () => void }) => h('button', { 'data-test': 'own-close', 'onClick': collapse }, 'Back'),
+      actions: ({ expandHeader }: { expandHeader: () => void }) => h('button', { 'data-test': 'open-search', 'onClick': expandHeader }, 'Open search'),
+    }
+    const shell = await render(slots, { header: { close: false } })
+    await shell.get('[data-test="open-search"]').trigger('click')
+    expect(shell.find('button[aria-label="Close"]').exists()).toBe(false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(shell.find('[data-test="own-close"]').exists()).toBe(false)
+  })
+
+  it('closes the header on Escape beside a right panel that stays open, and leaves an Escape to its other layers', async () => {
+    const slots = {
+      header: () => h(UPopover, { defaultOpen: true }, {
+        default: () => h('input', { 'data-test': 'search' }),
+        content: () => h('p', { 'data-test': 'results' }, 'Results'),
+      }),
+      actions: ({ expandHeader, aside }: { expandHeader: () => void, aside: { toggle: () => void } }) => [
+        h('button', { 'data-test': 'open-search', 'onClick': expandHeader }, 'Open search'),
+        h('button', { 'data-test': 'open-chat', 'onClick': aside.toggle }, 'Open chat'),
+      ],
+      aside: chat,
+    }
+    const shell = await render(slots, { asideButton: false, asideSlideover: { dismissible: false } })
+    await shell.get('[data-test="open-chat"]').trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull())
+    await shell.get('[data-test="open-search"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-test="results"]')).not.toBeNull()
+    const escape = async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await flushPromises()
+    }
+    // the results are a layer of their own: they take the first Escape, the chat stays
+    await escape()
+    await vi.waitFor(() => expect(document.querySelector('[data-test="results"]')).toBeNull())
+    expect(shell.find('[data-test="search"]').exists()).toBe(true)
+    expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull()
+    // the kept chat's layer is no layer to leave an Escape to: the next one closes the header
+    await escape()
+    expect(shell.find('[data-test="search"]').exists()).toBe(false)
+  })
+
   it('opens the sidebar as a named menu with its own close button', async () => {
     const shell = await render()
     await shell.get('button[aria-label="Open sidebar"]').trigger('click')
@@ -429,6 +509,84 @@ describe('the header-sidebar shell on a narrow screen', () => {
     const shell = await render()
     const account = application.layouts[layout]!.menus.account
     expect(shell.find('button[aria-label="Account"]').exists()).toBe(account.some(section => section.items.length > 0))
+  })
+})
+
+describe('the header-sidebar shell\'s folded sub-menus', () => {
+  const sections = () => application.layouts[layout]!.menus
+  const original = structuredClone(sections().primary)
+  const landing = () => application.routing.landing
+
+  beforeEach(() => {
+    sections().primary = [{ items: [
+      { id: 'sales', label: 'Sales', icon: 'i-lucide-chart-bar', children: [
+        { id: 'sales-orders', label: 'Orders', to: landing() },
+        { id: 'sales-invoices', label: 'Invoices', to: landing() },
+      ] },
+      { id: 'plain', label: 'Plain', to: landing() },
+    ] }] as never
+  })
+  afterEach(() => {
+    sections().primary = original
+  })
+
+  const rows = (shell: VueWrapper) => shell.get('nav[aria-label="Main"]').findAll('a, button').map(row => row.text() || row.attributes('aria-label'))
+  const parent = (shell: VueWrapper) => shell.get('nav[aria-label="Main"]').findAll('button').find(button => button.text().includes('Sales'))!
+
+  it('opens a folded sidebar\'s sub-menu beside its parent by default', async () => {
+    screen(800)
+    const shell = await render({}, { narrowSidebar: 'collapsed' })
+    const menu = shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+    expect(menu.props('popover')).toBe(true)
+    expect(shell.get('nav[aria-label="Main"]').text()).not.toContain('Orders')
+  })
+
+  it('lists a folded sidebar\'s sub-menu after its parent, shut until the parent opens it', async () => {
+    screen(800)
+    const shell = await render({}, { narrowSidebar: 'collapsed', foldedSubmenu: { mode: 'inline' }, menu: { type: 'single' } })
+    const menu = shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+    expect(menu.props('popover')).toBe(false)
+    const items = (menu.props('items') as { label?: string, ui?: { item?: unknown[] }, class?: unknown[] }[][])[0]!
+    expect(items.map(item => item.label)).toEqual(['Sales', 'Orders', 'Invoices', 'Plain'])
+    // shut: no height and hidden, in the list for the slide
+    expect(items[1]!.ui!.item).toContain('py-0 invisible')
+    expect(items[1]!.class).toContain('h-0')
+    expect(parent(shell).attributes('aria-expanded')).toBe('false')
+
+    await parent(shell).trigger('click')
+    await flushPromises()
+    expect(parent(shell).attributes('aria-expanded')).toBe('true')
+    const open = (shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+      .props('items') as { ui?: { item?: unknown[] }, class?: unknown[] }[][])[0]!
+    expect(open[1]!.ui!.item).not.toContain('py-0 invisible')
+    expect(open[1]!.class).not.toContain('h-0')
+    expect(rows(shell).length).toBeGreaterThan(0)
+
+    await parent(shell).trigger('click')
+    await flushPromises()
+    expect(parent(shell).attributes('aria-expanded')).toBe('false')
+  })
+
+  it('draws the inline rows with the project\'s classes, first and last apart', async () => {
+    screen(800)
+    const shell = await render({}, {
+      narrowSidebar: 'collapsed',
+      foldedSubmenu: { mode: 'inline', ui: { item: 'ps-2', first: 'pt-1', last: 'pb-1' } },
+    })
+    const menu = shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+    const items = (menu.props('items') as { ui?: { item?: unknown[] } }[][])[0]!
+    expect(items[1]!.ui!.item).toEqual(expect.arrayContaining(['ps-2', 'pt-1']))
+    expect(items[2]!.ui!.item).toEqual(expect.arrayContaining(['ps-2', 'pb-1']))
+    expect(items[2]!.ui!.item).not.toContain('pt-1')
+  })
+
+  it('leaves the open sidebar\'s sub-menus to the accordion', async () => {
+    screen(1280)
+    const shell = await render({}, { foldedSubmenu: { mode: 'inline' } })
+    const menu = shell.findAllComponents(UNavigationMenu).find(candidate => candidate.props('orientation') === 'vertical')!
+    const items = (menu.props('items') as { label?: string, children?: unknown[] }[][])[0]!
+    expect(items.map(item => item.label)).toEqual(['Sales', 'Plain'])
+    expect(items[0]!.children).toHaveLength(2)
   })
 })
 
