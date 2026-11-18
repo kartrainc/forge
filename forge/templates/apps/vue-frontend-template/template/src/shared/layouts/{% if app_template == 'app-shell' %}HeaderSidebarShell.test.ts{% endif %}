@@ -132,6 +132,13 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(page.classList.contains('lg:not-last:border-e')).toBe(false)
   })
 
+  it('lowers Nuxt UI\'s 4 rem minimum width to the 3.5 rem a folded sidebar is sized to', async () => {
+    const shell = await render()
+    const root = rootOf(shell.get('nav[aria-label="Main"]').element)
+    expect(root.classList).toContain('min-w-14')
+    expect(root.classList).not.toContain('min-w-16')
+  })
+
   it('keeps the collapsed sidebar\'s items named for assistive technology', async () => {
     const shell = await render({}, { menu: { ui: { linkLabel: 'font-bold' } } })
     await shell.get('[data-shell="sidebar-toggle"]').trigger('click')
@@ -302,7 +309,18 @@ describe('the header-sidebar shell on a wide screen', () => {
     expect(layer(left).classList.contains('order-1')).toBe(true)
     expect(layer(right).classList.contains('order-3')).toBe(true)
     expect(rootOf(page).classList.contains('order-2')).toBe(true)
-    expect(rootOf(shell.get('[data-shell="aside"]').element).classList.contains('order-4')).toBe(true)
+    const asideRoot = rootOf(shell.get('[data-shell="aside"]').element)
+    expect(asideRoot.classList.contains('order-4')).toBe(true)
+    // `order` sorts the flex items of one row: the layers, the page and the panel are its children, the panel's group
+    // (a second UDashboardGroup, `fixed inset-0 flex` in Nuxt UI) renders no box of its own
+    const row = layer(left).parentElement!
+    expect(layer(right).parentElement).toBe(row)
+    expect(rootOf(page).parentElement).toBe(row)
+    expect(asideRoot.parentElement).toBe(asideRoot.parentElement!.closest<HTMLElement>('.contents'))
+    expect(asideRoot.parentElement!.parentElement).toBe(row)
+    // no stylesheet in jsdom: tailwind-merge must have let `contents` replace the group's own `flex`
+    expect(asideRoot.parentElement!.classList).toContain('contents')
+    expect(asideRoot.parentElement!.classList).not.toContain('flex')
     for (const toggle of [left, right]) {
       expect(page.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
@@ -459,6 +477,50 @@ describe('the header-sidebar shell on a narrow screen', () => {
     // the kept chat's layer is no layer to leave an Escape to: the next one closes the header
     await escape()
     expect(shell.find('[data-test="search"]').exists()).toBe(false)
+  })
+
+  it('keeps an Escape a header control consumed from closing the header while the right panel stays open', async () => {
+    let consumed = 0
+    const slots = {
+      header: () => h('input', {
+        'data-test': 'search',
+        'onKeydown': (event: KeyboardEvent) => {
+          if (event.key !== 'Escape') return
+          consumed++
+          event.preventDefault()
+        },
+      }),
+      actions: ({ expandHeader, aside }: { expandHeader: () => void, aside: { toggle: () => void } }) => [
+        h('button', { 'data-test': 'open-search', 'onClick': expandHeader }, 'Open search'),
+        h('button', { 'data-test': 'open-chat', 'onClick': aside.toggle }, 'Open chat'),
+      ],
+      aside: chat,
+    }
+    const shell = await render(slots, { asideButton: false, asideSlideover: { dismissible: false } })
+    await shell.get('[data-test="open-chat"]').trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull())
+    await shell.get('[data-test="open-search"]').trigger('click')
+    await flushPromises()
+    const input = shell.get('[data-test="search"]').element
+    // the control takes the Escape: the header and the chat stay
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(consumed).toBe(1)
+    expect(shell.find('[data-test="search"]').exists()).toBe(true)
+    expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull()
+  })
+
+  it('keeps a project\'s own escapeKeyDown handler on the right panel\'s content', async () => {
+    const seen = vi.fn()
+    const shell = await render({
+      actions: ({ aside }: { aside: { toggle: () => void } }) => h('button', { 'data-test': 'open-chat', 'onClick': aside.toggle }, 'Open chat'),
+      aside: chat,
+    }, { asideButton: false, asideSlideover: { dismissible: false, content: { onEscapeKeyDown: seen } } })
+    await shell.get('[data-test="open-chat"]').trigger('click')
+    await vi.waitFor(() => expect(document.body.querySelector('[data-test="chat"]')).not.toBeNull())
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(seen).toHaveBeenCalledTimes(1)
   })
 
   it('opens the sidebar as a named menu with its own close button', async () => {

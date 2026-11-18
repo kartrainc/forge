@@ -152,14 +152,28 @@ watch(sidebarWide, (wide) => {
 })
 // Escape belongs to an open layer first (a search's results, a menu, a slide-over): Reka UI
 // dismisses the topmost one without preventDefault, and marks each one open with
-// `data-dismissable-layer`. The header closes on an Escape no layer takes. The aside over the page
-// that stays open (`asideSlideover.dismissible: false`) is no such layer: Nuxt UI prevents every
-// Escape it receives so that it stays, and the header still closes under it.
+// `data-dismissable-layer`. The header closes on an Escape no layer takes and no control consumed
+// (`defaultPrevented`: a combobox, an editor, an input cancelling its own interaction). The aside over
+// the page that stays open (`asideSlideover.dismissible: false`) is no such layer: Nuxt UI prevents
+// every Escape it receives so that it stays, and the header still closes under it. Its prevention is
+// told apart from a control's by the order: the aside's own handler (`asideContent`) sees the event
+// before Nuxt UI's does, and marks it only when nothing had prevented it by then.
+const keptEscapes = new WeakSet<Event>()
+const asideContent = computed(() => {
+  const own = props.asideSlideover.content as { onEscapeKeyDown?: (event: Event) => void } | undefined
+  return {
+    ...props.asideSlideover.content,
+    onEscapeKeyDown: (event: Event) => {
+      if (!event.defaultPrevented) keptEscapes.add(event)
+      own?.onEscapeKeyDown?.(event)
+    },
+  }
+})
 onKeyStroke('Escape', (event) => {
   const kept = props.asideSlideover.dismissible === false && asideOpen.value
   const layers = [...document.querySelectorAll('[data-dismissable-layer]')]
     .filter(layer => !(kept && layer.querySelector('[data-shell="aside"]')))
-  if (layers.length || (event.defaultPrevented && !kept)) return
+  if (layers.length || (event.defaultPrevented && !keptEscapes.has(event))) return
   if (narrow.value && headerExpanded.value) headerExpanded.value = false
 })
 
@@ -198,7 +212,7 @@ function mergeUi(own: Ui, project: Ui | undefined): Ui {
 // Nuxt UI shows the sidebar from `lg` and its menu below it; the shell's breakpoint decides instead.
 const sidebarUi = computed<Ui>(() => (sidebarMode.value === 'menu'
   ? { root: 'min-h-0 hidden lg:hidden', handle: 'lg:hidden', toggle: 'lg:inline-flex', content: 'lg:flex', overlay: 'lg:block' }
-  : { root: 'min-h-0 flex', handle: 'block' }))
+  : { root: 'min-h-0 min-w-14 flex', handle: 'block' }))
 const sidebarProps = computed(() => ({
   collapsible: true,
   collapsedSize: 3.5,
@@ -233,7 +247,7 @@ const asideProps = computed(() => ({
     ? { root: 'order-4 flex min-h-0 min-w-0 w-0', body: 'p-0 overflow-hidden', handle: 'hidden lg:hidden' }
     : { root: 'order-4 flex min-h-0 min-w-0 border-s border-default', body: 'p-0', handle: 'block' }, props.aside.ui as Ui | undefined),
 }))
-const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
+const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, content: asideContent.value, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
 
 // The single type takes one open sub-menu, the multiple type a list. None open is '':
 // undefined would leave the menu to its own state.
@@ -264,8 +278,8 @@ function toggleSubmenu(value: string) {
   if (props.menu.type === 'single') openItems.value = open ? [] : [value]
   else openItems.value = open ? openItems.value.filter(other => other !== value) : [...openItems.value, value]
 }
-function menuItems(isCollapsed: boolean): NavigationMenuItem[][] {
-  if (!isCollapsed || props.foldedSubmenu.mode !== 'inline') return primary.value
+const foldedItems = computed((): NavigationMenuItem[][] => {
+  if (props.foldedSubmenu.mode !== 'inline') return primary.value
   const { first, last, ...rows } = props.foldedSubmenu.ui ?? {}
   return primary.value.map((list, listIndex) => list.flatMap((item, index): NavigationMenuItem[] => {
     if (!item.children?.length) return [item]
@@ -284,7 +298,10 @@ function menuItems(isCollapsed: boolean): NavigationMenuItem[][] {
       })),
     ]
   }))
-}
+})
+// The open sidebar's items are the layout's own; the folded one's follow `foldedSubmenu`. Computed, so a re-render
+// that changes neither hands UNavigationMenu the same `items`.
+const menuItems = (isCollapsed: boolean) => (isCollapsed ? foldedItems.value : primary.value)
 </script>
 
 <template>
