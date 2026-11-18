@@ -519,7 +519,7 @@ describe('the header-sidebar shell\'s folded sub-menus', () => {
 
   beforeEach(() => {
     sections().primary = [{ items: [
-      { id: 'sales', label: 'Sales', icon: 'i-lucide-chart-bar', children: [
+      { id: 'sales', label: 'Sales', icon: 'i-lucide-house', children: [
         { id: 'sales-orders', label: 'Orders', to: landing() },
         { id: 'sales-invoices', label: 'Invoices', to: landing() },
       ] },
