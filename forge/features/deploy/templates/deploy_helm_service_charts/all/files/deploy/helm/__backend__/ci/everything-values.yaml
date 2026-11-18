@@ -69,6 +69,11 @@ externalSecret:
   dataFrom:
     - extract:
         key: example/env
+  template:
+    engineVersion: v2
+    mergePolicy: Merge
+    data:
+      EXAMPLE_URL: "postgresql://app:{{ .EXAMPLE_PASSWORD }}@postgres-rw:5432/app"
 migration:
   postgresImage: "pgvector/pgvector:pg16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 ingressRoute:

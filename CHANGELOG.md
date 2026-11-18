@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased] — targeting 1.2.0
 
+### Per-service charts: `externalSecret.template`
+
+- The backend and gatekeeper charts take `externalSecret.template` and render it as the ExternalSecret's
+  `target.template` (a backend's migration copy gets it too), so a key can be built from others the store holds, such as
+  a database or Redis URL from a password key, and a value lives in one key of the store. Empty by default: the
+  rendered ExternalSecrets are unchanged. External Secrets' default `mergePolicy: Replace` keeps only the templated
+  keys; `mergePolicy: Merge` keeps the fetched ones beside them.
+
 ### Go: `auth.provider=in_memory` and `security.sbom`
 
 - `auth.provider=in_memory` now generates Go services too: `internal/devauth` mints ES256 tokens in the process and

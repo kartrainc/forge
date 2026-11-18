@@ -57,6 +57,11 @@ externalSecret:
   dataFrom:
     - extract:
         key: gatekeeper
+  template:
+    engineVersion: v2
+    mergePolicy: Merge
+    data:
+      REDIS_URL: "redis://:{{ .redis_password }}@redis:6379/0"
 signingKeys:
   existingSecret: gatekeeper-signing-keys
 serviceRegistry:
