@@ -11,7 +11,7 @@
 import { computed, ref, useSlots, watch } from 'vue'
 import { onKeyStroke, useLocalStorage, useMediaQuery } from '@vueuse/core'
 import { useRoute } from 'vue-router'
-import type { DashboardSidebarProps, NavigationMenuProps, SlideoverProps } from '@nuxt/ui'
+import type { DashboardSidebarProps, NavigationMenuItem, NavigationMenuProps, SlideoverProps } from '@nuxt/ui'
 import { application } from '@/shared/application/config'
 import { useApplicationRouting } from '@/shared/application/context'
 import { useApplicationDropdown, useApplicationMenu, useOpenMenuItems } from '@/shared/application/menus'
@@ -19,6 +19,8 @@ import { useApplicationDropdown, useApplicationMenu, useOpenMenuItems } from '@/
 /** From which width a region is wide: a number of pixels, or a media query that matches when it is. */
 type Breakpoint = number | string
 type Ui = Record<string, unknown>
+/** An inline sub-menu's classes: Nuxt UI's item slots, and `first` and `last` added to its first and last row's `item`. */
+type FoldedSubmenuUi = NonNullable<NavigationMenuItem['ui']> & { first?: string, last?: string }
 
 /** The right-hand panel's state and its toggle, for a trigger of the project's own. */
 interface AsideControl {
@@ -40,29 +42,46 @@ const props = withDefaults(defineProps<{
   aside?: Pick<DashboardSidebarProps, 'defaultSize' | 'minSize' | 'maxSize' | 'resizable' | 'class' | 'ui'>
   /** UNavigationMenu props of the primary menu over the shell's: `type`, `tooltip`, `popover`, `ui`. */
   menu?: Omit<NavigationMenuProps, 'items' | 'modelValue' | 'defaultValue' | 'orientation' | 'collapsed'>
+  /**
+   * A sub-menu of the folded sidebar (and of a narrow screen's icons). `popover`, Nuxt UI's and the default: it opens
+   * beside its parent. `inline`: its items follow their parent in the list, drawn as Nuxt UI draws every folded item (the
+   * icon, the name in a tooltip, the count on its corner), and the parent opens and shuts them as the open sidebar's
+   * accordion does (the parent says `aria-expanded`). A shut sub-menu's rows stay in the list with no height and hidden
+   * (`invisible`: out of the pointer's, the keyboard's and assistive technology's reach), so `ui` can slide them. `ui`
+   * draws the rows over each item's own; `first` and `last` add classes to the first and last row's `item`.
+   * `markActiveParent` (inline only, off by default) marks a shut parent `active` while one of its children is the
+   * current page, so a folded sidebar shows the location when its sub-menu is shut: a shut sub-menu's rows are
+   * `invisible`, and the parent is otherwise never active. Off, a shut parent stays unmarked, as the open sidebar's does.
+   */
+  foldedSubmenu?: { mode: 'popover' | 'inline', ui?: FoldedSubmenuUi, markActiveParent?: boolean }
   /** Where the sidebar, the right panel and the header turn narrow; 1024 px each by default. */
   breakpoints?: { sidebar?: Breakpoint, aside?: Breakpoint, header?: Breakpoint }
   /** The sidebar on narrow screens: behind a menu button (`menu`), or kept as icons (`collapsed`). */
   narrowSidebar?: 'menu' | 'collapsed'
   /** The header's "Show panel" button on narrow screens; off when the project renders its own trigger. */
   asideButton?: boolean
-  /** USlideover props for the right panel on narrow screens over the shell's: `overlay`, `modal`, `transition`, `title`, `ui`. */
+  /** USlideover props for the right panel on narrow screens over the shell's: `overlay`, `modal`, `transition`, `title`, `ui`, `dismissible`, `portal`. */
   asideSlideover?: Omit<SlideoverProps, 'open' | 'side'>
   /**
-   * Classes for the page's `main` and its `footer` in place of the shell's own (`p-4 sm:p-6`; `border-t border-default
-   * px-4 py-3 sm:px-6`): a project draws its own padding, and its footer's line and spacing.
+   * Classes for the page's `main` and its `footer` in place of the shell's own (`flex-1 p-4 sm:p-6`; `border-t
+   * border-default px-4 py-3 sm:px-6`): a project draws its own padding, and its footer's line and spacing. A `main` of
+   * the project's own does not grow unless it says `flex-1`, so its footer can follow the content on a short page. A
+   * project's `footer` slot gets the footer's classes as `footerClass` and renders the footer element itself.
    */
   page?: { main?: string, footer?: string }
   /**
    * Classes for the header's spacing and its actions' gap in place of the shell's own (`gap-3 px-4`; `gap-2`): a project
-   * sets its own sides and the space between the logo, the centre and the actions.
+   * sets its own sides and the space between the logo, the centre and the actions. `close: false` drops the Close
+   * button the shell sets beside a narrow screen's opened header, for a header whose content draws its own (it closes
+   * through the `header` slot's `collapse`; Escape still closes it).
    */
-  header?: { spacing?: string, actions?: string }
+  header?: { spacing?: string, actions?: string, close?: boolean }
 }>(), {
   asideBadge: undefined,
   sidebar: () => ({}),
   aside: () => ({}),
   menu: () => ({}),
+  foldedSubmenu: () => ({ mode: 'popover' }),
   breakpoints: () => ({}),
   narrowSidebar: 'menu',
   asideButton: true,
@@ -76,7 +95,8 @@ defineSlots<{
   header?(props: { narrow: boolean, expanded: boolean, collapse: () => void, sidebarNarrow: boolean }): unknown
   actions?(props: { narrow: boolean, expandHeader: () => void, account: ReturnType<typeof useApplicationDropdown>['value'], sidebarNarrow: boolean, aside: AsideControl }): unknown
   default?(): unknown
-  footer?(props: { items: ReturnType<typeof useApplicationMenu>['value'] }): unknown
+  /** Fills the page's footer: the shell renders no element around it, the slot draws its own with `footerClass`. */
+  footer?(props: { items: ReturnType<typeof useApplicationMenu>['value'], footerClass: string }): unknown
   aside?(props: { close: () => void, docked: boolean }): unknown
   /** Rendered at the shell's root, after the page: a trigger of the project's own, which positions it. */
   'aside-trigger'?(props: AsideControl): unknown
@@ -135,9 +155,33 @@ watch(sidebarWide, (wide) => {
 })
 // Escape belongs to an open layer first (a search's results, a menu, a slide-over): Reka UI
 // dismisses the topmost one without preventDefault, and marks each one open with
-// `data-dismissable-layer`. The header closes on an Escape no layer takes.
+// `data-dismissable-layer`. The header closes on an Escape no layer takes and no control consumed
+// (`defaultPrevented`: a combobox, an editor, an input cancelling its own interaction). The aside over
+// the page that stays open (`asideSlideover.dismissible: false`) is no such layer: Nuxt UI prevents
+// every Escape it receives so that it stays, and the header still closes under it.
+// Reka UI's DismissableLayer and the `onKeyStroke` below both listen on `window` in the bubble phase, so they run in
+// the order they were added: this listener at the shell's setup, a panel's layer listener when the panel opens, later.
+// The handler therefore sees the Escape first, and the only prevention it can find then comes from a control on the
+// event's path, which the rule respects. Should a layer's listener ever run first, the aside's prevention would look
+// like a control's: `asideContent` marks the Escape in the aside's own `onEscapeKeyDown`, when nothing had prevented
+// it by then, and the handler lets a marked Escape through. The marking is that fallback; a test moves this listener
+// behind the layer's to run it.
+const keptEscapes = new WeakSet<Event>()
+const asideContent = computed(() => {
+  const own = props.asideSlideover.content as { onEscapeKeyDown?: (event: Event) => void } | undefined
+  return {
+    ...props.asideSlideover.content,
+    onEscapeKeyDown: (event: Event) => {
+      if (!event.defaultPrevented) keptEscapes.add(event)
+      own?.onEscapeKeyDown?.(event)
+    },
+  }
+})
 onKeyStroke('Escape', (event) => {
-  if (event.defaultPrevented || document.querySelector('[data-dismissable-layer]')) return
+  const kept = props.asideSlideover.dismissible === false && asideOpen.value
+  const layers = [...document.querySelectorAll('[data-dismissable-layer]')]
+    .filter(layer => !(kept && layer.querySelector('[data-shell="aside"]')))
+  if (layers.length || (event.defaultPrevented && !keptEscapes.has(event))) return
   if (narrow.value && headerExpanded.value) headerExpanded.value = false
 })
 
@@ -176,10 +220,10 @@ function mergeUi(own: Ui, project: Ui | undefined): Ui {
 // Nuxt UI shows the sidebar from `lg` and its menu below it; the shell's breakpoint decides instead.
 const sidebarUi = computed<Ui>(() => (sidebarMode.value === 'menu'
   ? { root: 'min-h-0 hidden lg:hidden', handle: 'lg:hidden', toggle: 'lg:inline-flex', content: 'lg:flex', overlay: 'lg:block' }
-  : { root: 'min-h-0 flex', handle: 'block' }))
+  : { root: 'min-h-0 min-w-14 flex', handle: 'block' }))
 const sidebarProps = computed(() => ({
   collapsible: true,
-  collapsedSize: 4,
+  collapsedSize: 3.5,
   defaultSize: 16,
   minSize: 12,
   maxSize: 22,
@@ -208,10 +252,10 @@ const asideProps = computed(() => ({
   // makes a visible x scroll): a scrollable region without focusable content (inert) is an
   // axe failure.
   ui: mergeUi(asideCollapsed.value
-    ? { root: 'flex min-h-0 min-w-0 w-0', body: 'p-0 overflow-hidden', handle: 'hidden lg:hidden' }
-    : { root: 'flex min-h-0 min-w-0 border-s border-default', body: 'p-0', handle: 'block' }, props.aside.ui as Ui | undefined),
+    ? { root: 'order-4 flex min-h-0 min-w-0 w-0', body: 'p-0 overflow-hidden', handle: 'hidden lg:hidden' }
+    : { root: 'order-4 flex min-h-0 min-w-0 border-s border-default', body: 'p-0', handle: 'block' }, props.aside.ui as Ui | undefined),
 }))
-const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
+const slideoverProps = computed(() => ({ title: 'Panel', ...props.asideSlideover, content: asideContent.value, ui: mergeUi({ body: 'p-0 sm:p-0' }, props.asideSlideover.ui as Ui | undefined) }))
 
 // The single type takes one open sub-menu, the multiple type a list. None open is '':
 // undefined would leave the menu to its own state.
@@ -226,8 +270,47 @@ function menuProps(isCollapsed: boolean) {
   // they stay for assistive technology. tailwind-merge keeps `hidden` beside `sr-only`;
   // `inline` replaces it.
   const ui = mergeUi(isCollapsed ? { linkLabel: 'inline sr-only' } : {}, props.menu.ui as Ui | undefined)
-  return { tooltip: true, popover: true, ...props.menu, ui }
+  return { tooltip: true, popover: props.foldedSubmenu.mode === 'popover', ...props.menu, ui }
 }
+
+// The folded sidebar's sub-menus inline (`foldedSubmenu.mode: 'inline'`). An item's value is the one Nuxt UI's accordion
+// gives it (its `valueKey`, else `item-<index>`, prefixed by its group's), so the same sub-menu is open under either
+// sidebar. A shut sub-menu's rows keep their place with no height (`SHUT`, over the project's classes).
+const SHUT = { item: 'py-0 invisible', link: 'h-0' }
+function itemValue(item: NavigationMenuItem, index: number, listIndex: number): string {
+  const own = item[(props.menu.valueKey as string | undefined) ?? 'value'] as string | undefined
+  return own ?? `${primary.value.length > 1 ? `group-${listIndex}-` : ''}item-${index}`
+}
+function toggleSubmenu(value: string) {
+  const open = openItems.value.includes(value)
+  if (props.menu.type === 'single') openItems.value = open ? [] : [value]
+  else openItems.value = open ? openItems.value.filter(other => other !== value) : [...openItems.value, value]
+}
+const foldedItems = computed((): NavigationMenuItem[][] => {
+  if (props.foldedSubmenu.mode !== 'inline') return primary.value
+  const { first, last, ...rows } = props.foldedSubmenu.ui ?? {}
+  return primary.value.map((list, listIndex) => list.flatMap((item, index): NavigationMenuItem[] => {
+    if (!item.children?.length) return [item]
+    const { children, ...parent } = item
+    const value = itemValue(item, index, listIndex)
+    const open = openItems.value.includes(value)
+    const marked = props.foldedSubmenu.markActiveParent && !open && children.some(child => child.active)
+    return [
+      { ...parent, ...(marked ? { active: true } : {}), 'aria-expanded': open, 'onSelect': (event: Event) => { item.onSelect?.(event); toggleSubmenu(value) } },
+      ...children.map((child, at) => ({
+        ...child,
+        ui: {
+          ...(mergeUi(rows, child.ui as Ui | undefined) as FoldedSubmenuUi),
+          item: [rows.item, at === 0 && first, at === children.length - 1 && last, child.ui?.item, !open && SHUT.item],
+        },
+        class: [child.class, !open && SHUT.link],
+      })),
+    ]
+  }))
+})
+// The open sidebar's items are the layout's own; the folded one's follow `foldedSubmenu`. Computed, so a re-render
+// that changes neither hands UNavigationMenu the same `items`.
+const menuItems = (isCollapsed: boolean) => (isCollapsed ? foldedItems.value : primary.value)
 </script>
 
 <template>
@@ -247,7 +330,7 @@ function menuProps(isCollapsed: boolean) {
         <div class="min-w-0 flex-1">
           <slot name="header" :narrow="narrow" :expanded="true" :collapse="() => (headerExpanded = false)" :sidebar-narrow="sidebarNarrow" />
         </div>
-        <UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close" @click="headerExpanded = false" />
+        <UButton v-if="header.close !== false" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close" @click="headerExpanded = false" />
       </template>
       <template v-else>
         <UDashboardSidebarToggle v-if="sidebarMode === 'menu'" class="lg:inline-flex" />
@@ -291,7 +374,7 @@ function menuProps(isCollapsed: boolean) {
           <UNavigationMenu
             v-bind="menuProps(isCollapsed)"
             v-model="openModel"
-            :items="primary"
+            :items="menuItems(isCollapsed)"
             orientation="vertical"
             :collapsed="isCollapsed"
             aria-label="Main"
@@ -299,62 +382,23 @@ function menuProps(isCollapsed: boolean) {
         </template>
       </UDashboardSidebar>
 
-      <UDashboardPanel :id="`${layout}-main`" :ui="{ root: 'min-h-0 lg:not-last:border-e-0' }">
+      <UDashboardPanel :id="`${layout}-main`" :ui="{ root: 'order-2 min-h-0 lg:not-last:border-e-0' }">
         <div class="relative flex min-h-0 flex-1 flex-col">
-          <template v-if="sidebarMode === 'wide' && sidebarCollapsible">
-            <slot name="sidebar-toggle" :collapsed="collapsed" :toggle="toggleSidebar">
-              <UTooltip :text="collapsed ? 'Expand menu' : 'Collapse menu'" :content="{ side: 'right' }">
-                <UButton
-                  class="absolute top-1/2 left-0 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                  size="xs"
-                  color="neutral"
-                  variant="outline"
-                  :icon="collapsed ? 'i-lucide-chevron-right' : 'i-lucide-chevron-left'"
-                  :aria-label="collapsed ? 'Expand menu' : 'Collapse menu'"
-                  :aria-expanded="!collapsed"
-                  data-shell="sidebar-toggle"
-                  @click="toggleSidebar"
-                />
-              </UTooltip>
-            </slot>
-          </template>
-          <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <main class="flex-1" :class="page.main ?? 'p-4 sm:p-6'">
+          <!-- `relative`: the page's containing block, so an absolutely placed `sr-only` label far down it is clipped with the scroll, not left to scroll the fixed shell. `data-shell="page"` marks the scrolling column. -->
+          <div class="relative flex min-h-0 flex-1 flex-col overflow-y-auto" data-shell="page">
+            <main :class="page.main ?? 'flex-1 p-4 sm:p-6'">
               <slot>
                 <RouterView />
               </slot>
             </main>
-            <footer v-if="slots.footer || hasFooter" :class="page.footer ?? 'border-t border-default px-4 py-3 sm:px-6'">
-              <slot name="footer" :items="footer">
-                <UNavigationMenu :items="footer" orientation="horizontal" aria-label="Footer" />
+            <template v-if="slots.footer || hasFooter">
+              <slot name="footer" :items="footer" :footer-class="page.footer ?? 'border-t border-default px-4 py-3 sm:px-6'">
+                <footer :class="page.footer ?? 'border-t border-default px-4 py-3 sm:px-6'">
+                  <UNavigationMenu :items="footer" orientation="horizontal" aria-label="Footer" />
+                </footer>
               </slot>
-            </footer>
+            </template>
           </div>
-          <template v-if="slots.aside && asideDocked">
-            <slot name="aside-toggle" :collapsed="asideCollapsed" :toggle="toggleAside">
-              <UTooltip :text="asideCollapsed ? 'Show panel' : 'Hide panel'" :content="{ side: 'left' }">
-                <UButton
-                  class="absolute top-1/2 right-0 z-10 translate-x-1/2 -translate-y-1/2 rounded-full"
-                  size="xs"
-                  color="neutral"
-                  variant="outline"
-                  :icon="asideCollapsed ? 'i-lucide-chevron-left' : 'i-lucide-chevron-right'"
-                  :aria-label="asideCollapsed ? 'Show panel' : 'Hide panel'"
-                  :aria-expanded="!asideCollapsed"
-                  data-shell="aside-toggle"
-                  @click="toggleAside"
-                />
-              </UTooltip>
-              <UBadge
-                v-if="asideBadge !== undefined && asideCollapsed"
-                :label="String(asideBadge)"
-                color="error"
-                size="sm"
-                class="absolute top-1/2 right-0 z-20 -translate-y-7 translate-x-1/2 rounded-full"
-                data-shell="aside-badge"
-              />
-            </slot>
-          </template>
         </div>
       </UDashboardPanel>
 
@@ -387,6 +431,58 @@ function menuProps(isCollapsed: boolean) {
           </aside>
         </UDashboardSidebar>
       </UDashboardGroup>
+      <!--
+        The edge toggles come last in the DOM, so the keyboard reaches them after the page and the right panel: the sidebar,
+        the page, the footer, the panel, then the toggles. Each sits in a layer of no width that the row's `order` puts where
+        the toggle belongs, at the page's start and at its end, so it is placed against its layer as it was against the page.
+        This is deliberate: the keyboard reaches the page and the right panel before the toggles, so a keyboard user
+        reaches the content first, which is the Tab order the app-shell design this template follows asks for.
+        The visual position (at the page's edges) and the focus order therefore differ on purpose: a keyboard user reaches
+        the page first. A project that wants the toggles earlier moves them with the `sidebar-toggle` and
+        `aside-toggle` slots or its own skip link; do not move the layers back before the page.
+      -->
+      <div v-if="sidebarMode === 'wide' && sidebarCollapsible" class="relative order-1 w-0 shrink-0">
+        <slot name="sidebar-toggle" :collapsed="collapsed" :toggle="toggleSidebar">
+          <UTooltip :text="collapsed ? 'Expand menu' : 'Collapse menu'" :content="{ side: 'right' }">
+            <UButton
+              class="absolute top-1/2 left-0 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :icon="collapsed ? 'i-lucide-chevron-right' : 'i-lucide-chevron-left'"
+              :aria-label="collapsed ? 'Expand menu' : 'Collapse menu'"
+              :aria-expanded="!collapsed"
+              data-shell="sidebar-toggle"
+              @click="toggleSidebar"
+            />
+          </UTooltip>
+        </slot>
+      </div>
+      <div v-if="slots.aside && asideDocked" class="relative order-3 w-0 shrink-0">
+        <slot name="aside-toggle" :collapsed="asideCollapsed" :toggle="toggleAside">
+          <UTooltip :text="asideCollapsed ? 'Show panel' : 'Hide panel'" :content="{ side: 'left' }">
+            <UButton
+              class="absolute top-1/2 right-0 z-10 translate-x-1/2 -translate-y-1/2 rounded-full"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :icon="asideCollapsed ? 'i-lucide-chevron-left' : 'i-lucide-chevron-right'"
+              :aria-label="asideCollapsed ? 'Show panel' : 'Hide panel'"
+              :aria-expanded="!asideCollapsed"
+              data-shell="aside-toggle"
+              @click="toggleAside"
+            />
+          </UTooltip>
+          <UBadge
+            v-if="asideBadge !== undefined && asideCollapsed"
+            :label="String(asideBadge)"
+            color="error"
+            size="sm"
+            class="absolute top-1/2 right-0 z-20 -translate-y-7 translate-x-1/2 rounded-full"
+            data-shell="aside-badge"
+          />
+        </slot>
+      </div>
     </div>
 
     <USlideover v-if="slots.aside && !asideDocked" v-bind="slideoverProps" v-model:open="asideOpen" side="right">
