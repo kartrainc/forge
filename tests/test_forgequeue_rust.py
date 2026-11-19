@@ -190,9 +190,18 @@ def test_adapter_implements_queue_port() -> None:
 
 
 def test_adapter_uses_apalis_native_schedule() -> None:
-    """The port's ``delay_seconds`` maps to Apalis's native schedule."""
+    """The port's ``delay_seconds`` maps to Apalis's native schedule: a
+    task's ``run_at``, set through ``TaskBuilder::run_after``."""
     body = _adapter_body()
-    assert "schedule" in body
+    assert ".run_after(" in body
+    assert ".push_task(" in body
+
+
+def test_adapter_worker_polls_on_an_interval() -> None:
+    """apalis 1.x parks a worker after an empty fetch until something wakes
+    it; without an interval, jobs pushed from elsewhere and retries or delays
+    falling due would wait for the next unrelated wake-up."""
+    assert ".poll_with_interval(" in _adapter_body()
 
 
 def test_adapter_handles_nack_requeue_and_dlq() -> None:

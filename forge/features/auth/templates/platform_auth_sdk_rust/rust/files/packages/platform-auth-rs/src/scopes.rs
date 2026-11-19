@@ -63,9 +63,5 @@ pub fn scope_satisfies(required: &str, granted: &HashSet<String>) -> bool {
 
     // Namespace wildcard: `*:<all-but-first>` — segment-bounded, exact match.
     let namespace_wildcard = format!("*:{}", parts[1..].join(":"));
-    if granted.contains(&namespace_wildcard) {
-        return true;
-    }
-
-    false
+    granted.contains(&namespace_wildcard)
 }

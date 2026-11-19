@@ -5,13 +5,15 @@
 //!
 //! The worker connects to the Redis queue pointed to by TASKIQ_BROKER_URL
 //! and drains `HelloJob` messages. Add more workers by calling
-//! `.register(...)` before `.run()` and pointing each at its job type.
+//! `.register(...)` before `.run()`, each building a worker for its job type.
+
+use std::time::Duration;
 
 use apalis::prelude::*;
 use dotenvy::dotenv;
 use tracing_subscriber::EnvFilter;
 
-use api::worker::{handle_hello, storage, HelloJob};
+use api::worker::{HelloJob, handle_hello, storage};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,11 +27,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("worker starting; awaiting jobs...");
     Monitor::new()
-        .register(
+        .register(move |_restarts| {
+            // apalis 1.x parks an idle worker until something wakes it: the
+            // interval picks up jobs the API pushes, and retries falling due.
             WorkerBuilder::new("hello-worker")
-                .backend(hello_storage)
-                .build_fn(handle_hello),
-        )
+                .backend(
+                    hello_storage
+                        .clone()
+                        .poll_with_interval(Duration::from_millis(100)),
+                )
+                .build(handle_hello)
+        })
         .run()
         .await?;
     Ok(())

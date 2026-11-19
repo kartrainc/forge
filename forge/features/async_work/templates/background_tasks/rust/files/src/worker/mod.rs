@@ -30,8 +30,10 @@ pub struct HelloJob {
     pub name: String,
 }
 
-/// Example job handler — replace / extend with project-specific work.
-pub async fn handle_hello(job: HelloJob, _data: Data<()>) -> Result<(), Error> {
+/// Example job handler — replace / extend with project-specific work. An
+/// error retries the job (apalis's backoff, up to its attempts); an
+/// ``AbortError`` sends it to the dead set.
+pub async fn handle_hello(job: HelloJob) -> Result<(), BoxDynError> {
     tracing::info!(name = %job.name, "hello_job executed");
     Ok(())
 }
