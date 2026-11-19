@@ -518,7 +518,7 @@
     },
     "apps/frontend/src/test/setup.ts": {
       "size": 1901,
-      "sha256": "499b1a8c71b06c52"
+      "sha256": "7f4adcfe5cb75a07"
     },
     "apps/frontend/tests/e2e/application.spec.ts": {
       "size": 6630,

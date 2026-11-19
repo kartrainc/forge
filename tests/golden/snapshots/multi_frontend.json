@@ -646,7 +646,7 @@
     },
     "apps/admin/src/test/setup.ts": {
       "size": 2113,
-      "sha256": "240a9c4b8a87ae18"
+      "sha256": "08119ff1ade5af91"
     },
     "apps/admin/tests/e2e/application.spec.ts": {
       "size": 2361,
@@ -1606,7 +1606,7 @@
     },
     "apps/frontend/src/test/setup.ts": {
       "size": 848,
-      "sha256": "0ae94e66136adc16"
+      "sha256": "c726c8da97fa9d73"
     },
     "apps/frontend/tailwind.config.ts": {
       "size": 163,

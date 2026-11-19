@@ -1210,7 +1210,7 @@
     },
     "apps/frontend/src/test/setup.ts": {
       "size": 848,
-      "sha256": "0ae94e66136adc16"
+      "sha256": "c726c8da97fa9d73"
     },
     "apps/frontend/tailwind.config.ts": {
       "size": 163,
