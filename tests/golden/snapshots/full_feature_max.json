@@ -1225,8 +1225,8 @@
       "sha256": "0dcdb8605fd8f9b6"
     },
     "apps/frontend/src/test/setup.ts": {
-      "size": 539,
-      "sha256": "1172e1baef2987f5"
+      "size": 848,
+      "sha256": "0ae94e66136adc16"
     },
     "apps/frontend/tailwind.config.ts": {
       "size": 163,
@@ -1309,8 +1309,8 @@
       "sha256": "aba9539ccbfa500e"
     },
     "apps/frontend/vite.config.ts": {
-      "size": 2777,
-      "sha256": "d10c39457e1afd07"
+      "size": 2605,
+      "sha256": "b36b4f8a384f1d35"
     },
     "apps/frontend/vitest.config.ts": {
       "size": 389,

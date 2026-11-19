@@ -131,8 +131,6 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    // CI prints the console of failing tests only: a runner's log slows down on large output
-    silent: /^(1|true)$/i.test(process.env.CI ?? '') ? 'passed-only' : false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html', 'json-summary'],
