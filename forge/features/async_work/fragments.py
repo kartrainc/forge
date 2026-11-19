@@ -51,7 +51,7 @@ def register_all(api: ForgeAPI) -> None:
                 ),
                 BackendLanguage.RUST: FragmentImplSpec(
                     fragment_dir=_impl("background_tasks", "rust"),
-                    dependencies=("apalis@0.7.4", "apalis-redis@0.7.4"),
+                    dependencies=("apalis@1.2.0", "apalis-redis@1.1.1"),
                     env_vars=(("TASKIQ_BROKER_URL", "redis://redis:6379/2"),),
                 ),
                 BackendLanguage.GO: FragmentImplSpec(
@@ -156,10 +156,9 @@ def register_all(api: ForgeAPI) -> None:
                     # serde_json/thiserror come in via the queue_port/rust
                     # impl this fragment depends on.
                     dependencies=(
-                        "apalis@0.7.4",
-                        "apalis-redis@0.7.4",
+                        "apalis@1.2.0",
+                        "apalis-redis@1.1.1",
                         'async-stream = "0.3.6"',
-                        'chrono = "0.4.45"',
                         'tokio = { version = "1.53.2", features = ["sync", "time"] }',
                         'uuid = { version = "1.27.0", features = ["v4"] }',
                     ),

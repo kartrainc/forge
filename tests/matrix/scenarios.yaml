@@ -458,10 +458,11 @@ scenarios:
   - name: rust_ports
     description: >-
       Rust port adapters compile — llm.provider=openai + queue=apalis +
-      reliability.cache + webhooks all on one backend. Exercises the shared
-      ports/mod.rs + adapters/mod.rs injection (#236) and the apalis consumer
-      rewritten against apalis 0.7's public WorkerBuilder API (#235). Every
-      Rust port + adapter now coexists; this scenario locks that in.
+      async.task_queue + reliability.cache + webhooks all on one backend.
+      Exercises the shared ports/mod.rs + adapters/mod.rs injection (#236), the
+      apalis consumer on apalis 1.x's public WorkerBuilder API (#235) and the
+      apalis worker binary. Every Rust port + adapter now coexists; this
+      scenario locks that in.
     lanes: [generate, verify]
     port_base: 8190
     expected_files:
@@ -479,6 +480,7 @@ scenarios:
       options:
         llm.provider: openai
         queue.backend: apalis
+        async.task_queue: true
         reliability.cache: memory
         platform.webhooks: true
 

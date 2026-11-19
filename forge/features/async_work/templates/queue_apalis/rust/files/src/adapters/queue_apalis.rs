@@ -13,8 +13,8 @@
 //! model) whose handler hands each decoded job to the port's stream and
 //! then BLOCKS on a per-message disposition the consumer signals via
 //! ``ack`` / ``nack``. That keeps apalis the source of truth for the
-//! job lifecycle: the handler returns ``Ok`` (ack), ``Error::Failed``
-//! (requeue/retry) or ``Error::Abort`` (dead-letter) according to the
+//! job lifecycle: the handler returns ``Ok`` (ack), an error
+//! (requeue/retry) or an ``AbortError`` (dead-letter) according to the
 //! consumer's decision, so delivery is genuinely at-least-once and
 //! ``nack`` actually requeues / DLQs rather than just dropping bookkeeping.
 //!
@@ -23,11 +23,12 @@
 //! no leaked background task, and an un-acked in-flight message is
 //! redelivered rather than silently marked done.
 //!
-//! The ``topic`` parameter is the Apalis namespace; each unique topic
+//! The ``topic`` parameter is the Apalis queue; each unique topic
 //! gets its own ``RedisStorage`` instance, lazy-initialized on first use.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apalis::prelude::*;
 use apalis_redis::{Config as RedisConfig, RedisStorage};
@@ -35,7 +36,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::ports::queue::{QueueError, QueueMessage, QueuePort};
 
@@ -48,16 +49,42 @@ enum Disposition {
     Dlq,
 }
 
-fn worker_error(msg: &str) -> Error {
-    Error::Failed(Arc::new(Box::<dyn std::error::Error + Send + Sync>::from(
-        msg.to_string(),
-    )))
+/// How often an idle worker asks Redis for due jobs (apalis 0.7's default):
+/// one fetch per interval for each open ``consume`` stream, per topic and replica.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+fn worker_error(msg: &str) -> BoxDynError {
+    msg.into()
 }
 
-fn abort_error(msg: &str) -> Error {
-    Error::Abort(Arc::new(Box::<dyn std::error::Error + Send + Sync>::from(
-        msg.to_string(),
-    )))
+fn abort_error(msg: &str) -> BoxDynError {
+    AbortError::new(msg).into()
+}
+
+/// The worker's handler: hands the job and a disposition sender to the
+/// consume stream, then maps the consumer's ack/nack onto the job outcome.
+async fn hand_over(
+    job: JsonEnvelope,
+    tx: mpsc::Sender<(JsonEnvelope, oneshot::Sender<Disposition>)>,
+) -> Result<(), BoxDynError> {
+    let (disp_tx, disp_rx) = oneshot::channel::<Disposition>();
+    // A closed channel means the consumer stream was dropped before this
+    // job was handed over — fail it so it isn't acked. (If the stream drops
+    // AFTER hand-over, ``disp_rx.await`` is cancelled with the worker rather
+    // than resolving here; that job is redelivered via apalis's orphan
+    // recovery once the worker misses its heartbeats — 60 s by default
+    // (``Config::heartbeat_interval`` 30 s × ``missed_heartbeats`` 2) — not
+    // immediately.)
+    if tx.send((job, disp_tx)).await.is_err() {
+        return Err(worker_error("consumer stream closed"));
+    }
+    match disp_rx.await {
+        Ok(Disposition::Ack) => Ok(()),
+        Ok(Disposition::Requeue) => Err(worker_error("nack: requeue")),
+        Ok(Disposition::Dlq) => Err(abort_error("nack: dead-letter")),
+        // Consumer dropped the message without acking → requeue (at-least-once).
+        Err(_) => Err(worker_error("consumer dropped message")),
+    }
 }
 
 /// Apalis-side envelope. Maps to the cross-language ``{id, body}`` shape
@@ -100,11 +127,10 @@ impl ApalisQueueAdapter {
         let conn = apalis_redis::connect(broker_url())
             .await
             .map_err(|e| QueueError::Transport(e.to_string()))?;
-        // Apalis namespaces messages per ``Config::namespace``; keying
-        // it by the topic name keeps separate topics in separate Redis
-        // keysets.
-        let cfg = RedisConfig::default().set_namespace(topic);
-        let storage = RedisStorage::new_with_config(conn, cfg);
+        // Apalis keys messages per ``Config::queue``; keying it by the
+        // topic name keeps separate topics in separate Redis keysets.
+        let cfg = RedisConfig::default().queue(topic);
+        let storage = RedisStorage::new(conn).with_config(cfg);
         map.insert(topic.to_string(), storage.clone());
         Ok(storage)
     }
@@ -132,12 +158,13 @@ impl QueuePort for ApalisQueueAdapter {
         };
         let mut storage = self.storage_for(topic).await?;
         if delay_seconds > 0 {
-            // Apalis exposes scheduled delivery via ``schedule`` taking
-            // a chrono ``DateTime``; map ``delay_seconds`` onto an
-            // offset from "now".
-            let when = chrono::Utc::now() + chrono::Duration::seconds(delay_seconds as i64);
+            // Apalis schedules a task through its ``run_at``, set from a
+            // delay after "now".
+            let task = TaskBuilder::new(envelope)
+                .run_after(Duration::from_secs(delay_seconds))
+                .build();
             storage
-                .schedule(envelope, when.timestamp())
+                .push_task(task)
                 .await
                 .map_err(|e| QueueError::Transport(e.to_string()))?;
         } else {
@@ -167,7 +194,7 @@ impl QueuePort for ApalisQueueAdapter {
             // sender to this stream over a bounded channel, then awaits the
             // consumer's ack/nack.
             let (tx, mut rx) =
-                tokio::sync::mpsc::channel::<(JsonEnvelope, oneshot::Sender<Disposition>)>(
+                mpsc::channel::<(JsonEnvelope, oneshot::Sender<Disposition>)>(
                     batch_size.max(1),
                 );
             // The worker name is the Redis consumer identity apalis heartbeats
@@ -175,32 +202,12 @@ impl QueuePort for ApalisQueueAdapter {
             // a shared name across stream instances or service replicas would
             // confuse orphan recovery for in-flight jobs.
             let worker_name = format!("forge-consumer-{topic}-{}", uuid::Uuid::new_v4());
+            // apalis 1.x parks a worker after an empty fetch until something
+            // wakes it; the interval picks up jobs pushed from elsewhere and
+            // retries and delays falling due, as apalis 0.7's poll did.
             let worker = WorkerBuilder::new(worker_name)
-                .backend(storage)
-                .build_fn(move |job: JsonEnvelope| {
-                    let tx = tx.clone();
-                    async move {
-                        let (disp_tx, disp_rx) = oneshot::channel::<Disposition>();
-                        // A closed channel means the consumer stream was
-                        // dropped before this job was handed over — fail it so
-                        // it isn't acked. (If the stream drops AFTER hand-over,
-                        // ``disp_rx.await`` is cancelled with the worker rather
-                        // than resolving here; that job is redelivered via
-                        // apalis's orphan recovery — Redis ``reenqueue_orphaned_
-                        // after``, 5 min by default — not immediately.)
-                        if tx.send((job, disp_tx)).await.is_err() {
-                            return Err(worker_error("consumer stream closed"));
-                        }
-                        match disp_rx.await {
-                            Ok(Disposition::Ack) => Ok(()),
-                            Ok(Disposition::Requeue) => Err(worker_error("nack: requeue")),
-                            Ok(Disposition::Dlq) => Err(abort_error("nack: dead-letter")),
-                            // Consumer dropped the message without acking →
-                            // requeue (at-least-once).
-                            Err(_) => Err(worker_error("consumer dropped message")),
-                        }
-                    }
-                });
+                .backend(storage.poll_with_interval(POLL_INTERVAL))
+                .build(move |job: JsonEnvelope| hand_over(job, tx.clone()));
             // Drive the worker INLINE (not tokio::spawn) so dropping this
             // stream stops the worker and its in-flight handlers.
             let mut worker_fut = std::pin::pin!(worker.run());
