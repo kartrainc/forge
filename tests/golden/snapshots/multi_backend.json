@@ -345,16 +345,16 @@
       "sha256": "7aed9f41bf232c59"
     },
     "services/api-node/vitest.config.ts": {
-      "size": 1154,
-      "sha256": "2bde913d0ce3843e"
+      "size": 982,
+      "sha256": "aba39920c3521b92"
     },
     "services/api-node/vitest.e2e.config.ts": {
-      "size": 722,
-      "sha256": "34afa7d7c5edb6e9"
+      "size": 550,
+      "sha256": "8810403c1dc8c6eb"
     },
     "services/api-node/vitest.integration.config.ts": {
-      "size": 791,
-      "sha256": "43db3b91997ac960"
+      "size": 619,
+      "sha256": "264370db3ae0a104"
     },
     "services/api-py/.copier-answers.yml": {
       "size": 563,

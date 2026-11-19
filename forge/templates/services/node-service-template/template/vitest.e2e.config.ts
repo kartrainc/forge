@@ -6,8 +6,6 @@ export default defineConfig({
     // The integration tier's defaults for the auth bootstrap's issuer and audience.
     setupFiles: ["tests/integration/setup-env.ts"],
     passWithNoTests: false,
-    // CI prints the console of failing tests only: a runner's log slows down on large output
-    silent: /^(1|true)$/i.test(process.env.CI ?? "") ? "passed-only" : false,
     coverage: { provider: "v8", include: ["src/**/*.ts", "../../packages/*/src/**/*.ts", "packages/*/src/**/*.ts"], allowExternal: true, exclude: ["**/*.test.ts", "**/*.d.ts"], reporter: ["json", "lcov", "text"] },
   },
 });

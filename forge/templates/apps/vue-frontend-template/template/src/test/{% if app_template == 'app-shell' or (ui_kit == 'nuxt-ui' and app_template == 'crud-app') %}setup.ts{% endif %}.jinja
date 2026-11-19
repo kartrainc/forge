@@ -14,6 +14,11 @@ afterAll(() => server.close())
 // icons, color mode and router integration.
 config.global.plugins.push(ui)
 
+// Vue's warnings on one line: the message and the component chain by name, without the props it prints by default
+config.global.config.warnHandler = (msg, _instance, trace) => {
+  console.warn(`[Vue warn]: ${msg}${trace ? ` ${trace}` : ''}`.replaceAll('\n', ' '))
+}
+
 // Nuxt UI's links read the router: a test that installs none gets an empty one; a test's own router or route stays.
 config.global.plugins.push({
   install(app) {
