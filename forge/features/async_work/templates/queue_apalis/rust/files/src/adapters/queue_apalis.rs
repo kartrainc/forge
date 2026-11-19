@@ -49,7 +49,8 @@ enum Disposition {
     Dlq,
 }
 
-/// How often an idle worker asks Redis for due jobs (apalis 0.7's default).
+/// How often an idle worker asks Redis for due jobs (apalis 0.7's default):
+/// one fetch per interval for each open ``consume`` stream, per topic and replica.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 fn worker_error(msg: &str) -> BoxDynError {
@@ -71,8 +72,9 @@ async fn hand_over(
     // job was handed over — fail it so it isn't acked. (If the stream drops
     // AFTER hand-over, ``disp_rx.await`` is cancelled with the worker rather
     // than resolving here; that job is redelivered via apalis's orphan
-    // recovery — after the worker misses its heartbeats
-    // (``Config::missed_heartbeats``) — not immediately.)
+    // recovery once the worker misses its heartbeats — 60 s by default
+    // (``Config::heartbeat_interval`` 30 s × ``missed_heartbeats`` 2) — not
+    // immediately.)
     if tx.send((job, disp_tx)).await.is_err() {
         return Err(worker_error("consumer stream closed"));
     }

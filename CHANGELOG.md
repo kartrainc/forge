@@ -8,10 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Rust: building on Rust 1.100
 
 - A Rust service with `queue.backend=apalis` or `async.task_queue` moves to apalis 1.2 and apalis-redis 1.1:
-  apalis-redis 0.7.4 no longer compiles on Rust 1.100, which changed the never type's fallback, and 0.7.4 is the
-  last 0.7. The queue adapter and the worker binary keep their behaviour: an error retries the job, an `AbortError`
-  sends it to the dead set, a delay sets the task's `run_at`. An idle worker polls Redis every 100 ms, as apalis 0.7
-  did, since apalis 1.x otherwise waits for something to wake it after an empty fetch.
+  apalis-redis 0.7.4 no longer compiles on Rust 1.100, which changed the never type's fallback, and 0.7.4 is the last
+  0.7. The queue adapter and the worker binary keep their behaviour: an error retries the job (after as many seconds
+  as its attempt number, up to 25 attempts), an `AbortError` sends it to the dead set, a delay sets the task's
+  `run_at`. An idle worker polls Redis every 100 ms, as apalis 0.7 did, since apalis 1.x otherwise waits for something
+  to wake it after an empty fetch.
 - The Rust platform-auth SDK's scope check returns the namespace-wildcard test directly, which clippy 1.100's
   `needless_bool` asks for (the toolchain lints with `-D warnings`).
 - The `rust_ports` matrix scenario adds `async.task_queue`, so the apalis worker binary is built and linted too.

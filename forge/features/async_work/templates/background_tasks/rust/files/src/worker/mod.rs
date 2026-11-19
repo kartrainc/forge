@@ -31,8 +31,9 @@ pub struct HelloJob {
 }
 
 /// Example job handler — replace / extend with project-specific work. An
-/// error retries the job (apalis's backoff, up to its attempts); an
-/// ``AbortError`` sends it to the dead set.
+/// error retries the job after as many seconds as its attempt number (1 s,
+/// 2 s, …) until the task's ``max_attempts``, 25 by default; an ``AbortError``
+/// sends it to the dead set.
 pub async fn handle_hello(job: HelloJob) -> Result<(), BoxDynError> {
     tracing::info!(name = %job.name, "hello_job executed");
     Ok(())
